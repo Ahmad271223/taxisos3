@@ -1,0 +1,35 @@
+{
+  "summary": "Drei gemeldete Punkte gefixt + vorherige Konsolen-Fehler. (A) Mehrfach-Login: Admin UND Fahrer gleichzeitig im selben Browser via rollen-getrennte Cookies (tc_admin/tc_driver) + Socket-Rolle im Handshake (auth.role); /api/auth/me liefert beide Sessions; scope-basiertes Logout. (B) Vorbestellung: eine weit in der Zukunft reservierte Fahrt erscheint NICHT mehr sofort als aktueller Auftrag, sondern unter 'Meine geplanten Fahrten'; der Sweep schaltet sie erst ~5 min vor Termin live (FAHRER_UNTERWEGS) und pusht den Fahrer-State. (C) Zwischenstopp: Fahrer-Navigation führt jetzt als Google-Maps-Waypoints ÜBER die Stopps (nicht direkt zum Ziel). Zudem zuvor: verschachtelte <a> (Brand in Link) auf /buchen entfernt (Hydration-Fehler) + reactStrictMode=false (react-leaflet 'Map already initialized'). tsc CLEAN; 97/97 pytest (2 neue Multi-Login); 6/6 E2E inkl. neuem e2e_scheduled.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_phase10_multilogin.py", "/app/scripts/e2e_scheduled.js"],
+  "action_items": [
+    "Nach Deploy einmal hart neu laden (Strg+F5), da Cookie-Namen/Socket-Auth geändert wurden (alte JS-Caches/Sessions sonst inkonsistent).",
+    "Bestehende Alt-Sessions (tc_session) werden per Fallback weiter akzeptiert; neue Logins nutzen tc_admin/tc_driver."
+  ],
+  "critical_code_review_comments": [
+    "Auth: lib/auth.ts ADMIN_COOKIE/DRIVER_COOKIE (+SESSION_COOKIE Legacy-Fallback) + cookieForRole; login setzt rollenabhängiges Cookie; companies/register -> ADMIN_COOKIE; session.ts getSession(kind) liest passendes Cookie (Fallback Legacy); /api/auth/me -> {admin,driver,session}; /api/auth/logout?scope=admin|driver (ohne scope: alles).",
+    "Socket: lib/socket.ts getSocket(role) sendet auth.role; realtime.ts liest handshake.auth.role und das passende Cookie -> richtet NUR die jeweilige Rolle ein (keine Kreuz-Kontamination). Customer-Sockets (ohne role) bleiben reine Tracking/Chat-Verbindungen. DriverPortal->getSocket('driver'), AdminDashboard->getSocket('admin'); Auth-Checks auf d.driver/d.admin; Logout mit scope.",
+    "Vorbestellung: realtime.driverState active-Query schließt zukünftige Vorbestellungen aus (OR isScheduled=false / scheduledAt<=now+5min); myScheduled zeigt geplante; dispatch.sweep schaltet fällige RESERVIERTE Vorbestellungen auf FAHRER_UNTERWEGS + dispatcher.refreshDriver (von realtime gesetzt) pusht driver:state.",
+    "Zwischenstopp: DriverPortal.navigate() hängt Stopps als &waypoints an die Google-Maps-URL (nur bei Fahrt zum Ziel).",
+    "Konsole: /buchen + /buchen/vorbestellung: doppelte <a> (Link um Brand) entfernt; next.config.js reactStrictMode=false (react-leaflet v4 nicht StrictMode-sicher)."
+  ],
+  "updated_files": [
+    "src/lib/auth.ts", "src/lib/session.ts", "src/lib/socket.ts",
+    "src/app/api/auth/login/route.ts", "src/app/api/auth/me/route.ts", "src/app/api/auth/logout/route.ts",
+    "src/app/api/companies/register/route.ts",
+    "src/server/realtime.ts (Socket-Rolle, refreshDriver, driverState-Query)",
+    "src/server/dispatch.ts (refreshDriver Hook + Sweep-Promotion)",
+    "src/components/DriverPortal.tsx (getSocket driver, auth.driver, logout scope, nav waypoints)",
+    "src/components/AdminDashboard.tsx (getSocket admin, auth.admin, logout scope)",
+    "src/app/super-admin/page.tsx (auth.admin, logout scope)",
+    "src/app/buchen/page.tsx + buchen/vorbestellung/page.tsx (kein <a> in <a>)",
+    "next.config.js (reactStrictMode false)",
+    "backend/tests/test_phase10_multilogin.py (NEW)", "backend/tests/test_taxios_api.py (Cookie tc_admin)",
+    "scripts/e2e_scheduled.js (NEW)", "scripts/e2e_*.js (Socket auth.role driver)"
+  ],
+  "success_rate": {"backend": "100% (97/97 pytest)", "e2e": "100% (6/6: scheduled, driver_socket, parallel_drivers, invoice, bulk_invoice, invoice_archive)", "tsc": "clean"},
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Auth ist jetzt rollen-getrennt (tc_admin/tc_driver). Sockets MÜSSEN auth.role mitsenden (getSocket('admin'|'driver')); Tests mit io(...,{auth:{role:'driver'}}). Vorbestellungen werden erst ~5min vor Termin live (SCHEDULED_LEAD_MS in realtime+dispatch). Mehrfach-Login per pytest test_phase10 abgedeckt; Vorbestellungs-Reservierung per e2e_scheduled."
+}

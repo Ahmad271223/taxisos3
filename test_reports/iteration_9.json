@@ -1,0 +1,36 @@
+{
+  "summary": "Phase 4 – monatliche Provisions-Rechnung als PDF im Admin-Dashboard. Die Plattform stellt jedem Unternehmen die Vermittlungsgebühren (platformFee) eines Monats in Rechnung: netto + 19% USt = brutto, mit Fahrten-Einzelaufstellung, Aussteller/Empfänger, deterministischer Rechnungsnummer. Echte PDF-Erzeugung serverseitig mit pdf-lib (pure JS, keine Font-/Bundler-Probleme). tsc --noEmit CLEAN; 64/64 pytest GREEN (6 neue Phase-4 + 58 vorher); NEW scripts/e2e_invoice.js GREEN (Trip real abschliessen -> Rechnung mit Zeile + USt-Mathematik + gültiges, parsebares PDF). Erzeugtes PDF visuell verifiziert (Umlaute, EUR-Beträge, Tabelle, Summen, Steuerhinweis).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_phase4_invoices.py",
+    "/app/scripts/e2e_invoice.js"
+  ],
+  "action_items": [
+    "Run 'npm install' in the pod – NEW dep: pdf-lib ^1.17.1.",
+    "Optional env (Phase 4): VAT_RATE (default 0.19), PLATFORM_NAME, PLATFORM_ADDRESS, PLATFORM_VAT_ID, PLATFORM_EMAIL – Aussteller-Angaben auf der Rechnung. Sinnvolle Defaults sind gesetzt.",
+    "Kein db push nötig (keine Schemaänderung in Phase 4)."
+  ],
+  "critical_code_review_comments": [
+    "src/lib/invoice.ts: buildInvoice(companyId, 'YYYY-MM') -> queriert ABGESCHLOSSEN-Bookings mit completedAt im Monat, summiert platformFee=net, vat=net*VAT_RATE, gross=net+vat. parseMonth akzeptiert YYYY-MM und MM-YYYY. Rechnungsnummer deterministisch RE-<YYYYMM>-<companyId.slice(-6)>.",
+    "src/lib/pdf.ts: invoicePdf() rendert mit pdf-lib (StandardFonts Helvetica/Bold, WinAnsi). WICHTIG: WinAnsi kann '→' und '€' als Glyphe nicht/riskant kodieren -> safe() ersetzt '→'->'->' und alles ausserhalb Latin-1 durch '?'; Beträge als 'EUR'-Text. Paginierung der Fahrtenliste mit wiederholtem Tabellenkopf. Adress-Fallback ist '-' (ASCII), nicht '—' (war als '?' gerendert).",
+    "API /api/admin/invoices/[month]: ?format=json -> Daten, sonst PDF (Content-Disposition attachment, Content-Type application/pdf, Cache no-store). Auth: ADMIN nur eigene Firma; SUPER_ADMIN via ?companyId=; fremde companyId -> 403; ungültiger Monat -> 400.",
+    "UI: src/components/AdminInvoices.tsx (Monatswähler <input type=month>, Vorschau-Tabelle + Summen, PDF-Download-Link, deaktiviert bei 0 Fahrten) unter /admin/abrechnung. Link aus dem Dashboard (commission-card, data-testid=invoice-link).",
+    "E2E-Robustheit: e2e_driver_socket.js + e2e_parallel_drivers.js nutzen jetzt einen Event-Collector, der driver:offer ab Verbindungsbeginn puffert und auf die EIGENE bookingId filtert. Das macht die Skripte deterministisch trotz fremder Alt-Buchungen in der geteilten Test-DB (im Pod ohnehin frisch). 2x hintereinander grün verifiziert."
+  ],
+  "updated_files": [
+    "src/lib/invoice.ts (NEW)", "src/lib/pdf.ts (NEW)",
+    "src/app/api/admin/invoices/[month]/route.ts (NEW)",
+    "src/app/admin/abrechnung/page.tsx (NEW)", "src/components/AdminInvoices.tsx (NEW)",
+    "src/components/AdminDashboard.tsx (Link zur Abrechnung)",
+    "backend/tests/test_phase4_invoices.py (NEW)",
+    "scripts/e2e_invoice.js (NEW)",
+    "scripts/e2e_driver_socket.js (offer-collector)", "scripts/e2e_parallel_drivers.js (offer-collector)",
+    "package.json (+pdf-lib)", ".env.example (VAT_RATE + PLATFORM_* issuer)"
+  ],
+  "success_rate": {"backend": "100% (64/64 pytest)", "e2e": "100% (e2e_invoice.js + e2e_driver_socket.js + e2e_parallel_drivers.js, je 2x deterministisch grün)", "frontend": "tsc clean; /admin/abrechnung SSR 200 (invoice-month + invoice-download); PDF visuell verifiziert (1 Zeile, Summen, USt, Umlaute)."},
+  "test_credentials": "Super-Admin: super@taxios.app / SuperAdmin2026! (role='ADMIN' im Login-Body).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phasen 1-4 alle grün. Provisions-Rechnung: GET /api/admin/invoices/<YYYY-MM> (PDF) bzw. ?format=json (Vorschau). Firmen-Admin nur eigene Firma; Super-Admin via ?companyId=. PDF mit pdf-lib (kein db push, nur npm install pdf-lib). Lokaler Hinweis: die geteilte dev.db sammelt OFFEN-Buchungen über Läufe an; die E2E-Skripte filtern Angebote per bookingId und sind dadurch robust. Offene Ideen für Phase 5: Sammel-Rechnungslauf für ALLE Firmen (Super-Admin, ZIP), E-Mail-Versand der Rechnung via Resend, Live-Karte-Verbesserungen."
+}

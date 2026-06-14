@@ -1,0 +1,41 @@
+{
+  "summary": "Phase 6 – persistentes Rechnungs-Archiv + Mahnwesen + Zahlungsabgleich. Neues Invoice-Modell (eingefrorener Snapshot: Beträge + Positionen + Aussteller/Empfänger als JSON) mit Lebenszyklus OFFEN/BEZAHLT/STORNIERT, Fälligkeit (issuedAt+14T), Überfälligkeits-Erkennung, Mahnzähler und Zahlungsreferenz. Festschreiben (issue) ist idempotent pro Firma+Monat. Firmen-Admin sieht eigenes Archiv + kann festschreiben; Super-Admin sieht plattformweites Archiv, schreibt alle fest (issue-all), führt Mahnläufe (remind-overdue) und erfasst Zahlungseingänge (pay/unpaid). Archivierte PDFs sind frozen Snapshots mit Status-Stempel (BEZAHLT grün / ÜBERFÄLLIG rot / MAHNUNG n) + Fälligkeitsdatum. tsc CLEAN; 83/83 pytest (11 neue Phase-6 + 72 vorher); NEW scripts/e2e_invoice_archive.js GREEN (voller Lebenszyklus issue->überfällig->Mahnung->bezahlt + frozen PDF). Alle 5 E2E-Suiten grün; PDF-Stempel visuell verifiziert.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_phase6_invoice_archive.py",
+    "/app/scripts/e2e_invoice_archive.js"
+  ],
+  "action_items": [
+    "Run 'prisma db push' in the pod – NEW model Invoice (snapshot + lifecycle) + Company.invoices relation.",
+    "Kein neuer npm-Dep in Phase 6 (nutzt pdf-lib/jszip/resend aus Phase 4/5).",
+    "Mahnläufe/Versand nutzen weiterhin Resend (mock ohne RESEND_API_KEY)."
+  ],
+  "critical_code_review_comments": [
+    "prisma Invoice: @@unique([companyId, monthKey]) garantiert eine Rechnung je Firma+Monat; invoiceNo @@unique. Snapshot-Felder linesJson/issuerJson/recipientJson frieren die Rechnung ein (unveränderlich).",
+    "src/lib/invoiceStore.ts: issueInvoice() idempotent (prüft existierende per companyId+data.monthKey, legt sonst an; Race-Fallback via unique-Constraint), lehnt 0-Umsatz ab. invoiceToData() rekonstruiert InvoiceData aus dem Snapshot inkl. statusBadge/dueLabel. markPaid/markUnpaid/recordReminder, isOverdue (OFFEN && dueAt<now), listForCompany/listAll(status,overdueOnly). invoiceDTO mit abgeleitetem overdue-Flag.",
+    "src/lib/pdf.ts: optionaler Status-Stempel (rect+Text, Farbe je Status) + 'Fällig bis'-Zeile; Stempel unter den Aussteller-Block gesetzt (kein Overlap).",
+    "src/lib/invoiceMail.ts: sendInvoiceEmail(data,{reminder,level}) -> Mahn-Betreff + Mahn-Text (PDF-Anhang).",
+    "Routes: GET /api/admin/invoices (eigenes Archiv); POST /api/admin/invoices/[month]/issue (ADMIN eigen / SUPER ?companyId); GET /api/admin/invoices/id/[id] (frozen PDF, Ownership-Check). GET /api/super/invoices (Liste + totals open/paid/overdue) & POST {issue-all|remind-overdue}; POST /api/super/invoices/id/[id] {pay|unpaid|remind}. Statische 'id'-Segmente koexistieren mit dynamischem [month] (Next bevorzugt statisch).",
+    "UI: AdminInvoices (/admin/abrechnung) 'Festschreiben'-Button + Archiv-Tabelle mit Status-Badges + Archiv-PDF-Link. SuperInvoiceArchive (/super-admin) Totals (offen/überfällig/bezahlt), Filter, 'Alle festschreiben', 'Mahnlauf', je Zeile bezahlt/mahnen/zurücksetzen + PDF."
+  ],
+  "updated_files": [
+    "prisma/schema.prisma (Invoice model + Company.invoices)",
+    "src/lib/invoiceStore.ts (NEW)", "src/lib/invoice.ts (InvoiceData badge fields)",
+    "src/lib/pdf.ts (status stamp + due date)", "src/lib/invoiceMail.ts (reminder variant)",
+    "src/app/api/admin/invoices/route.ts (NEW)",
+    "src/app/api/admin/invoices/[month]/issue/route.ts (NEW)",
+    "src/app/api/admin/invoices/id/[id]/route.ts (NEW)",
+    "src/app/api/super/invoices/route.ts (NEW – list + bulk actions)",
+    "src/app/api/super/invoices/id/[id]/route.ts (NEW – pay/unpaid/remind)",
+    "src/components/AdminInvoices.tsx (issue + archive)",
+    "src/components/SuperInvoiceArchive.tsx (NEW)", "src/app/super-admin/page.tsx (embed)",
+    "backend/tests/test_phase6_invoice_archive.py (NEW)",
+    "scripts/e2e_invoice_archive.js (NEW)"
+  ],
+  "success_rate": {"backend": "100% (83/83 pytest)", "e2e": "100% (e2e_invoice_archive voller Lebenszyklus; invoice/bulk/driver/parallel weiterhin grün)", "frontend": "tsc clean; archivierte PDFs mit BEZAHLT-Stempel + Fälligkeit visuell verifiziert."},
+  "test_credentials": "Super-Admin: super@taxios.app / SuperAdmin2026! (role='ADMIN' im Login-Body).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phasen 1-6 alle grün. Rechnungs-Archiv: POST /api/admin/invoices/<month>/issue (festschreiben, idempotent), GET /api/admin/invoices (eigenes Archiv), GET /api/admin/invoices/id/<id> (frozen PDF). Super: GET /api/super/invoices (?status/?overdue + totals), POST {action:issue-all,month}|{action:remind-overdue}, POST /api/super/invoices/id/<id> {action:pay|unpaid|remind}. Lifecycle OFFEN->BEZAHLT, overdue=OFFEN&&dueAt<now. db push nötig (Invoice). E2E backdatet dueAt via prisma um Überfälligkeit zu testen. Mögliche Phase 7: PDF-Stempel/Branding pro Plattform, Teilzahlungen, automatischer Monatsend-Cron (issue-all + Versand), Export DATEV/CSV-Buchungsjournal."
+}

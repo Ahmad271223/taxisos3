@@ -1,0 +1,27 @@
+{
+  "summary": "Geocoding/Routing auf kommerziell nutzbaren Anbieter umgestellt (steckbar). geo.ts wählt per Env automatisch Mapbox (MAPBOX_TOKEN) > LocationIQ (LOCATIONIQ_KEY) > freie OSM-Dienste (Photon/Nominatim/OSRM) als Fallback. Forward-/Reverse-Geocoding + Routing (routeBetween/routeVia) laufen über die Anbieter; Mapbox- und LocationIQ-Routing liefern OSRM-Format (gemeinsamer Parser), LocationIQ-Geocoding ist Nominatim-kompatibel. Reverse-Geocoding aus der API-Route nach geo.ts verschoben. Bei gesetztem Anbieter KEIN Rückfall auf freie Dienste (ToS). tsc CLEAN; 95/95 pytest + 5 E2E grün (gegen Postgres, freier Fallback aktiv).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/src/lib/geo.ts"],
+  "action_items": [
+    "Für LIVE einen Anbieter-Key setzen (EINE Option): MAPBOX_TOKEN ODER LOCATIONIQ_KEY (+ optional LOCATIONIQ_REGION, Default eu1). Auto-Auswahl Mapbox>LocationIQ>frei, oder GEO_PROVIDER erzwingen.",
+    "Verifizierung des Paid-Pfads benötigt einen Key (LocationIQ/Mapbox haben kostenlose Tiers) – dann Geocoding+Routing live prüfbar.",
+    "Empfehlung DE: LocationIQ (Nominatim/OSRM-kompatibel, günstig) oder Mapbox (großzügiges Free-Tier)."
+  ],
+  "critical_code_review_comments": [
+    "src/lib/geo.ts: geoProvider() = explizit GEO_PROVIDER oder Auto (Mapbox>LocationIQ>frei). geocoderConfigured() exportiert. directionsUrl(coords) baut Routing-URL je Anbieter (alle OSRM-Format) -> routeBetween/routeVia unverändert geparst.",
+    "geocode(): bei Mapbox/LocationIQ ohne Fallback auf freie Dienste (ToS); nur im Frei-Modus Photon->Nominatim. geocodeLocationIQ (Nominatim-Format), geocodeMapbox (GeoJSON v6).",
+    "reverseGeocode(lat,lng) neu in geo.ts (anbieterabhängig); /api/geocode?reverse nutzt es jetzt statt inline-Nominatim.",
+    ".env.example: MAPBOX_TOKEN/LOCATIONIQ_KEY/LOCATIONIQ_REGION/GEO_PROVIDER dokumentiert; Hinweis dass freie Dienste nur Dev/Test sind.",
+    "Verifiziert im Frei-Modus (Fallback): /api/geocode liefert echte Treffer; Routing/Quotes/E2E grün. Paid-Pfad strukturell korrekt (OSRM-Format geteilt), aber ohne Key nicht live getestet."
+  ],
+  "updated_files": [
+    "src/lib/geo.ts (Anbieter-Layer: Mapbox/LocationIQ/frei; reverseGeocode; directionsUrl)",
+    "src/app/api/geocode/route.ts (reverseGeocode statt inline)",
+    ".env.example (Geocoder-Env)"
+  ],
+  "success_rate": {"backend": "100% (95/95 pytest, Postgres)", "e2e": "100% (5 Suiten grün)", "geocoder": "Frei-Fallback live verifiziert (echte Treffer); Paid-Pfad braucht Key zur Live-Verifizierung."},
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Geocoding/Routing steckbar via geo.ts. Ohne Key=frei (Dev/Test). Mit MAPBOX_TOKEN oder LOCATIONIQ_KEY wird der Anbieter genutzt (kein Fallback auf frei). Reverse über reverseGeocode(). Zum Live-Verifizieren Key setzen. Verbleibende Live-Punkte: Rechtsseiten (Impressum/DSGVO/AGB); + Keys eintragen (Stripe-Live, Twilio-Upgrade, Geocoder)."
+}

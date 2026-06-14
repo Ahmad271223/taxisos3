@@ -1,0 +1,55 @@
+{
+  "summary": "Phase 2 (e Mehrziel-Vorabplanung + f Zieländerung während der Fahrt + g Stripe Authorize-then-Capture) implemented and verified. Backend: 49/49 pytest GREEN (NEW test_phase2_multistop_destchange_stripe.py 13 + test_phase1_commission_cancel.py 16 + test_platform_booking.py 5 + test_taxios_api.py 15) against a locally booted server (ts-node fallback runner, SQLite, seeded super-admin). TypeScript: npx tsc --noEmit CLEAN (also fixed two pre-existing type errors: duplicate 'Tariff' identifier in geo.ts and PriceEstimate/PriceEstimateT mismatch in BookingForm). Frontend SSR smokes: /buchen 200 + data-testid='add-stop' present; /verfolgen/<id> 200 for a CARD booking with one stop (payment-card + stops rows render); /fahrer 200 (DriverPortal compiles with change-dest UI). API verification: CARD booking returns paymentStatus=AUTORISIERT with priceAuthorized=17.12 (mock mode, no STRIPE_SECRET_KEY locally) and stops persisted as [{address,lat,lng}]; paymentRef intentionally NOT exposed in DTO.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase2_multistop_destchange_stripe.py",
+    "/app/backend/tests/test_phase1_commission_cancel.py",
+    "/app/backend/tests/test_platform_booking.py",
+    "/app/backend/tests/test_taxios_api.py"
+  ],
+  "action_items": [
+    "Run 'prisma db push' in the pod after deploy – Booking gained columns: stops (String?), priceAuthorized (Float?), destChangedAt (DateTime?), destChangeCount (Int @default(0)).",
+    "Run 'npm install' in the pod – new dependency: stripe ^16.12.0 (plus devDeps ts-node/tsconfig-paths as local-runner fallback).",
+    "Set STRIPE_SECRET_KEY in the pod env to switch card payments from mock mode to real Stripe test-mode authorize/capture/void.",
+    "DONE: full driver-socket E2E (scripts/e2e_driver_socket.js) passes 21/21 incl. capture-on-complete (AUTORISIERT->BEZAHLT) and driver:changeDest mid-ride. With a real STRIPE_SECRET_KEY the same checks should hold (authorize requires_capture -> capture succeeded)."
+  ],
+  "critical_code_review_comments": [
+    "e) /api/quote and POST /api/bookings accept stops:[{address,lat,lng}] (max 8). Routing uses one OSRM request over all waypoints (routeVia) with airline-legs fallback. bookingDTO now returns stops as a parsed array (JSON string in SQLite column).",
+    "f) POST /api/bookings/:id/destination accepts {dest} and/or {addStop}; recomputes distance/duration/priceMin/priceMax/tariff over the full route, bumps destChangeCount, re-syncs the dispatcher's near-completion destination, and only rewrites priceExact (mid of new corridor) if it was already fixed (i.e. after driver acceptance). Blocked with 409 after ABGESCHLOSSEN/STORNIERT. Driver socket event 'driver:changeDest' guards driverId ownership. Customer UI in TrackingView (change-dest card, gated on FAHRER_GEFUNDEN..FAHRT_LAEUFT), driver UI in DriverPortal active-trip card.",
+    "g) src/lib/stripe.ts lazy-imports the stripe SDK only when STRIPE_SECRET_KEY is set; otherwise full mock mode with mock_* refs and identical state transitions (AUTORISIERT/BEZAHLT/STORNIERT) so tests are stable with or without a key. authorize: PaymentIntent capture_method=manual confirm=true with pm_card_visa (server-side test PM, amount=priceMax, min 0.50 EUR); capture on trip complete capped at min(fare, priceAuthorized); void on every cancel path (customer/admin/driver). paymentStatus extended: OFFEN|AUTORISIERT|BEZAHLT|FEHLGESCHLAGEN|STORNIERT.",
+    "acceptBooking (priceExact) now routes over bookingRoutePoints(b0) so the fixed price includes intermediate stops.",
+    "Map.tsx gained kind='stop' (orange numbered pin); BookingForm renders stop rows with add/remove + resolves them in proceedToConfirm; quote effect re-fires on stopsKey changes.",
+    "Pre-existing tsc errors fixed: geo.ts private 'interface Tariff' renamed to EnvTariff (collided with exported type Tariff union), BookingForm quote state typed PriceEstimateT. npx tsc --noEmit now exits 0 for the whole project.",
+    "NOTE: zod type inference produces all-optional props because tsconfig has strict:false – route handlers therefore rebuild explicit literals from parsed.data before passing to typed helpers (see bookings/route.ts and destination/route.ts)."
+  ],
+  "updated_files": [
+    "prisma/schema.prisma",
+    "src/lib/stops.ts (NEW)",
+    "src/lib/stripe.ts (NEW)",
+    "src/lib/geo.ts",
+    "src/server/serialize.ts",
+    "src/server/dispatch.ts",
+    "src/server/realtime.ts",
+    "src/app/api/quote/route.ts",
+    "src/app/api/bookings/route.ts",
+    "src/app/api/bookings/[id]/destination/route.ts (NEW)",
+    "src/components/Map.tsx",
+    "src/components/BookingForm.tsx",
+    "src/components/TrackingView.tsx",
+    "src/components/DriverPortal.tsx",
+    "backend/tests/test_phase2_multistop_destchange_stripe.py (NEW)",
+    "package.json (+stripe, devDeps ts-node/tsconfig-paths)",
+    ".env.example (+STRIPE_SECRET_KEY)"
+  ],
+  "success_rate": {"backend": "100% (49/49 pytest incl. 13 new Phase-2 tests) + 21/21 driver-socket E2E (scripts/e2e_driver_socket.js)", "frontend": "SSR smokes 100% (/buchen add-stop, /verfolgen payment-card+stops, /fahrer). Browser-level interaction E2E (clicking add-stop, change-dest dialog) not run, but the same backend endpoints are fully covered by the socket E2E."},
+  "test_credentials": "Super-Admin: super@taxios.app / SuperAdmin2026! (role='ADMIN' MUST be in /api/auth/login JSON body).",
+  "seed_data_creation": "Local SQLite (prisma db push + seed). ~20 TEST_ bookings created by the Phase-2 pytest run incl. CARD bookings with mock authorizations (paymentRef mock_auth_*).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 2 backend is green. Multi-stop: POST /api/bookings with stops[] -> DTO.stops array; quote accepts stops too. Dest change: POST /api/bookings/:id/destination {dest:{address,lat,lng}} or {addStop:{...}} -> 200 with recomputed booking, 400 empty payload, 404 unknown id, 409 after cancel/complete. Stripe: without STRIPE_SECRET_KEY everything is mock but state transitions are identical; with a test key the same assertions must hold (authorize on CARD create, void on cancel, capture on driver complete). Remaining untested paths need a Socket.IO driver client: capture-on-complete and driver:changeDest (see Phase-3 backlog j parallel-driver E2E)."
+}

@@ -1,0 +1,504 @@
+// TaxiConnect / TaxiOS Datenmodell (Multi-Mandant)
+// Provider auf "postgresql" umstellen + DATABASE_URL anpassen, um produktiv zu gehen.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Taxiunternehmen (Mandant + Admin-Account)
+// ---------------------------------------------------------------------------
+model Company {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique // fuer den Kunden-Buchungslink /c/<slug>
+  address      String?
+  phone        String?
+  email        String   @unique // Admin-Login
+  passwordHash String
+
+  // Provisionsstufe: BIG (Großstadt, 7%) | SMALL (Klein/ländlich, 5%)
+  cityTier     String   @default("SMALL")
+
+  drivers      Driver[]
+  bookings     Booking[]
+  pricing      Pricing?
+  classPricing VehicleClassPricing[]
+  invoices     Invoice[]
+
+  createdAt    DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Preis je Fahrzeugklasse pro Unternehmen (Phase 12 Marktplatz).
+// Fehlt ein Eintrag, gilt der Plattform-Standardfaktor aus lib/vehicleClasses.
+// ---------------------------------------------------------------------------
+model VehicleClassPricing {
+  id            String  @id @default(cuid())
+  companyId     String
+  company       Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  classKey      String  // STANDARD | VAN | ... (siehe lib/vehicleClasses)
+  enabled       Boolean @default(true)
+  multiplier    Float   @default(1.0) // Faktor auf den Firmen-Grundtarif
+  flatSurcharge Float   @default(0)   // optionaler Fixaufschlag (EUR)
+
+  updatedAt     DateTime @updatedAt
+
+  @@unique([companyId, classKey])
+  @@index([companyId])
+}
+
+// ---------------------------------------------------------------------------
+// Preis-Einstellungen je Unternehmen
+// ---------------------------------------------------------------------------
+model Pricing {
+  id             String   @id @default(cuid())
+  companyId      String   @unique
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  basePrice      Float    @default(4.0) // Grundpreis
+  perKmDay       Float    @default(2.5) // Tagtarif 06:00-22:00
+  perKmNight     Float    @default(3.2) // Nachttarif 22:00-06:00
+  perKmWeekend   Float    @default(2.8) // Wochenende (Sa/So)
+  perMinute      Float    @default(0.0) // optionaler Zeitanteil
+  nightStartHour Int      @default(22)
+  nightEndHour   Int      @default(6)
+
+  updatedAt      DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Fahrer (inkl. Fahrzeugdaten)
+// ---------------------------------------------------------------------------
+model Driver {
+  id           String   @id @default(cuid())
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  username     String   @unique
+  passwordHash String
+  name         String
+  phone        String?
+
+  // Status: FREI | BESETZT | PAUSE | OFFLINE
+  status       String   @default("OFFLINE")
+
+  // Letzte bekannte GPS-Position
+  lat          Float?
+  lng          Float?
+  speed        Float?
+  lastSeenAt   DateTime?
+
+  // Fahrzeug
+  vehicleModel String?
+  vehiclePlate String?
+  vehicleColor String?
+  vehicleSeats Int      @default(4)
+  // Fahrzeugklasse fuer den Marktplatz (Phase 12): STANDARD | VAN | EXTRA_LUGGAGE
+  // | SHUTTLE | BUSINESS | WHEELCHAIR | PET | CHILD_SEAT | VIP. Siehe lib/vehicleClasses.
+  vehicleClass String   @default("STANDARD")
+  active       Boolean  @default(true)
+
+  bookings     Booking[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+// ---------------------------------------------------------------------------
+// Auftrag / Buchung
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Gruppen-/Eventbuchung (Phase 13): eine Bestellung über mehrere Fahrzeuge
+// (Hochzeit, Firma, Messe-Shuttle ...). Jedes Fahrzeug ist eine eigene Booking
+// mit groupId; der Versand/Tracking/Preis läuft je Fahrzeug wie gewohnt.
+// ---------------------------------------------------------------------------
+model BookingGroup {
+  id              String   @id @default(cuid())
+
+  customerName    String
+  customerPhone   String
+  customerId      String?
+  customer        Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  pickupAddress   String
+  pickupLat       Float
+  pickupLng       Float
+  destAddress     String
+  destLat         Float
+  destLng         Float
+
+  isScheduled     Boolean  @default(false)
+  scheduledAt     DateTime?
+
+  vehicleCount    Int
+  totalPassengers Int      @default(1)
+  totalLuggage    Int      @default(0)
+  eventLabel      String?
+  notes           String?
+  paymentMethod   String   @default("CASH")
+
+  bookings        Booking[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([customerId])
+}
+
+model Booking {
+  id             String   @id @default(cuid())
+  companyId      String?
+  company        Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  // Teil einer Gruppen-/Eventbuchung (Phase 13)?
+  groupId        String?
+  group          BookingGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  // Krankenfahrt (Phase 15): Kategorie + ggf. Teil einer wiederkehrenden Serie.
+  medicalType    String?  // DIALYSE | REHA | KRANKENHAUS | ARZT | SONSTIGE
+  recurringId    String?
+  recurring      RecurringRide? @relation(fields: [recurringId], references: [id], onDelete: SetNull)
+
+  // Kundendaten
+  customerName   String
+  customerPhone  String
+  // Optionales Kundenkonto (Gastbuchungen bleiben ohne)
+  customerId     String?
+  customer       Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  // Adressen + Koordinaten
+  pickupAddress  String
+  pickupLat      Float
+  pickupLng      Float
+  destAddress    String
+  destLat        Float
+  destLng        Float
+
+  // Mehrziel-Vorabplanung (Phase 2e): Zwischenstopps zwischen Abholung und Ziel,
+  // als JSON-Array [{address,lat,lng}] in Anfahrt-Reihenfolge. Leer = Direktfahrt.
+  stops          String?
+
+  // Optionen
+  passengers     Int      @default(1)
+  luggage        Boolean  @default(false)
+  childSeat      Boolean  @default(false)
+  notes          String?
+
+  // Gewünschte Fahrzeugklasse (Phase 12 Marktplatz). Bestimmt Preis-Faktor und
+  // welche Fahrer ein Angebot erhalten. Siehe lib/vehicleClasses.
+  vehicleClass   String   @default("STANDARD")
+
+  // Vorbestellung
+  isScheduled    Boolean  @default(false)
+  scheduledAt    DateTime?
+
+  // Flughafen-Modul (Phase 14): an einen Flug gekoppelte Fahrt mit
+  // Verspätungserkennung. flightScheduledAt = geplante Flugzeit (Landung/Abflug);
+  // die Abholzeit (scheduledAt) wird daraus + Verspätung + Puffer berechnet.
+  flightNumber      String?
+  flightDirection   String?   // ARRIVAL | DEPARTURE
+  terminal          String?
+  flightStatus      String?
+  flightScheduledAt DateTime?
+  flightDelayMinutes Int      @default(0)
+
+  // Schaetzung / Preis
+  distanceMeters Int?
+  durationSeconds Int?
+  priceMin       Float?
+  priceMax       Float?
+  // Vorab-„ca."-Preis aus dem täglichen Plattform-Durchschnitt (vor Fahrer-Annahme)
+  priceApprox    Float?
+  tariff         String?  // TAG | NACHT | WOCHENENDE
+  fare           Float?
+  // Exakter Festpreis nach Fahrer-Annahme (Pflicht fuer Endpreis)
+  priceExact     Float?
+  // Autorisierter Kartenbetrag (Stripe Hold, Phase 2g) – obere Schaetzung,
+  // tatsaechliche Belastung (capture) erfolgt nach Fahrtende mit `fare`.
+  priceAuthorized Float?
+  // Plattform-Provision
+  platformFeeRate Float?  // 0.07 oder 0.05
+  platformFee    Float?   // EUR
+  companyNet     Float?   // EUR (= fare - platformFee)
+
+  // Auftragsstatus (Admin):
+  //   OFFEN | ZUGEWIESEN | AKTIV | ABGESCHLOSSEN | STORNIERT
+  status         String   @default("OFFEN")
+
+  // Kunden-Tracking-Status
+  trackingStatus String   @default("SUCHE")
+
+  // Zuweisung
+  driver         Driver?  @relation(fields: [driverId], references: [id])
+  driverId       String?
+  declinedDriverIds String @default("")
+
+  // Bewertung
+  rating         Int?
+  ratedAt        DateTime?
+  ratingComment  String?
+
+  // Zahlung
+  paymentMethod  String   @default("CASH") // CASH | CARD
+  paymentStatus  String   @default("OFFEN") // OFFEN | AUTORISIERT | BEZAHLT | FEHLGESCHLAGEN | STORNIERT
+  paymentRef     String?  // Stripe PaymentIntent o.ae.
+
+  assignedAt     DateTime?
+  acceptedAt     DateTime?
+  arrivedAt      DateTime?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  cancelledAt    DateTime?
+  cancelReason   String?
+  cancelledBy    String?  // CUSTOMER | ADMIN | DRIVER | SYSTEM
+
+  // Reservierte Folgefahrt (Bolt-Style "near completion")
+  isReserved     Boolean  @default(false)
+
+  // Notfall-Rettungsfahrt (Phase 21): per SOS automatisch zum Standort disponiert.
+  isSos          Boolean  @default(false)
+
+  // Gezielt gewähltes Taxi von der Live-Karte (Phase 23): nur dieser Fahrer wird
+  // zuerst angefragt. Bei Ablehnung/Timeout normale Disposition.
+  requestedDriverId String?
+
+  // Zieländerung während der Fahrt (Phase 2f)
+  destChangedAt   DateTime?
+  destChangeCount Int      @default(0)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  cancellations  CancellationLog[]
+  messages       ChatMessage[]
+
+  @@index([companyId])
+  @@index([status])
+  @@index([driverId])
+  @@index([groupId])
+  @@index([recurringId])
+}
+
+// ---------------------------------------------------------------------------
+// Wiederkehrende (Kranken-)Fahrt (Phase 15): Serie aus Wochentagen + Uhrzeit
+// (z. B. Dialyse Mo/Mi/Fr). Der Scheduler erzeugt daraus im Voraus geplante
+// Buchungen (siehe lib/recurring).
+// ---------------------------------------------------------------------------
+model RecurringRide {
+  id              String   @id @default(cuid())
+
+  customerId      String
+  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customerName    String
+  customerPhone   String
+
+  pickupAddress   String
+  pickupLat       Float
+  pickupLng       Float
+  destAddress     String
+  destLat         Float
+  destLng         Float
+
+  vehicleClass    String   @default("WHEELCHAIR")
+  medicalType     String?
+
+  daysOfWeek      String   // CSV 0–6 (0 = Sonntag)
+  timeOfDay       String   // "HH:MM" Hinfahrt
+  returnTrip      Boolean  @default(false)
+  returnTimeOfDay String?  // "HH:MM" Rückfahrt
+
+  startDate       DateTime
+  endDate         DateTime?
+  active          Boolean  @default(true)
+  notes           String?
+
+  bookings        Booking[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([active])
+}
+
+// ---------------------------------------------------------------------------
+// Gast-Verifizierung (Phase 3h): SMS-/E-Mail-Code vor der Buchung
+// ---------------------------------------------------------------------------
+model Verification {
+  id         String   @id @default(cuid())
+  channel    String   // SMS | EMAIL
+  target     String   // Telefonnummer bzw. E-Mail (normalisiert)
+  codeHash   String   // bcrypt-Hash des 6-stelligen Codes
+  expiresAt  DateTime
+  attempts   Int      @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([channel, target])
+  @@index([target])
+}
+
+// ---------------------------------------------------------------------------
+// Kundenkonto (optional – Gäste können weiter ohne Konto buchen)
+// ---------------------------------------------------------------------------
+model Customer {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  phone        String
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Bonus-/Punktesystem (Phase 18)
+  points       Int      @default(0)
+
+  // Notfallkontakt für SOS (Phase 17)
+  emergencyContactName  String?
+  emergencyContactPhone String?
+
+  bookings     Booking[]
+  groups       BookingGroup[]
+  recurring    RecurringRide[]
+  favorites    Favorite[]
+  sosAlerts    SosAlert[]
+
+  @@index([phone])
+}
+
+// ---------------------------------------------------------------------------
+// Lieblingsfahrer/-unternehmen (Phase 18). Genau eines von driverId/companyId.
+// ---------------------------------------------------------------------------
+model Favorite {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  driverId   String?
+  companyId  String?
+  createdAt  DateTime @default(now())
+
+  @@unique([customerId, driverId])
+  @@unique([customerId, companyId])
+  @@index([customerId])
+}
+
+// ---------------------------------------------------------------------------
+// SOS-/Notfallmeldung (Phase 17): vom Kunden während/zur Fahrt ausgelöst.
+// ---------------------------------------------------------------------------
+model SosAlert {
+  id            String   @id @default(cuid())
+  bookingId     String?
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName  String
+  customerPhone String
+  lat           Float?
+  lng           Float?
+  message       String?
+  status        String   @default("OPEN") // OPEN | RESOLVED
+  companyId     String?  // betroffenes Unternehmen (für Admin-Routing)
+  rescueBookingId String? // automatisch erzeugte Notfall-Rettungsfahrt (Phase 21)
+  createdAt     DateTime @default(now())
+  resolvedAt    DateTime?
+
+  @@index([status])
+  @@index([companyId])
+}
+
+// ---------------------------------------------------------------------------
+// Plattform-Durchschnittstarif (täglich 02:00 berechnet) – Basis für den
+// „ca."-Vorabpreis, bevor ein Fahrer (und damit der Firmentarif) feststeht.
+// ---------------------------------------------------------------------------
+model PlatformRate {
+  id           String   @id @default("current")
+  avgBasePrice Float
+  avgPerKm     Float
+  avgPerMinute Float    @default(0)
+  companyCount Int      @default(0)
+  computedAt   DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Rechnungs-Archiv (Phase 6): festgeschriebene Monats-Provisionsrechnung mit
+// Lebenszyklus (offen/bezahlt/storniert), Mahnungen und Zahlungsabgleich.
+// Beträge + Positionen sind ein eingefrorener Snapshot (unveränderlich).
+// ---------------------------------------------------------------------------
+model Invoice {
+  id            String   @id @default(cuid())
+  invoiceNo     String   @unique
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  monthKey      String   // "YYYY-MM"
+  periodLabel   String
+
+  // Eingefrorener Snapshot zum Ausstellungszeitpunkt
+  trips         Int
+  grossRevenue  Float
+  net           Float
+  vatRate       Float
+  vat           Float
+  gross         Float
+  linesJson     String   // JSON: InvoiceLine[]
+  issuerJson    String   // JSON: { name, address, vatId, email }
+  recipientJson String   // JSON: { name, slug, address, email, cityTier, ratePct }
+
+  // Lebenszyklus
+  status        String   @default("OFFEN") // OFFEN | BEZAHLT | STORNIERT
+  issuedAt      DateTime @default(now())
+  dueAt         DateTime
+  paidAt        DateTime?
+  paymentRef    String?  // Zahlungsreferenz / Notiz (Zahlungsabgleich)
+
+  // Mahnwesen
+  remindersSent  Int      @default(0)
+  lastReminderAt DateTime?
+  emailSentAt    DateTime?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([companyId, monthKey])
+  @@index([companyId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Live-Chat Kunde <-> Fahrer (Phase 3i)
+// ---------------------------------------------------------------------------
+model ChatMessage {
+  id        String   @id @default(cuid())
+  bookingId String
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  sender    String   // CUSTOMER | DRIVER
+  text      String
+  createdAt DateTime @default(now())
+
+  @@index([bookingId])
+}
+
+// ---------------------------------------------------------------------------
+// Stornierungs-Protokoll
+// ---------------------------------------------------------------------------
+model CancellationLog {
+  id         String   @id @default(cuid())
+  bookingId  String
+  booking    Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  actorType  String   // CUSTOMER | ADMIN | DRIVER | SYSTEM
+  actorId    String?  // driver.id oder company.id, je nach actorType
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@index([bookingId])
+}

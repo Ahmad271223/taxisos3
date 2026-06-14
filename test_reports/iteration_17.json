@@ -1,0 +1,29 @@
+{
+  "summary": "Kartenkacheln über den Anbieter konfigurierbar (ein Key für alles) + Rechtsseiten (Impressum/Datenschutz/AGB) + Cookie-Hinweis. Leaflet bleibt Renderer; Tile-URL/Attribution via NEXT_PUBLIC_MAP_TILES_URL überschreibbar (Default CARTO), LocationIQ-Tile-Format live als PNG verifiziert. Drei Rechtsseiten als DE-Vorlagen mit Platzhaltern + Auftragsverarbeiter-Liste (Stripe/Twilio/Resend/LocationIQ/Hosting); Footer-Links + dismissbarer Cookie-Hinweis (nur technisch notwendige Cookies). tsc CLEAN; SSR 200 für /impressum /datenschutz /agb /buchen /; 95/95 pytest grün.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/src/app/impressum/page.tsx", "/app/src/components/Map.tsx"],
+  "action_items": [
+    "Rechtstexte: Platzhalter [in Klammern] mit echten Firmendaten füllen und anwaltlich prüfen lassen (Impressum/DSGVO/AGB).",
+    "Kartenkacheln live: NEXT_PUBLIC_MAP_TILES_URL=https://tiles.locationiq.com/v3/streets/r/{z}/{x}/{y}.png?key=pk.... (VOR `next build` setzen; Key clientseitig sichtbar -> im LocationIQ-Dashboard Domain-Restriktion aktivieren).",
+    "Optional Attribution: NEXT_PUBLIC_MAP_TILES_ATTRIB."
+  ],
+  "critical_code_review_comments": [
+    "src/components/Map.tsx: TILE_URL/TILE_ATTRIB aus NEXT_PUBLIC_MAP_TILES_URL/_ATTRIB, Default CARTO. Leaflet TileLayer nutzt sie. LocationIQ-Tile-URL (…/v3/streets/r/{z}/{x}/{y}.png?key=) live als 200 image/png bestätigt.",
+    "Rechtsseiten: src/components/LegalLayout.tsx (Chrome + H/P-Helfer + Vorlagen-Hinweis); /impressum (§5 DDG), /datenschutz (DSGVO inkl. Auftragsverarbeiter Stripe/Twilio/Resend/LocationIQ/Hosting, Betroffenenrechte, Cookies), /agb (Vermittlung, ca.-Preis vs. Festpreis, Zahlung Authorize-then-Capture, Storno, Haftung). Alle mit [Platzhaltern] + Prüf-Hinweis.",
+    "src/components/CookieNotice.tsx: client, dismissbar (localStorage taxios_cookie_ok), nur Info (technisch notwendige Cookies). In layout.tsx site-weit eingebunden. Footer der Landing verlinkt Impressum/Datenschutz/AGB.",
+    "Hinweis NEXT_PUBLIC_*: zur Build-Zeit inlined -> im Pod vor `next build` setzen."
+  ],
+  "updated_files": [
+    "src/components/Map.tsx (konfigurierbare Tiles)",
+    "src/components/LegalLayout.tsx (NEW)",
+    "src/app/impressum/page.tsx (NEW)", "src/app/datenschutz/page.tsx (NEW)", "src/app/agb/page.tsx (NEW)",
+    "src/components/CookieNotice.tsx (NEW)", "src/app/layout.tsx (CookieNotice)",
+    "src/app/page.tsx (Footer-Rechtslinks)",
+    ".env.example (NEXT_PUBLIC_MAP_TILES_URL/_ATTRIB)"
+  ],
+  "success_rate": {"backend": "100% (95/95 pytest)", "frontend": "SSR 200 für alle Rechtsseiten + Buchen + Landing; Footer-Rechtslinks vorhanden; Cookie-Hinweis client-seitig.", "tiles": "LocationIQ-Tile-Format live als PNG bestätigt; konfigurierbar."},
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Leaflet bleibt Map-Renderer; Tiles via NEXT_PUBLIC_MAP_TILES_URL (Default CARTO). Rechtsseiten sind Vorlagen mit Platzhaltern (anwaltlich prüfen). Damit sind alle baubaren Live-Punkte erledigt; verbleibend nur das Eintragen der Keys/Daten durch den Betreiber (Stripe-Live, Twilio-Upgrade, LocationIQ im Pod, Rechtstexte)."
+}

@@ -1,0 +1,30 @@
+{
+  "summary": "„ca.\"-Vorabpreis aus täglichem Plattform-Durchschnitt. Jeden Tag 02:00 berechnet ein Scheduler den Durchschnitt aus den Tarifen ALLER registrierten Firmen (Ø Grundpreis, Ø €/km, Ø €/min) und speichert ihn 24h als PlatformRate. Quote + Buchung zeigen damit einen einzelnen „ca.\"-Preis (Ø-Basis + Ø-km × km) statt einer Spanne; gespeichert als Booking.priceApprox. Sobald ein Fahrer gefunden ist, gilt wie bisher der exakte Firmentarif (priceExact, in acceptBooking) und wird neu angezeigt; am Fahrtende wird dieser abgebucht (Stripe-Capture). tsc CLEAN; 95/95 pytest (5 neue) + alle 5 E2E grün. Averaging direkt verifiziert: Ausreißer-Firma (99 €/km) hob den Schnitt 2,50 -> 2,84 €/km über 286 Firmen, Quote nutzt den neuen Schnitt.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_phase9_platform_rate.py"],
+  "action_items": [
+    "POD: prisma db push (neues Model PlatformRate + Booking.priceApprox).",
+    "Der 02:00-Lauf braucht einen dauerhaft laufenden Prozess (Custom-Server). Beim Boot wird zudem ein fehlender/veralteter (>24h) Wert sofort berechnet."
+  ],
+  "critical_code_review_comments": [
+    "src/lib/platformRate.ts: computePlatformRate() mittelt basePrice/perKmDay/perMinute über alle Firmen (slug!=_super; Firmen ohne Tarif -> DEFAULT_PRICING) und upsertet PlatformRate(id='current'). getPlatformRate() liest bzw. berechnet bei Bedarf. approxFare(rate,dist,dur)=Ø-Basis+km*Ø-km+min*Ø-min.",
+    "src/server/scheduler.ts: scheduleDailyPlatformRate() – erster Lauf via setTimeout bis 02:00, danach setInterval 24h; beim Boot ensureFresh() (berechnet, wenn Wert fehlt/älter 24h). In server.ts nach Dispatcher-Init verdrahtet.",
+    "/api/quote: liefert zusätzlich priceApprox + approxPerKm (aus PlatformRate). /api/bookings: speichert Booking.priceApprox. serialize.ts: priceApprox im DTO.",
+    "UI: BookingForm zeigt 'ca. {priceApprox}' (statt Spanne) im Schritt-1- und Bestätigungs-Quote; TrackingView zeigt 'Voraussichtlich ca. …' bis priceExact gesetzt ist, danach 'Festpreis'. (priceMin/priceMax bleiben intern/abwärtskompatibel.)",
+    "GET/POST /api/super/platform-rate (Super-Admin): aktuellen Schnitt lesen / sofort neu berechnen (Ops + Test)."
+  ],
+  "updated_files": [
+    "prisma/schema.prisma (PlatformRate model + Booking.priceApprox)",
+    "src/lib/platformRate.ts (NEW)", "src/server/scheduler.ts (NEW)", "server.ts (Scheduler verdrahtet)",
+    "src/app/api/quote/route.ts (priceApprox)", "src/app/api/bookings/route.ts (priceApprox)",
+    "src/server/serialize.ts (priceApprox im DTO)",
+    "src/app/api/super/platform-rate/route.ts (NEW)",
+    "src/components/BookingForm.tsx (ca.-Anzeige)", "src/components/TrackingView.tsx (ca.-Anzeige)",
+    "backend/tests/test_phase9_platform_rate.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (95/95 pytest inkl. 5 neue)", "e2e": "100% (alle 5 Suiten grün; Fahrer-Annahme -> priceExact -> Capture weiterhin korrekt)", "logic": "Averaging direkt bewiesen (Outlier verschiebt den Schnitt korrekt)."},
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Ablauf jetzt: vor Fahrer = priceApprox (Ø aller Firmen, täglich 02:00 via scheduler.ts / PlatformRate); nach Fahrer-Annahme = priceExact (Firmentarif, acceptBooking); Fahrtende = Capture. Super kann den Schnitt via POST /api/super/platform-rate sofort neu berechnen. db push nötig (PlatformRate). Offene Live-Punkte weiterhin: PostgreSQL, bezahlter Geocoder, Rechtsseiten, Twilio-Upgrade, Stripe-Live-Keys."
+}

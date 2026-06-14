@@ -1,0 +1,10 @@
+{
+  "name": "taxios-frontend-shim",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Thin wrapper that boots the Next.js custom server (in /app) on PORT=3000.",
+  "scripts": {
+    "start": "cd /app && HOST=0.0.0.0 PORT=3000 NODE_ENV=production npx tsx server.ts",
+    "dev": "cd /app && HOST=0.0.0.0 PORT=3000 NODE_ENV=development npx tsx server.ts"
+  }
+}

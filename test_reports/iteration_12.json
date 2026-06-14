@@ -1,0 +1,36 @@
+{
+  "summary": "Produktions-Härtung (Schritt 1, ohne externe Accounts) + Twilio-Anbindung. Rate-Limiting für SMS-Anforderung (Twilio-Kostenschutz), Login (Brute-Force) und Buchung (Spam); AUTH_SECRET-Fail-fast in Produktion; CORS-Lockdown via ALLOWED_ORIGINS. Twilio ist angebunden und LIVE validiert (Auth-Token; API-Key war Region-Ireland -> 401, deaktiviert). Twilio-Account ist Trial + ohne Absendernummer -> echter SMS-Versand erst nach Upgrade + Nummer/Sender-ID; lokal weiterhin Mock (Tests grün). tsc CLEAN; 86/86 pytest (3 neue Härtungs-Tests); alle 5 E2E-Suiten grün.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_phase7_hardening.py"],
+  "action_items": [
+    "POD: AUTH_SECRET zwingend setzen (sonst startet Auth nicht mehr) – `openssl rand -hex 32`.",
+    "POD: ALLOWED_ORIGINS=https://<deine-domain> setzen (Socket.IO-CORS).",
+    "Twilio LIVE: Account upgraden (Trial sendet nur an verifizierte Nummern) + Absender setzen (TWILIO_FROM E.164 ODER TWILIO_MESSAGING_SERVICE_SID; für DE ggf. alphanumerische Sender-ID 'TaxiOS'). Geteilten Auth-Token + API-Key-Secret ROTIEREN (standen im Chat).",
+    "Offen (Live-Roadmap): PostgreSQL statt SQLite, echte Stripe-Kartenzahlung (Elements + Webhook), bezahlter Geocoder/Router, Booking-Zugriffstoken, Firmen-E-Mail-Verifizierung/Freigabe, Rechtsseiten (Impressum/DSGVO/AGB), Monitoring/Backups/Deploy-Config."
+  ],
+  "critical_code_review_comments": [
+    "src/lib/ratelimit.ts: rateLimit(key,max,windowMs) Fixed-Window In-Memory + clientIp(req). clientIp ignoriert Loopback (::1/127.* /::ffff:127.*) -> lokale Direktaufrufe werden NICHT limitiert (Tests deterministisch); echte Clients hinter Proxy mit öffentlicher IP werden limitiert.",
+    "Limits: verify/request 5/10min pro Zielnummer + 50/10min pro IP; login 20/5min pro IP & pro Identifier; bookings 30/10min pro IP. Greifen nur bei vorhandener (nicht-Loopback) Client-IP.",
+    "backend/server.py (FastAPI-Proxy): setzt X-Forwarded-For = request.client.host, falls fehlend, damit das Rate-Limiting im Next-Backend im Pod greift.",
+    "src/lib/auth.ts: secret() wirft in NODE_ENV=production, wenn AUTH_SECRET fehlt/Default ist (keine fälschbaren Sessions).",
+    "server.ts: Socket.IO-CORS auf ALLOWED_ORIGINS eingeschränkt (Fallback origin:true nur ohne Angabe/Dev).",
+    "src/lib/notify.ts: Twilio unterstützt jetzt API-Key (SK…/Secret, bevorzugt) ODER Auth-Token; Absender via TWILIO_FROM ODER TWILIO_MESSAGING_SERVICE_SID. smsEnabled() = AccountSID + Auth + Absender."
+  ],
+  "updated_files": [
+    "src/lib/ratelimit.ts (NEW)",
+    "src/lib/auth.ts (AUTH_SECRET fail-fast)",
+    "src/lib/notify.ts (Twilio API-Key + Messaging-Service)",
+    "src/app/api/verify/request/route.ts (rate limit)",
+    "src/app/api/auth/login/route.ts (rate limit)",
+    "src/app/api/bookings/route.ts (rate limit)",
+    "server.ts (CORS ALLOWED_ORIGINS)",
+    "backend/server.py (X-Forwarded-For)",
+    "backend/tests/test_phase7_hardening.py (NEW)",
+    ".env.example (AUTH_SECRET/ALLOWED_ORIGINS/Twilio-Optionen)"
+  ],
+  "success_rate": {"backend": "100% (86/86 pytest inkl. 3 Härtungs-Tests)", "e2e": "100% (alle 5 Suiten grün nach Härtung)", "twilio": "Creds live validiert (Auth-Token), Account=Trial ohne Absender -> echter Versand erst nach Upgrade+Nummer."},
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Härtung aktiv: Rate-Limits greifen nur mit nicht-Loopback X-Forwarded-For (lokal/direkt = unlimitiert). Test-Muster: XFF mit öffentlicher IP (z.B. 203.0.x.x) senden, um 429 auszulösen. AUTH_SECRET muss im Pod gesetzt sein (sonst 500 in Prod). Twilio: Auth-Token funktioniert, API-Key 401 (Region), Account Trial ohne Nummer. Nächste Live-Blocker: Postgres + echte Stripe-Kartenzahlung."
+}

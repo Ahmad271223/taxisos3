@@ -1,0 +1,50 @@
+{
+  "summary": "Iteration_3 e2e validation of TaxiOS after fixing the two iteration_2 testid bugs. Backend (pytest): 15/15 PASS. Frontend testid fixes BOTH VERIFIED present: /fahrer exposes data-testid='gps-share-card' and 'gps-share-toggle' at the top of the portal, and /c/<slug>/buchen has data-testid='address-input-pickup' on the Abholadresse input and 'address-input-dest' on the Zieladresse input (placeholder mapping confirmed: pickup → 'Straße, Hausnummer, Ort', dest → 'Wohin geht die Fahrt?'). However a NEW critical state-management bug in BookingForm was uncovered that blocks the full step1 → step2 → confirm-booking UI flow (see rca + critical comments). End-to-end via direct API verified: super-admin login + /super-admin overview lists newly registered company, company self-registration, admin driver create + DELETE (1 → 0 verified via GET), CARD booking creation returns status='OFFEN', paymentMethod='CARD', paymentStatus='OFFEN', trackingStatus='SUCHE' as per design, /verfolgen/<id> renders tracking-banner + tracking-status='Momentan kein freier Fahrer verfügbar' (correct for no online driver). Admin map driver-marker click + map-zoom-stability NOT exercised because the same booking-form bug prevented bringing a driver fully online via the UI (toggling gps-share required a permissions race with the FREI-blocked alert; functional verification was via API + DriverPortal alert proof).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/bookings/:id", "issue": "Response wraps the booking object inconsistently. The top-level keys include some fields but `status`, `paymentMethod`, `paymentStatus`, `trackingStatus` were only populated correctly in the response of POST /api/bookings; the GET response in raw curl returned None for those at the top level. Likely the GET wraps inside a key (e.g. `booking`). Not a bug but the shape is inconsistent between POST and GET."},
+      {"endpoint": "PUT /api/admin/pricing", "issue": "Returned 400 when echoing back the exact response shape from GET (GET wraps pricing inside a 'pricing' key, PUT expects the flat object). UI flow likely sends the flat object so this is only a tests-format issue, but the asymmetric GET/PUT shapes are a code-smell."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "BookingForm /c/<slug>/buchen", "issue": "CRITICAL state bug: line 322 `onChange={(t) => setPickup({ address: t })}` and line 334 `onChange={(t) => setDest({ address: t })}` REPLACE the whole AddrState and DROP lat/lng. AddressInput's suggestion-click handler (line 89-95) calls onSelect(r) THEN onChange(r.label) → React batches both setState calls so the final state is `{address: r.label}` only. Therefore haveRoute (pickup.lat!=null && dest.lat!=null) stays false forever, the price preview stays as 'Wählen Sie Abhol- und Zieladresse für eine automatische Preisvorschau.' and the Weiter button stays disabled with 'Geben Sie zuerst beide Adressen ein.'. The whole 2-step booking flow is UNREACHABLE from the UI even though the backend POST /api/bookings + tracking page both work.", "selector": "[data-testid='booking-continue'] (stays disabled)", "priority": "CRITICAL"},
+      {"component": "AddressInput.tsx onClick (line 89-95)", "issue": "Same root cause: calling onChange(r.label) AFTER onSelect(r) is fragile — any parent onChange that does setX({address: t}) (which BookingForm does) will clobber the coords set by onSelect. Fix one OR the other.", "selector": "AddressInput suggestion <button>", "priority": "CRITICAL"},
+      {"component": "/admin/login form", "issue": "Login form 'Demo-Zugang admin@citytaxi.de / admin123' text still shown — there is no demo seed anymore so this hint is misleading.", "selector": "Demo-Zugang hint span", "priority": "LOW"},
+      {"component": "/fahrer/login form", "issue": "Same misleading 'Demo-Zugang fahrer1 ... fahrer6 / taxi123' hint visible.", "selector": "Demo-Zugang hint span", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Customer booking step1 → step2 → /verfolgen", "issue": "Blocked at step1 because of the BookingForm lat/lng-wipe bug above. Workaround used in this test: POST /api/bookings via fetch — that works and tracking page renders correctly.", "affected_selectors": ["booking-continue (stays disabled)", "booking-confirm (never rendered)", "pay-card (never rendered)", "confirm-booking (never rendered)"]},
+      {"flow": "Driver online → Admin live-map marker click → driver-detail-panel + map-zoom-stability assertion", "issue": "Not exercised end-to-end via UI. DriverPortal toggle test ran into an event-loop race (clicking gps-share-toggle while the FREI-blocked alert dialog was still queueing). Need a refactor to either auto-dismiss the alert and re-fetch the toggle handle, or run the driver browser in a separate Playwright context (the spec already mentions this — main agent should script it accordingly). Backend driver create/delete is fully verified.", "affected_selectors": ["gps-share-toggle", "driver-status-frei", "driver-detail-panel"]}
+    ],
+    "design_issues": [
+      {"screen": "Step1 booking form", "issues": ["Two labels stack vertically for each address ('ABHOLADRESSE *' from BookingForm AND 'Abholadresse' from inside AddressInput component) — visually redundant."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_taxios_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "FIX (critical, 1-line): In /app/src/components/AddressInput.tsx remove the `onChange(r.label)` call inside the suggestion onClick (line 92). onSelect(r) already updates parent state with the full label+lat+lng via selectPickup/selectDest, so the extra onChange overwrites the coords. After the fix re-test step1 → step2 → /verfolgen.",
+    "ALTERNATIVELY: In /app/src/components/BookingForm.tsx change `onChange={(t) => setPickup({ address: t })}` to `onChange={(t) => setPickup((p) => ({ ...p, address: t, lat: t === p.address ? p.lat : undefined, lng: t === p.address ? p.lng : undefined }))}` for both pickup and dest. Either fix works.",
+    "Drop the 'Demo-Zugang ...' hints from /admin/login and /fahrer/login since demo seeds were removed.",
+    "Once BookingForm is fixed, re-run admin map driver-detail panel + zoom stability test with a fully-online driver (separate browser context, geolocation pre-granted, accept the gps-share-toggle dialog, then click driver-status-frei)."
+  ],
+  "critical_code_review_comments": [
+    "AddressInput.tsx calls both `onSelect(r)` AND `onChange(r.label)` on suggestion click — this couples two state setters in a way that depends on parent implementation; the parent BookingForm's onChange wipes the coords. This is the classic React anti-pattern of two sources of truth for one piece of state.",
+    "BookingForm.tsx onChange handlers use `setPickup({ address: t })` instead of `setPickup((p) => ({ ...p, address: t }))` — this is the destructive update that throws away lat/lng.",
+    "GET /api/admin/pricing wraps the pricing object inside a `pricing` key while PUT expects the flat object — asymmetric API shape.",
+    "GET /api/bookings/:id response shape (top-level vs nested under 'booking') differs from POST — pick one shape.",
+    "/fahrer DriverPortal: clicking driver-status-frei while GPS is OFF triggers a blocking window.alert. Use an in-page toast instead so tests (and screen readers) don't have to deal with native dialogs."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "60%"},
+  "test_credentials": "Super-Admin: super@taxios.app / SuperAdmin2026!. New company: e2e_1781275228@test.de / ePass2026! (slug=e2e-co-1781275228). Driver `drv1781275228 / taxi123` was created and then deleted by the admin-delete-driver test.",
+  "seed_data_creation": "Registered new company E2E Co 1781275228 (slug e2e-co-1781275228), created a driver, then deleted that driver via API. One CARD booking left over (id=cmqb1hqzl000hfchr8h7dyrho).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "TestIds are now correct on both /fahrer (gps-share-card / gps-share-toggle) and on /c/<slug>/buchen (address-input-pickup / address-input-dest). Backend pytest suite at /app/backend/tests/test_taxios_api.py still 15/15. The blocker for the full step1→step2 UI flow is the lat/lng-wipe bug in BookingForm/AddressInput described above — a literal 1-line removal of `onChange(r.label)` in AddressInput.tsx unblocks everything. After main agent fixes, re-run customer booking with autocomplete-click flow, then run a second browser context as the driver with permissions=['geolocation'] + setGeolocation(52.3759, 9.7320), click gps-share-toggle ON, then driver-status-frei, and assert the admin live-map shows a yellow taxi marker and clicking it opens driver-detail-panel.",
+  "rca of the issue": "BookingForm step1 cannot progress because the AddressInput suggestion-click does `onSelect(r); onChange(r.label);` and the parent BookingForm's onChange handler is `(t) => setPickup({ address: t })` which OVERWRITES the AddrState — dropping the lat/lng that selectPickup just set. React state batching guarantees the final state lacks coords, so haveRoute stays false and booking-continue stays disabled. Reproduction: navigate to /c/e2e-co-1781275228/buchen, type 'Hauptbahnhof Hannover' in pickup, click first suggestion, type 'Kröpcke Hannover' in dest, click first suggestion — both visible labels update to the geocoded form but the Weiter button remains disabled with the hint 'Geben Sie zuerst beide Adressen ein.' Mitigation: either drop the onChange(r.label) call in AddressInput onClick, or make BookingForm's onChange functional + preserving (setPickup(p => ({...p, address: t}))). One-line patch."
+}

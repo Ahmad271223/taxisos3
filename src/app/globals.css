@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  @apply bg-white text-ink-900 antialiased;
+  font-feature-settings: "ss01", "cv01";
+}
+
+/* Leaflet karte fuellt ihren Container */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  background: #eef2f7;
+  z-index: 0;
+  font-family: inherit;
+}
+.leaflet-control-attribution {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+/* dezenter Scrollbalken */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db transparent;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 font-bold tracking-tight transition-all duration-200 active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-brand-400;
+  }
+  .btn-primary {
+    @apply btn bg-brand-500 text-ink-900 shadow-glow hover:bg-brand-400 hover:-translate-y-0.5;
+  }
+  .btn-dark {
+    @apply btn bg-ink-900 text-white shadow-soft hover:bg-ink-800 hover:-translate-y-0.5;
+  }
+  .btn-ghost {
+    @apply btn bg-white text-ink-800 ring-1 ring-ink-200 hover:bg-ink-50 hover:ring-ink-300;
+  }
+  .btn-outline {
+    @apply btn border-2 border-ink-900 bg-transparent text-ink-900 hover:bg-ink-900 hover:text-white;
+  }
+  .btn-success {
+    @apply btn bg-green-500 text-white shadow-soft hover:bg-green-600 hover:-translate-y-0.5;
+  }
+  .btn-danger {
+    @apply btn bg-red-500 text-white shadow-soft hover:bg-red-600 hover:-translate-y-0.5;
+  }
+  .card {
+    @apply rounded-3xl bg-white shadow-card ring-1 ring-ink-100;
+  }
+  .field {
+    @apply w-full rounded-2xl border border-ink-200 bg-white px-4 py-3.5 text-ink-900 outline-none transition placeholder:text-ink-400 focus:border-brand-500 focus:ring-4 focus:ring-brand-200;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-bold uppercase tracking-wide text-ink-500;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold;
+  }
+  .eyebrow {
+    @apply text-xs font-bold uppercase tracking-[0.16em] text-ink-500;
+  }
+}
+
+/* "Searching driver" pulsing dot */
+.pulse-yellow {
+  position: relative;
+}
+.pulse-yellow::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: rgba(255, 196, 0, 0.55);
+  animation: ping2 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}

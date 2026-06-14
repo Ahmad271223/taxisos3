@@ -1,0 +1,30 @@
+{
+  "summary": "RETEST iteration_5 frontend fixes – BOTH BUGS RESOLVED. Backend: 36/36 pytest GREEN (test_phase1_commission_cancel.py 16 + test_platform_booking.py 5 + test_taxios_api.py 15). Frontend e2e on /verfolgen/<id>: (1) cancel-booking flow VERIFIED: card 'Pläne geändert?' renders with button data-testid='cancel-booking' (text 'Fahrt stornieren') for a SUCHE booking; clicking the button (page.on('dialog') accept) triggers POST /api/bookings/:id/cancel → banner switches to red 'Storniert' (banner class contains 'bg-red'), button disappears (cancel-booking query-selector returns null after click). (2) RESERVIERT_FAHRER subtitle VERIFIED: by DB-side trackingStatus override on booking cmqb5bd9j001rz9arc0nooh9o + fresh page load before the dispatcher reset, banner shows label 'Fahrer beendet aktuell noch eine Fahrt' AND the new subtitle paragraph 'Ihr Fahrer beendet aktuell noch eine andere Fahrt und kommt anschließend direkt zu Ihnen.' (asserted via banner.inner_text contains subtitle, plus visual screenshot). REGRESSION smokes: /registrieren register-citytier-small + register-citytier-big visible; super@taxios.app/SuperAdmin2026! (with role='ADMIN' field) → /super-admin platform-financials + fin-gross/fin-fee/fin-net/fin-trips ALL visible; company admin cc1781281780@test.com/Pass1234 → /admin commission-card with Tarifstufe 'Großstadt 7%' + kpi-fee-today/kpi-fee-month/kpi-net-month ALL visible; /buchen BookingForm Step 1 renders.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase1_commission_cancel.py",
+    "/app/backend/tests/test_platform_booking.py",
+    "/app/backend/tests/test_taxios_api.py",
+    "/app/test_reports/pytest/iteration_6_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "GOOD: TrackingView.tsx lines 197-217 – cancel-booking card is correctly gated on status ∈ {SUCHE, RESERVIERT_FAHRER, FAHRER_GEFUNDEN, FAHRER_UNTERWEGS, GEPLANT} && !cancelled, matching the backend allow-list. cancel-error inside the card is correctly bound to state and uses data-testid='cancel-error'.",
+    "GOOD: TrackingView.tsx lines 190-194 – RESERVIERT_FAHRER subtitle conditional uses the same pattern as the existing SUCHE subtext (line 184-189). Verified live rendering by manipulating DB trackingStatus to RESERVIERT_FAHRER (workaround – the dispatcher resets the status back to SUCHE within ~1s for OFFEN/no-driver bookings, so the verification window is short but reproducible).",
+    "NOTE: backend dispatcher periodically resets non-driver-assigned bookings from RESERVIERT_FAHRER back to SUCHE. This is correct (state-machine consistency) but means RESERVIERT_FAHRER is only stable when an actual driver socket has reserved the next trip (ONLINE_RESERVED_NEXT_TRIP path).",
+    "GOOD: cancel-booking button correctly toggles disabled=cancelling and label between 'Fahrt stornieren' / 'Storniere…'. The native confirm() before fetch is preserved – Playwright must use page.on('dialog', accept) which works."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (36/36 pytest)", "frontend": "100% – both iteration_5 bugs resolved. /verfolgen cancel-booking + RESERVIERT_FAHRER subtitle + all regression smokes (registrieren citytier, super-admin platform-financials, admin commission-card, buchen Step 1) pass."},
+  "test_credentials": "Super-Admin: super@taxios.app / SuperAdmin2026! (role='ADMIN' MUST be in /api/auth/login JSON body, otherwise 401). Company admin reused from iteration_5: cc1781281780@test.com / Pass1234.",
+  "seed_data_creation": "Fresh TEST_E2ECancel booking created and cancelled during run (cmqb5d8qd001tz9arwtre7nj1 → STORNIERT). Booking cmqb5bd9j001rz9arc0nooh9o was repeatedly toggled to RESERVIERT_FAHRER via direct Prisma update for subtitle verification; dispatcher reset it back to SUCHE between checks. ~36 additional TEST_ rows created by the pytest run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 1 (commission + cancellation + priceExact + flat/wrapped GET shape) is now 100% green on BOTH backend (36/36 pytest) AND frontend (cancel-booking button + RESERVIERT_FAHRER subtitle). The reusable pytest harness (test_phase1_commission_cancel.py + test_platform_booking.py + test_taxios_api.py) should remain stable for future Phase 2 testing. NB: /api/auth/login requires {email,password,role:'ADMIN'} for super/company admins – passing without role returns 401. NB2: backend dispatcher reverts manually-injected trackingStatus='RESERVIERT_FAHRER' back to 'SUCHE' for OFFEN bookings without driver – use the immediate-load workaround (DB write → goto with wait=domcontentloaded → assert within 1-2s) or stub via a real driver socket reservation for stable verification.",
+  "rca of the issue": "iteration_5 reported two FE bugs that were both fixed by the main agent in TrackingView.tsx: (1) cancel-booking card added at lines 197-217 with proper conditional + data-testid + cancel-error binding; (2) RESERVIERT_FAHRER subtitle paragraph added at lines 190-194 inside the tracking-banner. Both are confirmed working live in this retest. No further action required."
+}

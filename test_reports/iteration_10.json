@@ -1,0 +1,40 @@
+{
+  "summary": "Phase 5 – Sammel-Abrechnung (Super-Admin) als ZIP + automatischer E-Mail-Versand via Resend. Super-Admin kann pro Monat alle Mandanten-Rechnungen als ZIP (PDFs je Firma + uebersicht.csv) herunterladen und/oder per E-Mail mit PDF-Anhang an jede Firma mit Provision>0 versenden; Firmen-Admin kann die eigene Rechnung per E-Mail anfordern. Echte ZIP-Erzeugung mit jszip, E-Mail via Resend (notify.sendEmail um Attachments erweitert) – beides mit Mock-Fallback ohne Key. tsc --noEmit CLEAN; 72/72 pytest GREEN (8 neue Phase-5 + 64 vorher); NEW scripts/e2e_bulk_invoice.js GREEN (ZIP wird ENTPACKT, enthaltene PDFs validiert, Sammel-Versand geprüft). Alle 4 E2E-Suiten (invoice, bulk, driver, parallel) grün.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_phase5_bulk_invoices.py",
+    "/app/scripts/e2e_bulk_invoice.js"
+  ],
+  "action_items": [
+    "Run 'npm install' in the pod – NEW dep: jszip ^3.10.1 (Phase 5). (Phase 4 pdf-lib bereits drin.)",
+    "Optional: RESEND_API_KEY + RESEND_FROM setzen, damit der E-Mail-Versand echt statt Mock läuft (Phase 3 env, jetzt mit PDF-Anhang genutzt). Ohne Key: results.mock=true, kein echter Versand.",
+    "Kein db push nötig (keine Schemaänderung in Phase 5)."
+  ],
+  "critical_code_review_comments": [
+    "src/lib/invoice.ts: buildAllInvoices(month) -> Rechnungen aller Mandanten (slug != _super), sortiert nach Name. InvoiceData.recipient.slug ergänzt (für ZIP-Dateinamen/CSV).",
+    "src/lib/notify.ts: sendEmail(to,subject,html,attachments?) – Resend-Attachments (filename+Buffer). Mock loggt '(+N Anhang)'.",
+    "src/lib/invoiceMail.ts: sendInvoiceEmail(data) rendert PDF (pdf-lib) + HTML-Zusammenfassung und versendet mit PDF-Anhang; liefert {slug,company,email,net,gross,sent,mock,error}.",
+    "GET /api/super/invoices/[month] (SUPER_ADMIN): ?format=json -> {companies,billable,totals{net,vat,gross},rows[]}; sonst ZIP (uebersicht-<month>.csv mit BOM + Semikolon + je Firma mit net>0 ein PDF). Buffer.from(uint8array) für NextResponse-BodyInit-Typ. Firmen-Admin -> 401 (requireRole SUPER_ADMIN).",
+    "POST /api/super/invoices/[month]/send (SUPER_ADMIN): E-Mail an jede Firma mit net>0; Summary {attempted,sent,failed,mock,results}. POST /api/admin/invoices/[month]/send (ADMIN): eigene Rechnung an Firmen-Mail.",
+    "UI: src/components/SuperInvoiceRun.tsx in /super-admin (Monatswähler, Vorschau-Tabelle + Totals, 'ZIP herunterladen', 'Alle per E-Mail senden' mit Bestätigung + Ergebnis). AdminInvoices.tsx: zusätzlicher 'Per E-Mail senden'-Button + Status."
+  ],
+  "updated_files": [
+    "src/lib/invoice.ts (recipient.slug + buildAllInvoices)",
+    "src/lib/notify.ts (sendEmail attachments)",
+    "src/lib/invoiceMail.ts (NEW)",
+    "src/app/api/super/invoices/[month]/route.ts (NEW – ZIP/JSON)",
+    "src/app/api/super/invoices/[month]/send/route.ts (NEW – Sammel-Mail)",
+    "src/app/api/admin/invoices/[month]/send/route.ts (NEW – eigene Mail)",
+    "src/components/SuperInvoiceRun.tsx (NEW)", "src/app/super-admin/page.tsx (embed)",
+    "src/components/AdminInvoices.tsx (E-Mail-Button)",
+    "backend/tests/test_phase5_bulk_invoices.py (NEW)",
+    "scripts/e2e_bulk_invoice.js (NEW)",
+    "package.json (+jszip)"
+  ],
+  "success_rate": {"backend": "100% (72/72 pytest)", "e2e": "100% (e2e_bulk_invoice unzips ZIP + validates inner PDFs + email-send; e2e_invoice/driver/parallel weiterhin grün)", "frontend": "tsc clean; /super-admin SSR 200 (Dashboard inkl. SuperInvoiceRun lädt client-seitig nach Auth); ZIP-Inhalt + Versand per E2E verifiziert."},
+  "test_credentials": "Super-Admin: super@taxios.app / SuperAdmin2026! (role='ADMIN' im Login-Body).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phasen 1-5 alle grün. Sammel-Abrechnung: GET /api/super/invoices/<YYYY-MM> (ZIP) bzw. ?format=json; POST .../send (Sammel-Mail); POST /api/admin/invoices/<month>/send (eigene Mail). ZIP=jszip, Mail=Resend mit PDF-Anhang (mock ohne RESEND_API_KEY). Nur npm install (jszip), kein db push. Node-E2E entpackt die ZIP und validiert die PDFs. Mögliche Phase 6: Rechnungs-Archiv/Historie (persistente Invoice-Tabelle mit Status bezahlt/offen), Mahnungen, Zahlungsabgleich (Stripe payout)."
+}

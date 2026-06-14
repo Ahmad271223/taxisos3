@@ -1,0 +1,117 @@
+{
+  "theme_archetype": {
+    "name": "Swiss & High-Contrast (Modern Mobility)",
+    "description": "A high-contrast, strictly functional and modern Uber-like interface. Uses stark white, extreme dark navy/black, and vivid taxi yellow. Prioritizes legibility, large touch targets, and outdoor visibility.",
+    "mode": "Light (Customer/Driver) / Hybrid (Admin with Dark Sidebar)"
+  },
+  "color_palette": {
+    "primary": {
+      "DEFAULT": "#FFC400",
+      "hover": "#E6B000",
+      "text_on_primary": "#1A1A1A"
+    },
+    "neutral": {
+      "900": "#1A1A1A",
+      "800": "#27272A",
+      "100": "#F3F4F6",
+      "50": "#F9FAFB",
+      "white": "#FFFFFF"
+    },
+    "status": {
+      "success": "#10B981",
+      "error": "#EF4444",
+      "offline": "#9CA3AF",
+      "warning": "#F59E0B"
+    }
+  },
+  "typography": {
+    "font_family": {
+      "heading": "Plus Jakarta Sans, sans-serif",
+      "body": "Manrope, sans-serif"
+    },
+    "hierarchy": {
+      "h1": "text-4xl md:text-5xl font-extrabold tracking-tight",
+      "h2": "text-2xl md:text-3xl font-bold tracking-tight",
+      "h3": "text-xl font-bold",
+      "body": "text-base font-medium",
+      "small": "text-sm font-medium tracking-wide"
+    }
+  },
+  "spacing_and_layout": {
+    "general": {
+      "padding": "p-4 md:p-6",
+      "radius": "rounded-2xl"
+    },
+    "mobile_apps": {
+      "customer": "Mobile-first view. Full-screen map with overlapping bottom sheet (rounded-t-[32px], bg-white, shadow-[0_-8px_30px_rgba(0,0,0,0.12)]).",
+      "driver": "Mobile-first view. Floating action cards with generous padding, large text."
+    },
+    "admin_dashboard": {
+      "sidebar": "w-64 bg-[#1A1A1A] text-white flex-shrink-0 min-h-screen sticky top-0. Active nav items use bg-[#FFC400] text-[#1A1A1A] rounded-xl font-bold.",
+      "content": "flex-1 bg-[#F9FAFB] p-8",
+      "cards": "bg-white rounded-2xl shadow-sm border border-neutral-100 p-6"
+    }
+  },
+  "component_rules": {
+    "buttons": {
+      "primary": "bg-[#FFC400] text-[#1A1A1A] hover:bg-[#E6B000] font-bold rounded-2xl py-4 px-6 transition-all transform active:scale-[0.98] w-full text-lg flex items-center justify-center gap-2",
+      "secondary": "bg-[#1A1A1A] text-white hover:bg-black font-bold rounded-2xl py-4 px-6 transition-all transform active:scale-[0.98] w-full text-lg flex items-center justify-center gap-2",
+      "outline": "border-2 border-[#1A1A1A] text-[#1A1A1A] font-bold rounded-2xl py-4 px-6 transition-all transform active:scale-[0.98] w-full text-lg flex items-center justify-center gap-2",
+      "accept": "bg-[#10B981] text-white rounded-2xl py-4 px-6 font-bold text-lg active:scale-[0.98]",
+      "decline": "bg-[#EF4444] text-white rounded-2xl py-4 px-6 font-bold text-lg active:scale-[0.98]"
+    },
+    "inputs": {
+      "default": "bg-[#F3F4F6] border-none rounded-xl px-4 py-4 text-base font-medium focus:ring-2 focus:ring-[#FFC400] focus:bg-white transition-all w-full outline-none"
+    },
+    "status_badges": {
+      "base": "inline-flex items-center px-3 py-1 rounded-full text-sm font-bold gap-1.5",
+      "frei": "bg-[#10B981]/10 text-[#10B981]",
+      "besetzt": "bg-[#EF4444]/10 text-[#EF4444]",
+      "offline": "bg-gray-100 text-gray-500",
+      "pause": "bg-[#FFC400]/20 text-[#1A1A1A]"
+    },
+    "driver_card": {
+      "layout": "flex items-center gap-4 bg-white p-4 rounded-2xl shadow-sm border border-neutral-100",
+      "avatar": "w-12 h-12 rounded-full object-cover",
+      "plate_badge": "bg-[#FFC400] text-[#1A1A1A] px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider"
+    }
+  },
+  "animations": {
+    "transitions": "transition-all duration-200 ease-in-out",
+    "loading": "animate-pulse for skeletons, pinging absolute dot (bg-[#FFC400]) for searching driver state",
+    "hover_lift": "hover:-translate-y-0.5 hover:shadow-md"
+  },
+  "image_urls": {
+    "hero_marketing": {
+      "url": "https://images.unsplash.com/photo-1630717285906-29364ffacea0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzJ8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjB5ZWxsb3clMjB0YXhpJTIwY2l0eSUyMHN0cmVldHxlbnwwfHx8fDE3ODEyNzE4NDd8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Yellow taxi cab on street during daytime (Use for landing page hero or sign-up backgrounds)"
+    },
+    "city_scene": {
+      "url": "https://images.pexels.com/photos/9540794/pexels-photo-9540794.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Urban street view, busy traffic with taxis (Use for marketing feature sections)"
+    },
+    "driver_profile_1": {
+      "url": "https://images.unsplash.com/photo-1551913363-3ee43854c682?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjV8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBkcml2ZXIlMjBwcm9maWxlfGVufDB8fHx8MTc4MTI3MTg1Mnww&ixlib=rb-4.1.0&q=85",
+      "description": "Professional male driver profile (Use for driver UI avatars or admin dashboard lists)"
+    },
+    "driver_profile_2": {
+      "url": "https://images.unsplash.com/photo-1667361162194-c259085e0c80?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjV8MHwxfHNlYXJjaHwzfHxwcm9mZXNzaW9uYWwlMjBkcml2ZXIlMjBwcm9maWxlfGVufDB8fHx8MTc4MTI3MTg1Mnww&ixlib=rb-4.1.0&q=85",
+      "description": "Driver side profile in car (Use for customer app 'Fahrer ist unterwegs' screen mockup or avatar)"
+    }
+  },
+  "accessibility_and_testing": {
+    "contrast": "Ensure #FFC400 has #1A1A1A text for WCAG AA compliance. Do not use white text on yellow.",
+    "testing": "All interactive elements, buttons, inputs, toggles, and status badges MUST include a 'data-testid' attribute (e.g., data-testid='admin-login-button', data-testid='driver-accept-ride')."
+  },
+  "instructions_to_main_agent": [
+    "Language: ALL copy MUST be in German. (e.g., 'Jetzt Taxi', 'Später bestellen', 'Fahrt planen', 'Fahrer gefunden', 'Frei', 'Besetzt', 'Fahrer', 'Kunden', 'Preise', 'Einstellungen').",
+    "Map Integration: Use 'react-leaflet' or similar map component. The map is the absolute core of the driver and customer mobile views.",
+    "Customer App Layout: Mobile viewport dimensions on desktop, or fully responsive mobile-first web. The map sits behind a white bottom sheet.",
+    "Driver App Layout: Similar mobile-first approach. Needs a prominent toggle for 'Frei/Offline' (Green/Gray) and large actionable cards for incoming rides with 'Annehmen' (Accept/Green) and 'Ablehnen' (Decline/Red).",
+    "Admin Dashboard: Built for desktop web. Left sidebar in #1A1A1A, active states in #FFC400. Top KPI cards, large data tables with status badges.",
+    "Icons: Use lucide-react. specifically MapPin, Navigation, User, Car, Clock, Shield.",
+    "Fonts: Install '@fontsource/plus-jakarta-sans' and '@fontsource/manrope'. Apply to Tailwind theme configuration.",
+    "Component Library: You may use Shadcn UI, but heavily customize buttons/cards to be rounded-2xl (16px radius) and borders to be subtle. Override Shadcn default borders and radius.",
+    "DO NOT use a fully transparent header over light content without glassmorphism. Ensure top legibility."
+  ]
+}

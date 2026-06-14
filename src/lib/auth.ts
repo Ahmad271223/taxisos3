@@ -1,0 +1,63 @@
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+
+export type Role = "ADMIN" | "DRIVER" | "SUPER_ADMIN" | "CUSTOMER";
+
+export interface SessionPayload {
+  sub: string; // user id (Driver-ID bzw. Company-ID)
+  role: Role;
+  name: string;
+  username: string;
+  companyId: string; // Mandant
+  companySlug?: string;
+  phone?: string; // nur Kundenkonto
+}
+
+// Rollen-getrennte Cookies, damit Admin UND Fahrer gleichzeitig im selben
+// Browser eingeloggt sein können. SESSION_COOKIE bleibt als Legacy-Fallback.
+export const SESSION_COOKIE = "tc_session";
+export const ADMIN_COOKIE = "tc_admin"; // ADMIN + SUPER_ADMIN
+export const DRIVER_COOKIE = "tc_driver";
+export const CUSTOMER_COOKIE = "tc_customer";
+
+export function cookieForRole(role: Role): string {
+  if (role === "DRIVER") return DRIVER_COOKIE;
+  if (role === "CUSTOMER") return CUSTOMER_COOKIE;
+  return ADMIN_COOKIE;
+}
+
+const DEFAULT_DEV_SECRET = "dev-secret-bitte-aendern";
+
+function secret(): string {
+  const s = process.env.AUTH_SECRET;
+  // Im Produktivbetrieb darf kein fehlendes/Default-Secret verwendet werden –
+  // sonst wären alle Sessions fälschbar. Hart fehlschlagen statt unsicher laufen.
+  if (!s || s === DEFAULT_DEV_SECRET || s === "bitte-aendern") {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("AUTH_SECRET ist nicht gesetzt – im Produktivbetrieb zwingend erforderlich.");
+    }
+    return DEFAULT_DEV_SECRET;
+  }
+  return s;
+}
+
+export async function hashPassword(plain: string): Promise<string> {
+  return bcrypt.hash(plain, 10);
+}
+
+export async function verifyPassword(plain: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(plain, hash);
+}
+
+export function signSession(payload: SessionPayload): string {
+  return jwt.sign(payload, secret(), { expiresIn: "7d" });
+}
+
+export function verifySession(token: string | undefined | null): SessionPayload | null {
+  if (!token) return null;
+  try {
+    return jwt.verify(token, secret()) as SessionPayload;
+  } catch {
+    return null;
+  }
+}

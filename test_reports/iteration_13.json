@@ -1,0 +1,33 @@
+{
+  "summary": "Echte Stripe-Kartenzahlung (Authorize-then-Capture mit Karteneingabe im Browser). Ersetzt den bisherigen serverseitigen Test-Karten-Hack (pm_card_visa) durch den korrekten Flow: Client erstellt PaymentIntent (manual capture, Betrag SERVERSEITIG aus der Route), gibt die Karte via Stripe Elements ein, bestätigt (confirmPayment, 3DS-fähig) -> Hold (requires_capture); Server verifiziert den Intent beim Buchen; Capture des echten Fahrpreises nach Fahrtende; Webhook hält den Status synchron. Mit Mock-Fallback ohne STRIPE_SECRET_KEY (lokal/CI). tsc CLEAN; 90/90 pytest (4 neue) + alle 5 E2E grün.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_phase8_stripe_intent.py"],
+  "action_items": [
+    "Für ECHTE Kartenzahlung 3 Env-Werte setzen: STRIPE_SECRET_KEY (sk_test_/sk_live_), NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY (pk_…), STRIPE_WEBHOOK_SECRET (whsec_…).",
+    "Webhook im Stripe-Dashboard auf /api/payments/webhook zeigen lassen (Events: payment_intent.succeeded|canceled|payment_failed).",
+    "npm install im Pod (neue Client-Deps @stripe/stripe-js, @stripe/react-stripe-js).",
+    "Verifizierung des echten Pfads benötigt Stripe-TEST-Keys (kostenlos, Testkarten) – damit kann der End-to-End-Flow lokal bewiesen werden."
+  ],
+  "critical_code_review_comments": [
+    "src/lib/stripe.ts: createAuthIntent(amountEur) legt PaymentIntent (capture_method=manual, payment_method_types:['card']) OHNE serverseitige Bestätigung an -> client_secret zurück. authorizePayment() ist jetzt NUR noch Mock (kein Key). retrieveIntent() + constructWebhookEvent() neu. capture/void unverändert.",
+    "POST /api/payments/intent: berechnet den Hold-Betrag (priceMax) serverseitig aus der Route (Client kann den Betrag NICHT setzen), legt Intent an, liefert clientSecret+amount+publishableKey. Rate-limited.",
+    "POST /api/bookings (CARD): wenn paymentEnabled() -> paymentIntentId PFLICHT, Server prüft pi.status==requires_capture && pi.amount>=priceMin*100 (sonst 402). Ohne Key -> Mock-Autorisierung wie bisher (Tests bleiben grün).",
+    "POST /api/payments/webhook: verifiziert Stripe-Signatur (STRIPE_WEBHOOK_SECRET) gegen Roh-Body (req.text()); mappt payment_intent.succeeded/canceled/payment_failed -> Booking.paymentStatus via paymentRef. Ohne Secret/Sig -> 503/400, nie 200.",
+    "UI: src/components/StripePayment.tsx (Elements + PaymentElement + confirmPayment redirect:'if_required'); in BookingForm nur aktiv, wenn NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY gesetzt ist (useStripeCard). Sonst normaler Bestell-Button (Mock-CARD). confirmBooking(paymentIntentId?) übergibt den Intent."
+  ],
+  "updated_files": [
+    "src/lib/stripe.ts (createAuthIntent/retrieveIntent/constructWebhookEvent; authorizePayment nur Mock)",
+    "src/app/api/payments/intent/route.ts (NEW)",
+    "src/app/api/payments/webhook/route.ts (NEW)",
+    "src/app/api/bookings/route.ts (CARD: Intent-Verifizierung im Echt-Modus)",
+    "src/components/StripePayment.tsx (NEW)", "src/components/BookingForm.tsx (Elements-Flow)",
+    "backend/tests/test_phase8_stripe_intent.py (NEW)",
+    "package.json (+@stripe/stripe-js, @stripe/react-stripe-js)",
+    ".env.example (NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET)"
+  ],
+  "success_rate": {"backend": "100% (90/90 pytest inkl. 4 neue Stripe-Tests)", "e2e": "100% (alle 5 Suiten grün; CARD-Mock-Pfad im Driver-E2E weiterhin AUTORISIERT)", "frontend": "tsc clean; Elements-Flow gated auf Publishable Key (lokal aus -> normaler Pfad)."},
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Echter Stripe-Pfad aktiv NUR mit STRIPE_SECRET_KEY (+ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY für die UI + STRIPE_WEBHOOK_SECRET). Ohne Key = Mock (CARD-Buchung ohne paymentIntentId -> AUTORISIERT). Echt-Test: /api/payments/intent -> clientSecret; Client confirmPayment mit Testkarte -> requires_capture; POST /api/bookings mit paymentIntentId; complete -> capture -> BEZAHLT. Mit Test-Keys kann ein E2E den Intent serverseitig via pm_card_visa bestätigen und so den ganzen Pfad beweisen."
+}

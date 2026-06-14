@@ -1,0 +1,30 @@
+{
+  "summary": "Umstellung von SQLite auf PostgreSQL – gegen ein echtes Postgres 16 verifiziert. Prisma-Datasource provider=postgresql; versionierte Migration (prisma/migrations/…_init) statt db push; DATABASE_URL = Postgres. Komplette App gegen einen lokalen Postgres-16-Docker-Container getestet: 95/95 pytest + alle 5 E2E grün (Dispatch, Mehrziel, Stripe-Mock, Verifizierung, Chat, Rechnungen, Archiv, Plattform-Durchschnitt). prisma/migrations wird jetzt versioniert; setup-Script nutzt 'prisma migrate deploy'.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/prisma/migrations/20260614082637_init/migration.sql"],
+  "action_items": [
+    "POD: DATABASE_URL auf die echte Postgres-Instanz setzen (Neon/Supabase/RDS o.ä.).",
+    "POD-Deploy: 'npm run setup' (= prisma generate && prisma migrate deploy && seed) ODER 'prisma migrate deploy'. Kein 'db push' mehr in Prod.",
+    "prisma/migrations/ ist jetzt versioniert (muss mitdeployt/committed werden).",
+    "Schema ist provider-agnostisch (keine SQLite/PG-spezifischen Typen) – lokal läuft Dev ebenfalls auf Postgres (Docker-Beispiel in .env.example)."
+  ],
+  "critical_code_review_comments": [
+    "prisma/schema.prisma: datasource provider 'sqlite' -> 'postgresql'. Alle Felder (String/Float/Int/DateTime/Boolean, @default(cuid()/now()), @unique, @@index, Relationen, onDelete) sind in beiden Providern identisch -> keine Typänderungen nötig.",
+    "Initiale Migration 20260614082637_init erstellt alle Tabellen (Company, Pricing, Driver, Booking, CancellationLog, ChatMessage, Verification, Invoice, PlatformRate). Auf frischer DB non-interaktiv angewandt.",
+    ".gitignore: /prisma/migrations NICHT mehr ignoriert (Migrationen müssen versioniert werden).",
+    "package.json: setup nutzt 'prisma migrate deploy'; neue Scripts db:migrate (deploy) + db:migrate:dev. .env.example: DATABASE_URL als Postgres-URL + Docker-Beispiel.",
+    "Verifiziert gegen Postgres 16 (Docker): voller pytest- + E2E-Lauf grün; Concurrency-/Mehrbenutzer-tauglich (im Gegensatz zu SQLite)."
+  ],
+  "updated_files": [
+    "prisma/schema.prisma (provider postgresql)",
+    "prisma/migrations/20260614082637_init/migration.sql (NEW, versioniert)",
+    ".env.example (DATABASE_URL Postgres + Docker-Beispiel)",
+    "package.json (setup -> migrate deploy; db:migrate/db:migrate:dev)",
+    ".gitignore (migrations nicht mehr ignoriert)"
+  ],
+  "success_rate": {"backend": "100% (95/95 pytest auf PostgreSQL 16)", "e2e": "100% (alle 5 Suiten gegen Postgres grün)", "db": "Echte Postgres-Instanz (Docker) verifiziert; Migration angewandt."},
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "DB ist jetzt PostgreSQL (provider=postgresql, versionierte Migrationen). Lokal: Postgres via Docker (siehe .env.example), DATABASE_URL setzen, 'prisma migrate deploy' + seed, dann server. Pod: DATABASE_URL = echte Postgres-URL, 'npm run setup'. Offene Live-Punkte: bezahlter Geocoder/Router, Rechtsseiten (Impressum/DSGVO/AGB), Twilio-Upgrade, Stripe-Live-Keys."
+}
