@@ -1,20 +1,30 @@
-# TaxiOS – Test Credentials
+# TaxiOS – Test-Zugänge
+
+## Kunden-Konto (Demo)
+- **E-Mail:** anna@kunde.test
+- **Passwort:** demo1234
+- **Telefon:** +491701234555 (bereits SMS-bestätigt)
+- Login: `/konto`
 
 ## Super-Admin
-- URL: `/admin/login`
-- E-Mail: `super@taxios.app`
-- Passwort: `SuperAdmin2026!`
-- Erreicht: `/super-admin` Overview aller registrierten Firmen.
+- **E-Mail:** super@taxios.app
+- **Passwort:** SuperAdmin2026!
 
-## Firmen-Admin (selbst registrieren)
-- URL: `/registrieren`
-- Beim Registrieren wird automatisch ein Slug erzeugt: `/c/<slug>`.
-- Anschließend ist man als Admin angemeldet und kann unter `/admin` Fahrer + Preise anlegen.
+## Demo-Firma + Fahrer
+- **Firma:** CityTaxi Hannover (`/c/citytaxi-hannover`)
+- **Firma Login E-Mail:** demo@citytaxi.test
+- **Passwort:** demo1234
 
-## Fahrer
-- URL: `/fahrer/login`
-- Werden vom Firmen-Admin unter `/admin/fahrer` angelegt (Username + Passwort wird beim Anlegen gesetzt).
+### Fahrer (Login: `/fahrer/login`, Passwort jeweils `demo1234`)
+| User | Name | Kennzeichen | Klasse |
+|---|---|---|---|
+| murat | Murat Yilmaz | H-MY 1234 | STANDARD |
+| ahmed | Ahmed Khan | H-AK 4521 | VAN |
+| sara | Sara Becker | H-SB 7788 | BUSINESS |
+| kemal | Kemal Demir | H-KD 0099 | SHUTTLE |
+| lisa | Lisa Hoffmann | H-LH 2233 | WHEELCHAIR |
+| tom | Tom Müller | H-TM 5567 | EXTRA_LUGGAGE |
 
-## Kunden
-- URL: `/c` (Kunden-Portal-Übersicht) oder direkt `/c/<firmen-slug>` bzw. `/c/<firmen-slug>/buchen`.
-- Keine Anmeldung notwendig.
+## SMS-Verifizierung
+TWILIO_FROM ist leer → **Mock-Modus**. Beim Anfordern des SMS-Codes wird der
+6-stellige `devCode` direkt in der UI angezeigt (gelbe Info-Box „Testmodus – Code: …").
