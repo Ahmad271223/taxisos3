@@ -18,6 +18,11 @@ const sans = Manrope({
   weight: ["400", "500", "600", "700", "800"],
 });
 
+// Diese App läuft auf einem Custom-Server (Express + Socket.IO) und ist komplett
+// dynamisch (API-Routen, Live-Daten). Statisches Prerendering bringt keinen
+// Nutzen und scheitert an client-only Komponenten -> app-weit dynamisch rendern.
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "TaxiOS – Smarte Taxi-Vermittlung",
   description:
