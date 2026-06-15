@@ -21,11 +21,11 @@ interface AddrState {
 
 type Step = "details" | "confirm";
 
-export function BookingForm({ scheduled = false, companySlug, initialVehicleClass, initialDriverId }: { scheduled?: boolean; companySlug?: string; initialVehicleClass?: string; initialDriverId?: string }) {
+export function BookingForm({ scheduled = false, companySlug, initialVehicleClass, initialDriverId, initialDestination }: { scheduled?: boolean; companySlug?: string; initialVehicleClass?: string; initialDriverId?: string; initialDestination?: string }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("details");
   const [pickup, setPickup] = useState<AddrState>({ address: "" });
-  const [dest, setDest] = useState<AddrState>({ address: "" });
+  const [dest, setDest] = useState<AddrState>({ address: initialDestination ?? "" });
   // Mehrziel-Vorabplanung (Phase 2e): Zwischenstopps zwischen Abholung und Ziel.
   const [stops, setStops] = useState<AddrState[]>([]);
   const [name, setName] = useState("");

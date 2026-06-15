@@ -2,9 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import dynamicImport from "next/dynamic";
 import { Brand } from "@/components/Brand";
 import { formatEuro, formatDateTime } from "@/lib/format";
 import { TRACKING_LABEL } from "@/lib/status";
+import type { MapMarker } from "@/components/Map";
+
+const MiniMap = dynamicImport(() => import("@/components/Map"), { ssr: false });
 
 type Tab = "login" | "register";
 
@@ -326,11 +331,14 @@ function LoggedIn({
 
         {/* Schnellaktionen */}
         <div className="flex flex-wrap gap-2 border-t border-ink-100 px-5 py-3">
-          <Link href="/buchen" className="btn-primary text-sm">Taxi bestellen</Link>
+          <Link href="/buchen" className="btn-primary text-sm" data-testid="quick-book">Taxi bestellen</Link>
           <Link href="/taxis" className="rounded-xl border border-ink-200 px-3 py-2 text-sm font-bold text-ink-700 hover:border-ink-900">🗺️ Live-Karte</Link>
           <Link href="/buchen/krankenfahrt" className="rounded-xl border border-ink-200 px-3 py-2 text-sm font-bold text-ink-700 hover:border-ink-900">🏥 Krankenfahrt</Link>
         </div>
       </div>
+
+      {/* Uber-Style: "Wohin?" Hero mit Mini-Live-Karte */}
+      <WhereToHero />
 
       {/* Tabs */}
       <div className="flex gap-1 rounded-2xl bg-ink-100 p-1" data-testid="account-tabs">
@@ -486,6 +494,98 @@ function EmergencyCard({ profile, onSave }: { profile: any | null; onSave: (name
       >
         {saved ? "✓ Gespeichert" : "Notfallkontakt speichern"}
       </button>
+    </div>
+  );
+}
+
+
+function WhereToHero() {
+  const router = useRouter();
+  const [to, setTo] = useState("");
+  const [taxis, setTaxis] = useState<any[]>([]);
+  const [available, setAvailable] = useState(0);
+
+  useEffect(() => {
+    let stop = false;
+    const load = () =>
+      fetch("/api/taxis/live")
+        .then((r) => r.json())
+        .then((d) => {
+          if (stop) return;
+          setTaxis(d.taxis ?? []);
+          setAvailable(d.available ?? 0);
+        })
+        .catch(() => {});
+    load();
+    const iv = setInterval(load, 8000);
+    return () => {
+      stop = true;
+      clearInterval(iv);
+    };
+  }, []);
+
+  const markers: MapMarker[] = taxis.map((t) => ({
+    id: t.id,
+    lat: t.lat,
+    lng: t.lng,
+    kind: "car" as const,
+    color: t.status === "FREI" ? "#10B981" : "#9CA3AF",
+  }));
+  const center: [number, number] = taxis[0] ? [taxis[0].lat, taxis[0].lng] : [52.3759, 9.732];
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const q = to.trim();
+    router.push(q ? `/buchen?to=${encodeURIComponent(q)}` : "/buchen");
+  }
+
+  return (
+    <div className="card overflow-hidden p-0" data-testid="where-to-hero">
+      {/* Mini-Live-Karte */}
+      <div className="relative h-44">
+        <MiniMap center={center} markers={markers} fit />
+        <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1 shadow-soft ring-1 ring-ink-200">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+          </span>
+          <span className="text-[11px] font-extrabold text-ink-900" data-testid="hero-available">{available} frei</span>
+        </div>
+        <Link
+          href="/taxis"
+          data-testid="hero-open-map"
+          className="absolute bottom-3 right-3 rounded-full bg-ink-900/90 px-3 py-1.5 text-[11px] font-extrabold text-white shadow-soft hover:bg-ink-900"
+        >
+          Vollbild-Karte →
+        </Link>
+      </div>
+
+      {/* Wohin? Eingabe */}
+      <form onSubmit={submit} className="grid gap-2.5 p-4" data-testid="where-to-form">
+        <div className="flex items-center gap-3 rounded-2xl border-2 border-ink-200 bg-white p-3 transition focus-within:border-brand-500 focus-within:ring-4 focus-within:ring-brand-200">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-ink-900 text-brand-500">
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
+              <path d="M12 22s8-7.5 8-13a8 8 0 1 0-16 0c0 5.5 8 13 8 13Z" stroke="currentColor" strokeWidth="2" />
+              <circle cx="12" cy="9" r="3" stroke="currentColor" strokeWidth="2" />
+            </svg>
+          </span>
+          <input
+            data-testid="where-to-input"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            placeholder="Wohin möchten Sie?"
+            className="min-w-0 flex-1 bg-transparent text-base font-semibold text-ink-900 placeholder:text-ink-400 focus:outline-none"
+          />
+          <button
+            type="submit"
+            data-testid="where-to-submit"
+            className="shrink-0 rounded-xl bg-brand-500 px-4 py-2 text-sm font-extrabold text-ink-900 shadow-glow transition hover:bg-brand-400"
+          >
+            Los
+          </button>
+        </div>
+        <p className="text-[11px] text-ink-400">Tipp: Adresse hier eingeben → wir öffnen direkt das Buchungsformular.</p>
+      </form>
     </div>
   );
 }

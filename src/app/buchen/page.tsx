@@ -4,7 +4,7 @@ import { Brand } from "@/components/Brand";
 
 export const dynamic = "force-dynamic";
 
-export default function PlatformBookingPage({ searchParams }: { searchParams?: { class?: string; driver?: string } }) {
+export default function PlatformBookingPage({ searchParams }: { searchParams?: { class?: string; driver?: string; to?: string } }) {
   return (
     <main className="min-h-screen bg-white">
       <header className="sticky top-0 z-10 border-b border-ink-100 bg-white/95 backdrop-blur">
@@ -23,7 +23,7 @@ export default function PlatformBookingPage({ searchParams }: { searchParams?: {
       <section className="mx-auto max-w-2xl px-5 py-6">
         <span className="chip bg-brand-500 text-ink-900">Sofort</span>
         <h1 className="mt-3 font-display text-3xl font-extrabold tracking-tight text-ink-900">
-          Fahrt planen
+          Wohin geht&apos;s?
         </h1>
         <p className="mt-1.5 text-ink-600">
           Wir finden den nächsten freien Fahrer per GPS – fair und ohne Firmen­auswahl.
@@ -77,7 +77,7 @@ export default function PlatformBookingPage({ searchParams }: { searchParams?: {
         </Link>
 
         <div className="card mt-6 p-6">
-          <BookingForm initialVehicleClass={searchParams?.class} initialDriverId={searchParams?.driver} />
+          <BookingForm initialVehicleClass={searchParams?.class} initialDriverId={searchParams?.driver} initialDestination={searchParams?.to} />
         </div>
       </section>
     </main>
