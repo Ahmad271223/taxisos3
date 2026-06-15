@@ -18,7 +18,7 @@ import requests
 
 BASE_URL = (
     os.environ.get("REACT_APP_BACKEND_URL")
-    or "https://5edd2c00-4649-42ac-89e2-a6ce5e73bc02.preview.emergentagent.com"
+    or "https://taxios-dispatch.preview.emergentagent.com"
 ).rstrip("/")
 
 HBF = {"lat": 52.3759, "lng": 9.7320}
