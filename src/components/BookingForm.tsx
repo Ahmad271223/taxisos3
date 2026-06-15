@@ -10,6 +10,8 @@ import { formatDistance, formatDuration, formatEuro } from "@/lib/format";
 import type { GeocodeResult, PriceEstimateT } from "@/lib/geo";
 import type { MapMarker } from "@/components/Map";
 import { vehicleClass as vehicleClassInfo, normalizeClass } from "@/lib/vehicleClasses";
+import { VehicleIcon } from "@/components/VehicleIcon";
+import { haversineMeters } from "@/lib/geo";
 
 const Map = dynamic(() => import("@/components/Map"), { ssr: false });
 
@@ -96,8 +98,35 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
 
   // Fahrzeugklassen-Vergleich (Phase 12): Preise/Verfügbarkeit aus dem Quote.
   const quoteClasses: any[] = quote?.classes ?? [];
-  const selectedClassQuote = quoteClasses.find((c) => c.key === vehicleClass);
+
+  // Live-Taxis fuer ETA-Schaetzung je Klasse (Stadtgeschwindigkeit ~30 km/h).
+  const [liveTaxis, setLiveTaxis] = useState<any[]>([]);
+  useEffect(() => {
+    if (!haveRoute) return;
+    let stop = false;
+    const load = () =>
+      fetch("/api/taxis/live")
+        .then((r) => r.json())
+        .then((d) => { if (!stop) setLiveTaxis(d.taxis ?? []); })
+        .catch(() => {});
+    load();
+    const iv = setInterval(load, 15000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [haveRoute]);
+
+  // ETA pro Fahrzeugklasse: naechster freier Wagen dieser Klasse → Sekunden.
+  const classesWithEta: any[] = quoteClasses.map((c) => {
+    if (pickup.lat == null || pickup.lng == null) return c;
+    const free = liveTaxis.filter((t) => t.status === "FREI" && t.vehicleClass === c.key);
+    if (free.length === 0) return c;
+    const dists = free.map((t) => haversineMeters({ lat: pickup.lat as number, lng: pickup.lng as number }, t) * 1.35);
+    const minMeters = Math.min(...dists);
+    const seconds = Math.round(minMeters / (30_000 / 3600));
+    return { ...c, etaSeconds: seconds };
+  });
+  const selectedClassQuote = classesWithEta.find((c) => c.key === vehicleClass);
   const displayApprox = selectedClassQuote?.price ?? quote?.priceApprox ?? quote?.priceMid ?? null;
+  const selectedEtaMin = selectedClassQuote?.etaSeconds != null ? Math.max(1, Math.round(selectedClassQuote.etaSeconds / 60)) : null;
 
   // Preis live berechnen, sobald Abholung und Ziel (und ggf. Stopps) stehen.
   useEffect(() => {
@@ -695,34 +724,40 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
       )}
 
       {/* Preisvorschau */}
-      <div className="rounded-3xl border-2 border-brand-500 bg-brand-50 p-5" data-testid="quote-card">
+      <div className="rounded-3xl border-2 border-ink-900 bg-ink-900 p-5 text-white" data-testid="quote-card">
         {quoting ? (
-          <p className="text-sm font-semibold text-ink-600">Preis wird berechnet …</p>
+          <p className="text-sm font-semibold text-white/70">Preis wird berechnet …</p>
         ) : quote ? (
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <p className="eyebrow text-ink-700">Voraussichtlicher Fahrpreis</p>
-              <p data-testid="quote-price" className="mt-1 font-display text-3xl font-extrabold text-ink-900">
-                ca. {formatEuro(displayApprox ?? quote.priceMid)}
+              <p className="text-[10px] font-bold uppercase tracking-wider text-brand-500">Voraussichtlicher Fahrpreis</p>
+              <p data-testid="quote-price" className="mt-1 font-display text-4xl font-extrabold tracking-tight">
+                {formatEuro(displayApprox ?? quote.priceMid)}
               </p>
-              <p className="mt-0.5 text-xs text-ink-500">{vehicleClassInfo(vehicleClass).label} · Festpreis nach Fahrer-Zuweisung</p>
+              <p className="mt-0.5 text-xs text-white/60">{vehicleClassInfo(vehicleClass).label} · Festpreis nach Fahrer-Zuweisung</p>
             </div>
-            <div className="text-right text-sm text-ink-700">
-              <p>📍 {formatDistance(quote.distanceMeters)}</p>
-              <p>⏱ ca. {formatDuration(quote.durationSeconds)}</p>
+            <div className="text-right text-sm text-white/70">
+              <p>{formatDistance(quote.distanceMeters)}</p>
+              <p>Fahrt ca. {formatDuration(quote.durationSeconds)}</p>
+              {selectedEtaMin != null && (
+                <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand-500 px-2.5 py-0.5 text-xs font-extrabold text-ink-900" data-testid="quote-eta">
+                  <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.4"/><path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"/></svg>
+                  Abholung ~ {selectedEtaMin} Min.
+                </p>
+              )}
             </div>
           </div>
         ) : (
-          <p className="text-sm font-semibold text-ink-600">
+          <p className="text-sm font-semibold text-white/70">
             Wählen Sie Abhol- und Zieladresse für eine automatische Preisvorschau.
           </p>
         )}
       </div>
 
       {/* Fahrzeugauswahl & Live-Vergleich (Phase 12 Marktplatz) */}
-      {quote && quoteClasses.length > 0 && (
+      {quote && classesWithEta.length > 0 && (
         <VehicleClassPicker
-          classes={quoteClasses}
+          classes={classesWithEta}
           value={vehicleClass}
           onChange={setVehicleClass}
           passengers={passengers}
@@ -823,8 +858,7 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
   );
 }
 
-// Fahrzeug-Marktplatz (Phase 12): Auswahlraster mit Live-Preis je Klasse,
-// Kapazität und „passt"-Hinweis (Gepäckrechner).
+// Fahrzeug-Marktplatz: Uber-aehnliche Auswahlraster mit ETA, Sitzen, Gepaeck.
 function VehicleClassPicker({
   classes,
   value,
@@ -839,10 +873,11 @@ function VehicleClassPicker({
   const anyFits = classes.some((c) => c.fits);
   return (
     <div data-testid="vehicle-classes">
-      <p className="eyebrow mb-2">Fahrzeug wählen</p>
-      <div className="grid gap-2 sm:grid-cols-2">
+      <p className="eyebrow mb-2">Fahrzeugklasse wählen</p>
+      <div className="grid gap-2.5">
         {classes.map((c) => {
           const selected = c.key === value;
+          const etaMin = c.etaSeconds != null ? Math.max(1, Math.round(c.etaSeconds / 60)) : null;
           return (
             <button
               key={c.key}
@@ -850,25 +885,54 @@ function VehicleClassPicker({
               data-testid={`vclass-${c.key}`}
               onClick={() => onChange(c.key)}
               className={`flex items-center gap-3 rounded-2xl border-2 p-3 text-left transition ${
-                selected ? "border-brand-500 bg-brand-50" : "border-ink-200 bg-white hover:border-ink-300"
+                selected ? "border-ink-900 bg-white shadow-soft" : "border-ink-100 bg-white hover:border-ink-300"
               }`}
             >
-              <span className="text-2xl leading-none">{c.icon}</span>
+              <span
+                className={`grid h-14 w-20 shrink-0 place-items-center rounded-xl ring-1 ${
+                  selected ? "bg-brand-100 ring-brand-200" : "bg-ink-50 ring-ink-100"
+                }`}
+              >
+                <VehicleIcon classKey={c.key} className="h-8 w-14 text-ink-900" />
+              </span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-2">
-                  <span className="truncate font-display font-extrabold text-ink-900">{c.short ?? c.label}</span>
+                  <span className="truncate font-display font-extrabold tracking-tight text-ink-900">{c.short ?? c.label}</span>
+                  {selected && (
+                    <span className="shrink-0 rounded-full bg-ink-900 px-1.5 py-0.5 text-[10px] font-extrabold text-brand-500">gewählt</span>
+                  )}
                   {!c.fits && (
                     <span className="shrink-0 rounded-full bg-ink-100 px-1.5 py-0.5 text-[10px] font-bold text-ink-500">zu klein</span>
                   )}
                 </span>
-                <span className="block text-[11px] text-ink-500">
-                  {c.seats} Pers. · {c.luggage} Gepäck{c.available > 0 ? ` · ${c.available} frei` : ""}
+                <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-500">
+                  <span className="inline-flex items-center gap-1">
+                    <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none"><circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="2"/><path d="M3 20a6 6 0 0 1 12 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                    {c.seats} Pers.
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none"><rect x="5" y="7" width="14" height="13" rx="2" stroke="currentColor" strokeWidth="2"/></svg>
+                    {c.luggage} Gepäck
+                  </span>
+                  {etaMin != null && (
+                    <span className="inline-flex items-center gap-1 font-bold text-green-700">
+                      <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2"/><path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                      ~ {etaMin} Min.
+                    </span>
+                  )}
+                  {c.available > 0 && (
+                    <span className="inline-flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                      {c.available} verfügbar
+                    </span>
+                  )}
                 </span>
               </span>
               <span className="shrink-0 text-right">
-                <span className="block font-display font-extrabold text-ink-900" data-testid={`vclass-${c.key}-price`}>
-                  ca. {formatEuro(c.price)}
+                <span className="block font-display text-lg font-extrabold tracking-tight text-ink-900" data-testid={`vclass-${c.key}-price`}>
+                  {formatEuro(c.price)}
                 </span>
+                <span className="block text-[10px] uppercase tracking-wider text-ink-400">geschätzt</span>
               </span>
             </button>
           );

@@ -5,11 +5,25 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Brand } from "@/components/Brand";
+import { VehicleIcon } from "@/components/VehicleIcon";
+import { haversineMeters } from "@/lib/geo";
 import type { MapMarker } from "@/components/Map";
 
 const Map = dynamic(() => import("@/components/Map"), { ssr: false });
 
 const HANNOVER: [number, number] = [52.3759, 9.732];
+// Stadt-Durchschnittsgeschwindigkeit fuer ETA-Schaetzung (m/s ~ 30 km/h).
+const CITY_MS = 30_000 / 3600;
+
+function formatEta(seconds: number): string {
+  const min = Math.max(1, Math.round(seconds / 60));
+  if (min < 60) return `${min} Min.`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${h}h ${m}m`;
+}
+
+interface UserLoc { lat: number; lng: number }
 
 export function LiveTaxiMap() {
   const router = useRouter();
@@ -19,6 +33,7 @@ export function LiveTaxiMap() {
   const [loaded, setLoaded] = useState(false);
   const [whereTo, setWhereTo] = useState("");
   const [me, setMe] = useState<{ name: string } | null>(null);
+  const [userLoc, setUserLoc] = useState<UserLoc | null>(null);
 
   useEffect(() => {
     let stop = false;
@@ -49,7 +64,25 @@ export function LiveTaxiMap() {
       .catch(() => {});
   }, []);
 
+  // GPS-Position fuer ETA. Stiller Versuch – kein Fehler-Banner.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setUserLoc({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => {},
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60_000 },
+    );
+  }, []);
+
+  // ETA pro Taxi (nur wenn Userposition bekannt). Verwendet Luftlinie x 1.35.
+  function etaSeconds(t: { lat: number; lng: number }): number | null {
+    if (!userLoc) return null;
+    const meters = haversineMeters(userLoc, t) * 1.35;
+    return Math.round(meters / CITY_MS);
+  }
+
   const selectedLive = selected ? taxis.find((t) => t.id === selected.id) ?? selected : null;
+  const selectedEta = selectedLive ? etaSeconds(selectedLive) : null;
 
   const markers: MapMarker[] = useMemo(
     () =>
@@ -64,7 +97,19 @@ export function LiveTaxiMap() {
     [taxis],
   );
 
-  const center: [number, number] = taxis[0] ? [taxis[0].lat, taxis[0].lng] : HANNOVER;
+  // Karten-Mittelpunkt: Userposition wenn vorhanden, sonst erstes Taxi/Hannover.
+  const center: [number, number] = userLoc
+    ? [userLoc.lat, userLoc.lng]
+    : taxis[0]
+    ? [taxis[0].lat, taxis[0].lng]
+    : HANNOVER;
+
+  // Pickup-Marker fuer User-Standort (falls verfuegbar).
+  const allMarkers: MapMarker[] = useMemo(() => {
+    const list = [...markers];
+    if (userLoc) list.push({ id: "_user", lat: userLoc.lat, lng: userLoc.lng, kind: "pickup", popup: "Ihr Standort" });
+    return list;
+  }, [markers, userLoc]);
 
   function submitWhereTo(e: React.FormEvent) {
     e.preventDefault();
@@ -73,15 +118,28 @@ export function LiveTaxiMap() {
   }
 
   const busy = taxis.length - available;
+  // Schnellster freier Wagen fuer Hero-Anzeige
+  const fastest = useMemo(() => {
+    if (!userLoc) return null;
+    let best: { id: string; eta: number } | null = null;
+    for (const t of taxis) {
+      if (t.status !== "FREI") continue;
+      const e = etaSeconds(t);
+      if (e == null) continue;
+      if (!best || e < best.eta) best = { id: t.id, eta: e };
+    }
+    return best;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taxis, userLoc]);
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-ink-50" data-testid="live-map-page">
-      {/* Vollbild-Karte als Hintergrund */}
+      {/* Vollbild-Karte */}
       <div className="absolute inset-0" data-testid="live-map">
-        <Map center={center} markers={markers} fit />
+        <Map center={center} markers={allMarkers} fit />
       </div>
 
-      {/* TOP BAR – schwebend, Uber-Stil */}
+      {/* TOP BAR – schlank, ohne Emoji */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
         <div className="pointer-events-auto mx-auto flex max-w-3xl items-center justify-between gap-2 px-4 pt-4">
           <Link
@@ -101,9 +159,9 @@ export function LiveTaxiMap() {
               <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-500" />
             </span>
             <span className="text-sm font-extrabold text-ink-900" data-testid="available-count">
-              {available} frei
+              {available} verfügbar
             </span>
-            <span className="text-xs text-ink-500">· {busy} besetzt</span>
+            <span className="text-xs text-ink-400">· {busy} besetzt</span>
           </div>
 
           <Link
@@ -119,17 +177,17 @@ export function LiveTaxiMap() {
           </Link>
         </div>
 
-        {/* "Wohin?" Such-Pille */}
+        {/* "Wohin?" Pille */}
         <div className="pointer-events-auto mx-auto mt-3 max-w-3xl px-4">
           <form
             onSubmit={submitWhereTo}
-            className="flex items-center gap-3 rounded-2xl bg-white p-3 shadow-float ring-1 ring-ink-200"
+            className="flex items-center gap-3 rounded-2xl bg-white p-2.5 shadow-float ring-1 ring-ink-200"
             data-testid="live-search-form"
           >
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-ink-900 text-brand-500">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-ink-900 text-white">
               <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none">
-                <path d="M12 22s8-7.5 8-13a8 8 0 1 0-16 0c0 5.5 8 13 8 13Z" stroke="currentColor" strokeWidth="2" />
-                <circle cx="12" cy="9" r="3" stroke="currentColor" strokeWidth="2" />
+                <circle cx="12" cy="11" r="3" stroke="currentColor" strokeWidth="2"/>
+                <path d="M12 2v3M12 17v3M2 11h3M19 11h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
               </svg>
             </span>
             <input
@@ -142,47 +200,58 @@ export function LiveTaxiMap() {
             <button
               type="submit"
               data-testid="live-search-submit"
-              className="shrink-0 rounded-xl bg-brand-500 px-4 py-2 text-sm font-extrabold text-ink-900 shadow-glow transition hover:bg-brand-400"
+              className="shrink-0 rounded-xl bg-ink-900 px-4 py-2.5 text-sm font-extrabold text-white transition hover:bg-ink-800"
             >
-              Los
+              Weiter
             </button>
           </form>
+          {fastest && !selectedLive && (
+            <div className="mt-2 flex items-center justify-center gap-2 text-xs font-semibold text-ink-900" data-testid="fastest-eta">
+              <span className="rounded-full bg-white px-3 py-1 shadow-card ring-1 ring-ink-200">
+                Schnellster Wagen ca. <span className="text-ink-900">{formatEta(fastest.eta)}</span> bei Ihnen
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* BOTTOM SHEET – wenn kein Taxi gewählt: Übersicht & Schnellaktionen */}
+      {/* BOTTOM SHEET – ohne Auswahl: Schnellaktionen */}
       {!selectedLive && (
         <div className="absolute inset-x-0 bottom-0 z-20" data-testid="live-bottom-sheet">
           <div className="mx-auto max-w-3xl">
             <div className="mx-3 mb-3 rounded-3xl bg-white p-5 shadow-float ring-1 ring-ink-200">
+              <div className="flex items-center justify-center pb-2.5">
+                <span className="h-1 w-10 rounded-full bg-ink-200" />
+              </div>
               <div className="mb-3 flex items-center justify-between">
                 <div>
-                  <p className="font-display text-xl font-extrabold text-ink-900">
-                    {me ? `Hallo, ${me.name.split(" ")[0]} 👋` : "Taxis in der Nähe"}
+                  <p className="font-display text-lg font-extrabold tracking-tight text-ink-900">
+                    {me ? `Guten Tag, ${me.name.split(" ")[0]}` : "Taxis in der Nähe"}
                   </p>
                   <p className="text-xs text-ink-500">
                     {loaded
                       ? taxis.length === 0
                         ? "Aktuell keine Taxis online."
-                        : "Tippen Sie auf ein Auto, um Details zu sehen."
+                        : "Wählen Sie einen Wagen direkt aus der Karte."
                       : "Lade Live-Daten …"}
                   </p>
                 </div>
-                <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-extrabold text-green-800">LIVE</span>
+                <span className="rounded-full bg-ink-900 px-2.5 py-1 text-[10px] font-extrabold tracking-wider text-brand-500">LIVE</span>
               </div>
 
-              {loaded && taxis.length === 0 && (
-                <p className="mb-3 rounded-xl bg-ink-50 px-3 py-2 text-center text-xs text-ink-500" data-testid="no-taxis">
-                  Gerade sind keine Taxis online. Bitte später erneut schauen.
-                </p>
-              )}
-
-              {/* Schnellaktionen wie Uber-Tiles */}
               <div className="grid grid-cols-4 gap-2">
-                <QuickTile href="/buchen" testid="quick-now" label="Sofort" icon="🚖" highlight />
-                <QuickTile href="/buchen/vorbestellung" testid="quick-later" label="Später" icon="🗓️" />
-                <QuickTile href="/buchen/flughafen" testid="quick-airport" label="Flughafen" icon="✈️" />
-                <QuickTile href="/buchen/gruppe" testid="quick-group" label="Gruppe" icon="👥" />
+                <QuickTile href="/buchen" testid="quick-now" label="Sofort" primary>
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2"/><path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                </QuickTile>
+                <QuickTile href="/buchen/vorbestellung" testid="quick-later" label="Später">
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M3 10h18M8 3v4M16 3v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                </QuickTile>
+                <QuickTile href="/buchen/flughafen" testid="quick-airport" label="Flughafen">
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none"><path d="m21 16-9-2-7 4v-2l5-3-2-7h2l4 6 4-1 2 2-3 1 4 2Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>
+                </QuickTile>
+                <QuickTile href="/buchen/gruppe" testid="quick-group" label="Gruppe">
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none"><circle cx="9" cy="9" r="3" stroke="currentColor" strokeWidth="2"/><circle cx="17" cy="10" r="2.4" stroke="currentColor" strokeWidth="2"/><path d="M3 20a6 6 0 0 1 12 0M14 20a4 4 0 0 1 7-3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                </QuickTile>
               </div>
 
               <Link
@@ -200,46 +269,66 @@ export function LiveTaxiMap() {
         </div>
       )}
 
-      {/* BOTTOM SHEET – wenn Taxi gewählt: Fahrzeug-Detailkarte */}
+      {/* BOTTOM SHEET – Taxi gewaehlt */}
       {selectedLive && (
         <div className="absolute inset-x-0 bottom-0 z-30" data-testid="taxi-detail">
           <div className="mx-auto max-w-3xl">
             <div className="mx-3 mb-3 overflow-hidden rounded-3xl bg-white shadow-float ring-1 ring-ink-200">
-              {/* Drag-Indikator */}
               <div className="flex justify-center pt-2.5">
-                <span className="h-1.5 w-12 rounded-full bg-ink-200" />
+                <span className="h-1 w-10 rounded-full bg-ink-200" />
               </div>
 
-              <div className="p-5">
+              <div className="px-5 pb-5 pt-3">
+                {/* Header mit Fahrzeug-Silhouette */}
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3.5">
                     <span
-                      className="grid h-16 w-16 place-items-center rounded-2xl text-3xl shadow-soft"
-                      style={{ background: selectedLive.status === "FREI" ? "#FFC400" : "#E5E7EB" }}
+                      className="grid h-16 w-20 shrink-0 place-items-center rounded-2xl ring-1"
+                      style={{
+                        background: selectedLive.status === "FREI" ? "#FEF3C7" : "#F3F4F6",
+                        borderColor: "#E5E7EB",
+                      }}
                     >
-                      {selectedLive.vehicleClassIcon}
+                      <VehicleIcon classKey={selectedLive.vehicleClass} className="h-9 w-14 text-ink-900" />
                     </span>
-                    <div>
-                      <p className="font-display text-xl font-extrabold text-ink-900" data-testid="taxi-detail-class">
+                    <div className="min-w-0">
+                      <p className="font-display text-xl font-extrabold tracking-tight text-ink-900" data-testid="taxi-detail-class">
                         {selectedLive.vehicleClassLabel}
                       </p>
-                      <p className="text-sm text-ink-500">{selectedLive.company ?? "Taxi"} · {selectedLive.name}</p>
+                      <p className="text-sm text-ink-500">{selectedLive.name} · {selectedLive.company ?? "Taxi"}</p>
                     </div>
                   </div>
                   <span
                     className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-extrabold ${
-                      selectedLive.status === "FREI" ? "bg-green-100 text-green-800" : "bg-ink-200 text-ink-600"
+                      selectedLive.status === "FREI" ? "bg-green-100 text-green-800" : "bg-ink-100 text-ink-600"
                     }`}
                   >
-                    {selectedLive.status === "FREI" ? "● frei" : "○ besetzt"}
+                    {selectedLive.status === "FREI" ? "verfügbar" : "besetzt"}
                   </span>
                 </div>
 
+                {/* ETA Banner */}
+                {selectedEta != null && selectedLive.status === "FREI" && (
+                  <div className="mt-4 flex items-center justify-between rounded-2xl bg-ink-900 px-4 py-3 text-white" data-testid="taxi-eta">
+                    <div className="flex items-center gap-3">
+                      <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-500 text-ink-900">
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2"/><path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                      </span>
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-white/60">Ankunft bei Ihnen</p>
+                        <p className="font-display text-lg font-extrabold leading-none">~ {formatEta(selectedEta)}</p>
+                      </div>
+                    </div>
+                    <p className="text-right text-[11px] text-white/60">
+                      geschätzt anhand<br />Ihrer Position
+                    </p>
+                  </div>
+                )}
+
+                {/* Fahrzeug-Details */}
                 <div className="mt-4 grid grid-cols-2 gap-2.5 text-sm">
                   <Info
-                    icon={
-                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none"><path d="M3 16v-3a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v3H3Z" stroke="currentColor" strokeWidth="2"/><path d="M7 10l1.5-4h7L17 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-                    }
+                    icon={<svg viewBox="0 0 24 24" className="h-4 w-4" fill="none"><path d="M3 16v-3a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v3H3Z" stroke="currentColor" strokeWidth="2"/><path d="M7 10l1.5-4h7L17 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>}
                     label="Fahrzeug"
                     value={[selectedLive.vehicleColor, selectedLive.vehicleModel].filter(Boolean).join(" ") || "—"}
                   />
@@ -267,7 +356,7 @@ export function LiveTaxiMap() {
                     data-testid="taxi-book"
                     className="flex items-center justify-center gap-2 rounded-2xl bg-brand-500 px-5 py-3.5 text-base font-extrabold text-ink-900 shadow-glow transition hover:bg-brand-400"
                   >
-                    {selectedLive.status === "FREI" ? "Dieses Taxi bestellen" : `${selectedLive.vehicleClassLabel} bestellen`}
+                    {selectedLive.status === "FREI" ? "Diesen Wagen bestellen" : `Nächsten ${selectedLive.vehicleClassLabel} bestellen`}
                     <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none">
                       <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
@@ -278,13 +367,13 @@ export function LiveTaxiMap() {
                     className="rounded-2xl bg-ink-100 px-4 py-3.5 text-sm font-bold text-ink-700 transition hover:bg-ink-200"
                     aria-label="Schließen"
                   >
-                    ✕
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"/></svg>
                   </button>
                 </div>
                 <p className="mt-2.5 text-center text-[11px] text-ink-400">
                   {selectedLive.status === "FREI"
-                    ? "Dieses Fahrzeug wird zuerst angefragt. Sagt es nicht zu, suchen wir das nächste freie."
-                    : "Aktuell besetzt – wir suchen das nächste freie Fahrzeug dieser Kategorie."}
+                    ? "Dieses Fahrzeug wird zuerst angefragt. Sagt es nicht zu, finden wir automatisch den nächsten freien Wagen."
+                    : "Aktuell besetzt – wir suchen den nächsten freien Wagen dieser Kategorie."}
                 </p>
               </div>
             </div>
@@ -292,7 +381,6 @@ export function LiveTaxiMap() {
         </div>
       )}
 
-      {/* Versteckter Brand für SEO/AT */}
       <span className="sr-only"><Brand subtitle="Live-Karte" /></span>
     </main>
   );
@@ -300,29 +388,41 @@ export function LiveTaxiMap() {
 
 function Info({ label, value, icon, mono }: { label: string; value: string; icon?: React.ReactNode; mono?: boolean }) {
   return (
-    <div className="flex items-center gap-2.5 rounded-xl bg-ink-50 px-3 py-2.5">
+    <div className="flex items-center gap-2.5 rounded-xl bg-ink-50 px-3 py-2.5 ring-1 ring-ink-100">
       {icon && <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-white text-ink-700 ring-1 ring-ink-200">{icon}</span>}
       <div className="min-w-0">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-400">{label}</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-400">{label}</p>
         <p className={`truncate font-extrabold text-ink-900 ${mono ? "font-mono tracking-wider" : ""}`}>{value}</p>
       </div>
     </div>
   );
 }
 
-function QuickTile({ href, label, icon, testid, highlight }: { href: string; label: string; icon: string; testid: string; highlight?: boolean }) {
+function QuickTile({
+  href,
+  label,
+  testid,
+  primary,
+  children,
+}: {
+  href: string;
+  label: string;
+  testid: string;
+  primary?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <Link
       href={href}
       data-testid={testid}
-      className={`flex flex-col items-center gap-1 rounded-2xl px-2 py-3 transition active:scale-95 ${
-        highlight
+      className={`flex flex-col items-center gap-1.5 rounded-2xl px-2 py-3 transition active:scale-95 ${
+        primary
           ? "bg-brand-500 text-ink-900 shadow-glow hover:bg-brand-400"
           : "bg-ink-50 text-ink-900 ring-1 ring-ink-200 hover:bg-ink-100"
       }`}
     >
-      <span className="text-2xl leading-none">{icon}</span>
-      <span className="text-[11px] font-extrabold">{label}</span>
+      <span className={primary ? "text-ink-900" : "text-ink-700"}>{children}</span>
+      <span className="text-[11px] font-extrabold tracking-tight">{label}</span>
     </Link>
   );
 }

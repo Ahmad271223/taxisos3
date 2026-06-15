@@ -309,7 +309,7 @@ function LoggedIn({
         <div className="flex items-center justify-between gap-3 bg-ink-900 px-5 py-4 text-white">
           <div className="min-w-0">
             <p className="text-xs font-semibold text-white/60">Mein Konto</p>
-            <p className="truncate font-display text-xl font-extrabold" data-testid="account-name">Hallo, {firstName} 👋</p>
+            <p className="truncate font-display text-xl font-extrabold" data-testid="account-name">Guten Tag, {firstName}</p>
           </div>
           <button onClick={onLogout} data-testid="account-logout" className="shrink-0 rounded-xl bg-white/10 px-3 py-1.5 text-sm font-bold text-white hover:bg-white/20">Abmelden</button>
         </div>
@@ -332,8 +332,14 @@ function LoggedIn({
         {/* Schnellaktionen */}
         <div className="flex flex-wrap gap-2 border-t border-ink-100 px-5 py-3">
           <Link href="/buchen" className="btn-primary text-sm" data-testid="quick-book">Taxi bestellen</Link>
-          <Link href="/taxis" className="rounded-xl border border-ink-200 px-3 py-2 text-sm font-bold text-ink-700 hover:border-ink-900">🗺️ Live-Karte</Link>
-          <Link href="/buchen/krankenfahrt" className="rounded-xl border border-ink-200 px-3 py-2 text-sm font-bold text-ink-700 hover:border-ink-900">🏥 Krankenfahrt</Link>
+          <Link href="/taxis" className="inline-flex items-center gap-1.5 rounded-xl border border-ink-200 px-3 py-2 text-sm font-bold text-ink-700 hover:border-ink-900">
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/><path d="M9 4v14M15 6v14" stroke="currentColor" strokeWidth="2"/></svg>
+            Live-Karte
+          </Link>
+          <Link href="/buchen/krankenfahrt" className="inline-flex items-center gap-1.5 rounded-xl border border-ink-200 px-3 py-2 text-sm font-bold text-ink-700 hover:border-ink-900">
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none"><path d="M9 12h6M12 9v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><rect x="4" y="6" width="16" height="14" rx="2" stroke="currentColor" strokeWidth="2"/></svg>
+            Krankenfahrt
+          </Link>
         </div>
       </div>
 

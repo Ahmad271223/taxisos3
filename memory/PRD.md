@@ -1,63 +1,64 @@
 # TaxiOS – PRD (Living Doc)
 
 ## Problem Statement (verbatim, gekürzt)
-- .env-Werte ergänzen (inkl. `SEARCH_MAX_MS=180000`)
-- Kunden-Dashboard & Buchung Uber-freundlicher gestalten (Live-Karte, Auftragsvergabe),
-  aktuellen Farbstil (Yellow/Ink) beibehalten
-- Live-Karte: nur online + frei = grün, klickbar → Kennzeichen, Sitzplätze, Typ, Name,
-  Gepäck, direkt buchen
+- .env mit allen Werten + `SEARCH_MAX_MS=180000`
+- Kunden-UI Uber-style **aber seriöser**, **keine KI-Emojis**, Farbstil Yellow/Ink beibehalten
+- Live-Karte mit freien Taxis, Klick auf Auto zeigt Details (Kennzeichen, Sitze, Typ, Name, Gepäck) → direkt buchen
+- **ETA-Schätzung** an mehreren Stellen (Live-Karte + Fahrzeugauswahl)
 
 ## Stack
-- Next.js 14 (App Router) + tsx server (Express + Socket.IO)
-- Prisma + PostgreSQL
-- Tailwind (Yellow brand-500 / Ink palette)
-- Leaflet/react-leaflet (LocationIQ Tiles)
-- Stripe (Test-Keys), Twilio (SMS), Resend (Email)
+- Next.js 14 + tsx Custom-Server (Express + Socket.IO)
+- Prisma + PostgreSQL 15 (lokal installiert + geseedet)
+- Tailwind (Brand-Gelb #FFC400 + Ink-Grau)
+- Leaflet/react-leaflet, LocationIQ Tiles
+- FastAPI Proxy (Port 8001 → Next.js Port 3000)
 
 ## Implementiert in dieser Session (Jan 2026)
-- `.env` neu erstellt mit allen Werten aus Problem Statement + `SEARCH_MAX_MS=180000`,
-  `ENABLE_SIMULATOR=0`, LocationIQ Tile-URL, Stripe Test-Keys
-- `LiveTaxiMap.tsx` komplett im Uber-Stil neugebaut:
-  - Vollbild-Hintergrund-Karte
-  - Schwebende Top-Bar (Zurück / "X frei · Y besetzt" Live-Pill / Konto-Avatar)
-  - "Wohin?"-Such-Pille direkt unter Top-Bar → führt zu `/buchen?to=...`
-  - Bottom-Sheet mit Begrüßung (eingeloggte Kunden), Schnellaktionen
-    (Sofort / Später / Flughafen / Gruppe) + "Taxi bestellen"-CTA
-  - Beim Tippen auf ein Auto: Detail-Bottom-Sheet mit
-    Fahrzeug, Kennzeichen, Sitzplätze, Gepäck, Fahrer-Name, Firma, Status
-  - "Dieses Taxi bestellen" → `/buchen?class=...&driver=...` (gezielte Bestellung)
-- `CustomerAccount.tsx`: neuer "Wohin?"-Hero über den Tabs:
-  - Mini-Live-Karte (160 px) mit Auto-Refresh alle 8 s
-  - "X frei"-Live-Pill, Vollbild-Karte-Link
-  - "Wohin?"-Eingabefeld → `/buchen?to=...`
-- `BookingForm.tsx`: akzeptiert `initialDestination` (Pre-Fill via `?to=` Param)
-- `/buchen/page.tsx`: reicht `searchParams.to` an `BookingForm` weiter,
-  Hero-Headline "Wohin geht's?"
 
-## Files Touched
-- /app/.env (neu)
-- /app/src/components/LiveTaxiMap.tsx (rewrite, Uber-Style)
-- /app/src/components/CustomerAccount.tsx (+ WhereToHero, Mini-Map)
-- /app/src/components/BookingForm.tsx (+ initialDestination prop)
-- /app/src/app/buchen/page.tsx (Hero-Headline, to-Param)
+### Iteration 1 – Basis Uber-Layout + .env
+- `.env` mit allen Werten aus Problem Statement + `SEARCH_MAX_MS=180000`, echtem 32-Byte AUTH_SECRET
+- LiveTaxiMap im Uber-Vollbild-Stil mit Top-Bar, „Wohin?"-Pille, Bottom-Sheet
+- CustomerAccount mit „Wohin?"-Hero + Mini-Live-Karte
+- BookingForm mit `?to=` Param-Vorausfüllung
+- PostgreSQL installiert, DB+Seed, 6 Demo-Fahrer angelegt
+- App läuft via Supervisor (Frontend Port 3000, Backend-Proxy Port 8001)
 
-## Farbpalette (unverändert)
-- Brand: `brand-500` = #FFC400 (Gelb)
-- Ink: grayscale (text-ink-900 etc.)
-- Akzente: green-500 (frei), red-600 (Fehler)
+### Iteration 2 – Seriös + ETA (aktuell)
+- **Neue Datei `/app/src/components/VehicleIcon.tsx`**: 9 maßgeschneiderte SVG-Auto-Silhouetten (Standard, Van, Extra-Gepäck, Shuttle, Business, Wheelchair, Pet, Child-Seat, VIP) statt Emoji
+- **LiveTaxiMap**:
+  - Alle Emojis durch klare SVG-Icons ersetzt (GPS-Pin, Uhr, Personen, Gepäck, Kennzeichen, Schließen-X)
+  - **ETA-Banner im Detail-Sheet**: dunkles „Ankunft bei Ihnen ~ X Min." Banner mit gelber Uhr (Haversine × 1.35 / 30 km/h)
+  - **„Schnellster Wagen ca. X Min. bei Ihnen"** Pille unter der „Wohin?"-Eingabe
+  - Browser-Geolocation lädt User-Position still, eigener Pickup-Marker auf der Karte
+  - Status-Labels „verfügbar/besetzt" (statt „frei")
+  - QuickTiles mit eigenen SVG-Icons (Uhr, Kalender, Flugzeug, Personen)
+- **BookingForm VehicleClassPicker**:
+  - Uber-Style große Karten mit **SVG-Auto-Silhouette pro Klasse**
+  - Pro Klasse: Sitze, Gepäck, **ETA in grün**, Verfügbarkeitsstatus, Preis
+  - Selektion-Indicator („gewählt"-Badge auf gewählter Klasse)
+  - Live-ETA-Berechnung über `/api/taxis/live` + Haversine
+- **BookingForm Preis-Karte**: schwarze Karte „VORAUSSICHTLICHER FAHRPREIS" mit gelber „Abholung ~ X Min."-Pille
+- **buchen/page.tsx**: alle Emoji-CTAs durch klare SVG-Tiles mit Icon-Boxen ersetzt
+- **CustomerAccount**: „Guten Tag, {Name}" statt „Hallo, {Name} 👋", Schnellaktionen mit SVG-Icons
 
-## Bekannte/Mocked
-- TWILIO_FROM leer → SMS im Mock-Modus (devCode wird in UI angezeigt)
-- RESEND_API_KEY leer → Mail im Mock-Modus
-- Stripe Test-Keys: echte Authorize-then-Capture möglich
+## Files Touched (Iteration 2)
+- /app/src/components/VehicleIcon.tsx (neu)
+- /app/src/components/LiveTaxiMap.tsx (rewrite, SVG-Icons + ETA)
+- /app/src/components/BookingForm.tsx (VehicleClassPicker, ETA, Preis-Karte)
+- /app/src/app/buchen/page.tsx (rewrite, SVG-Tiles)
+- /app/src/components/CustomerAccount.tsx (SVG-Schnellaktionen, kein Emoji)
 
-## Backlog / Nice-to-Have
-- P1: Live-Karte: Auto-Marker bewegen sich smooth (CSS transition statt Re-Render)
-- P1: "Wohin?"-Suche mit Autocomplete (geocode-API ist vorhanden)
-- P2: Kundenkonto-Hero merkt sich letzte Ziele als Vorschläge
-- P2: Bottom-Sheet schwenkbar (Drag-Indikator existiert visuell)
+## Demo-Setup
+- 6 Fahrer in Hannover (Standard, Van, Business, Shuttle, Wheelchair, Extra-Gepäck)
+- ENABLE_SIMULATOR=1 → Fahrer bewegen sich live + nehmen Aufträge an
+- Test-Login: `anna@kunde.test` / `demo1234` (siehe `/app/memory/test_credentials.md`)
+
+## Backlog / Next
+- P1: Smooth Marker-Animation (CSS transition statt Re-Render)
+- P1: Adress-Autocomplete in der „Wohin?"-Pille (LocationIQ-API ist eingebunden)
+- P2: ETA-Genauigkeit via OSRM-Route statt Luftlinie (vorhanden, aktuell nur Luftlinie wegen Performance)
+- P2: Letzte Ziele als Schnellzugriff im Konto
 
 ## Next Actions
-- Lokal `yarn install && yarn dev` → Live-Karte unter `/taxis` und Konto unter `/konto`
-  prüfen
-- Falls SMS produktiv: `TWILIO_FROM` mit verifizierter Nummer setzen
+- App ist live & getestet über die Preview-URL
+- Optional: `TWILIO_FROM` setzen für echte SMS
