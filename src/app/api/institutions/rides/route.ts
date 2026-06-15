@@ -17,7 +17,7 @@ const point = z.object({ address: z.string().min(1), lat: z.number(), lng: z.num
 
 const schema = z.object({
   patientId: z.string().optional().nullable(),
-  patientName: z.string().max(120).optional().nullable(),
+  // patientName/Details kommen aus medicalDetailsSchema (unten gespreadet).
   patientPhone: z.string().max(40).optional().nullable(),
   pickup: point,
   dest: point,

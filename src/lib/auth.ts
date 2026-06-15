@@ -43,6 +43,15 @@ function secret(): string {
   return s;
 }
 
+// Prüft – OHNE zu werfen –, ob ein gültiges AUTH_SECRET vorliegt. Erlaubt
+// Auth-Routen, bei Fehlkonfiguration früh und klar abzubrechen (statt erst beim
+// Signieren mit einem generischen 500). Im Dev gilt der Default als ausreichend.
+export function authConfigured(): boolean {
+  const s = process.env.AUTH_SECRET;
+  if (process.env.NODE_ENV !== "production") return true;
+  return !!s && s !== DEFAULT_DEV_SECRET && s !== "bitte-aendern";
+}
+
 export async function hashPassword(plain: string): Promise<string> {
   return bcrypt.hash(plain, 10);
 }
