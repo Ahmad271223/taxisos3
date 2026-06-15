@@ -940,18 +940,58 @@ export class Dispatcher {
         scheduledAt: { lte: dueAt },
       },
     });
-    for (const b of dueReserved) {
+    // 3) Watchdog: hängende ZUGEWIESEN-Buchungen, die seit > 5 Min nicht
+    //    weiterprogressed sind (z. B. nach Server-Neustart), auf OFFEN
+    //    zurücksetzen und den Fahrer freigeben. Greift NICHT auf Reservierungen
+    //    (trackingStatus GEPLANT/RESERVIERT_FAHRER), die kommen weiter regulär.
+    const stuckCutoff = new Date(Date.now() - 5 * 60_000);
+    const stuck = await prisma.booking.findMany({
+      where: {
+        status: "ZUGEWIESEN",
+        trackingStatus: "FAHRER_UNTERWEGS",
+        assignedAt: { lt: stuckCutoff },
+      },
+    });
+    for (const b of stuck) {
+      const oldDriverId = b.driverId;
       await prisma.booking.update({
         where: { id: b.id },
-        data: { trackingStatus: "FAHRER_UNTERWEGS" },
+        data: {
+          status: b.isScheduled ? "OFFEN" : "OFFEN",
+          trackingStatus: "SUCHE",
+          driverId: null,
+          assignedAt: null,
+          isReserved: false,
+        },
       });
-      if (b.driverId) {
-        this.driverActiveBooking.set(b.driverId, b.id);
-        this.driverActiveBookingDest.set(b.driverId, { lat: b.destLat, lng: b.destLng });
-        await this.setStatusInternal(b.driverId, "BESETZT");
-        await this.refreshDriver?.(b.driverId);
+      if (oldDriverId) {
+        this.driverActiveBooking.delete(oldDriverId);
+        this.driverActiveBookingDest.delete(oldDriverId);
+        await this.setStatusInternal(oldDriverId, "FREI");
+        await this.refreshDriver?.(oldDriverId);
       }
       await this.emitBooking(b.id);
+    }
+
+    // 4) Watchdog: Fahrer mit Status RESERVIERT/BESETZT, die keine aktive
+    //    Buchung mehr in der DB haben (Geist-Status durch Crash). Auf FREI zurück.
+    const busyDrivers = await prisma.driver.findMany({
+      where: { status: { in: ["RESERVIERT", "BESETZT"] }, active: true },
+      select: { id: true },
+    });
+    for (const d of busyDrivers) {
+      const hasActive = await prisma.booking.count({
+        where: {
+          driverId: d.id,
+          status: { in: ["ZUGEWIESEN", "AKTIV"] },
+        },
+      });
+      if (hasActive === 0) {
+        this.driverActiveBooking.delete(d.id);
+        this.driverActiveBookingDest.delete(d.id);
+        await this.setStatusInternal(d.id, "FREI");
+        await this.refreshDriver?.(d.id);
+      }
     }
   }
 }

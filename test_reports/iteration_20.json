@@ -1,0 +1,50 @@
+{
+  "summary": "Iteration 20 E2E re-test nach DB-Cleanup + Watchdog-Fix. Alle 9 priorisierten Buchungsvarianten und der Watchdog sind grün. 14/14 neue pytest-Cases bestehen. Watchdog testet positiv (Stuck-Booking >5min wird in <8s auf OFFEN/FREI zurückgesetzt). STANDARD-Buchung wird jetzt sauber dispatched (murat akzeptiert innerhalb ~3-9s).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/quote (GET-Format)", "issue": "Klassen-Feld heißt 'key' (nicht 'vehicleClass') in der Response – nur Test-Anpassung, keine Bug."},
+      {"endpoint": "/api/bookings (Schema)", "issue": "`luggage` ist boolean (nicht int) und `dest`/`destAddress`/`customerName`/`customerPhone` sind Pflicht – Doku-/Frontend-Hinweis, kein Backend-Bug."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration20_e2e.py",
+    "/app/test_reports/pytest/iteration_20.xml",
+    "/app/scripts/watchdog_check.ts",
+    "/app/scripts/check_state.ts"
+  ],
+  "action_items": [
+    "Optional: 6 alte stale pytest (test_phase8_stripe_intent erwartet noch mock:true; test_phase2 + test_taxios_api Card-Booking Flow erwartet 201 statt 402) auf den aktuellen Stripe-Live-Flow + PaymentIntent-vor-Booking-Pflicht updaten – kein Produktionsbug.",
+    "Optional: Rate-Limit /api/bookings für anna@kunde.test (Test-Account) lockern – nicht blockierend, aber E2E muss 11s zwischen Bookings warten."
+  ],
+  "critical_code_review_comments": [
+    "Watchdog (src/server/dispatch.ts L943-995) korrekt implementiert: 5-Min-Cutoff via assignedAt; setzt Booking auf OFFEN + driverId=null, Fahrer auf FREI, in-memory Maps werden bereinigt (driverActiveBooking/Dest), refreshDriver wird getriggert. Greift NICHT auf legitime Reservierungen (trackingStatus GEPLANT/RESERVIERT_FAHRER) – sauber abgegrenzt.",
+    "Geist-Fahrer-Sweep (L976-995) bonus: alle BESETZT/RESERVIERT-Fahrer ohne aktive Buchung in DB werden auf FREI gesetzt – fängt Crash-Szenarien zusätzlich ab.",
+    "Sweep läuft alle 20s (setInterval L113) – passt zum Required-30s-Acceptance-SLA.",
+    "DB-Status nach Cleanup verifiziert: 10/10 Fahrer FREI, 0 hängende ZUGEWIESEN-Bookings, 76 historische Storniert + 2 Abgeschlossen.",
+    "Live-Karte /taxis zeigt 9 verfügbar · 1 besetzt (= 10 Fahrer, exakt wie gefordert), 11 Leaflet-Marker, Detail-Sheets der Klick-Marker öffnen sich (Marker 2 + 3 erfolgreich; Marker 1 war außerhalb des aktuellen Viewports → kein UI-Bug, nur Test-Limitierung).",
+    "Stripe: /api/payments/intent erwartet {pickup, dest} (Koordinaten), nicht {amount} – Server berechnet Betrag aus Route (gut so, Anti-Tampering). Echte Test-API: mock:false, clientSecret pi_3... ✓.",
+    "Super-Admin meldet sich über role:'ADMIN' an (slug=_super wird serverseitig erkannt), Response kommt mit role:'SUPER_ADMIN' zurück – konsistent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration20_e2e.py (neu, 14 Tests)",
+    "/app/scripts/check_state.ts (neu, DB-State-Inspektor)",
+    "/app/scripts/watchdog_check.ts (neu, automatischer Watchdog-Verifier)"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 pytest grün im neuen Test-File)",
+    "frontend": "Live-Karte /taxis, 10 Fahrer (9+1), Marker klickbar, Detail-Sheets ok",
+    "watchdog": "Verifiziert: Stuck-ZUGEWIESEN nach 7.5s zurückgesetzt + Fahrer FREI"
+  },
+  "test_credentials": "anna@kunde.test/demo1234 (CUSTOMER), murat/demo1234 (DRIVER role:DRIVER), demo@citytaxi.test/demo1234 (ADMIN), super@taxios.app/SuperAdmin2026! (role:'ADMIN' → erkennt SUPER_ADMIN). Stripe-Testkarte 4242 4242 4242 4242 12/30 123 – nicht im Backend-Test verwendet (nur PaymentIntent verifiziert).",
+  "seed_data_creation": "1 STANDARD-CASH-Booking durch Anna (sofort dispatched zu Murat, Status ZUGEWIESEN/FAHRER_UNTERWEGS). 1 Vorbestellung (+30min). 1 Flughafen-Booking (VAN, LH441, +2h). 1 Krankenfahrt (WHEELCHAIR). 1 Gruppe via /api/groups (12 Pax). 1 Stuck-Booking via Watchdog-Test (gleich danach automatisch zurückgesetzt + cleanup).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Watchdog im Dispatcher ist verifiziert robust (5-Min-Cutoff + Geist-Fahrer-Sweep). 10 echte Demo-Fahrer aktiv, alle in 'FREI'-State. STANDARD/VAN/SHUTTLE/WHEELCHAIR-Klassen dispatchen alle. Stripe live (mock:false). Super-Admin Login via role:'ADMIN'. Live-Karte zeigt korrekt 10 Wagen. Falls Rate-Limit-Sturm reproduzieren willst: >11s warten zwischen Bookings.",
+  "rca of the issue": "Der ursprüngliche Bug (STANDARD-Bestellungen blockieren weil murat in RESERVIERT hängt) wurde mit zwei Fixes adressiert: a) einmaliges DB-Cleanup (alle hängenden Bookings storniert, alle Fahrer auf FREI), b) Dispatcher-Watchdog der alle 20s prüft, ob ZUGEWIESEN-Bookings >5min ohne Progression sind und sie zurücksetzt + die in-memory driverActiveBooking/Dest Maps bereinigt und den Fahrer auf FREI setzt. Zusätzlich räumt ein zweiter Sweep Geist-Fahrer-Status (RESERVIERT/BESETZT ohne aktive Buchung) auf. E2E reproduziert: künstliches Stuck-Booking (assignedAt -10min) wurde in 7.5s zurückgesetzt; reale Sofortbuchung von Anna wird in ~3-9s zugewiesen."
+}
