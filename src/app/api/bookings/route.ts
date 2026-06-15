@@ -5,7 +5,7 @@ import { estimatePriceViaWith } from "@/lib/geo";
 import { pricingForSlug, classFactorForSlug, applyClassFactor } from "@/lib/pricing";
 import { normalizeClass } from "@/lib/vehicleClasses";
 import { airportPickupTime } from "@/lib/flights";
-import { normalizeMedicalType } from "@/lib/medical";
+import { normalizeMedicalType, medicalDetailsSchema, medicalDetailsData } from "@/lib/medical";
 import { serializeStops } from "@/lib/stops";
 import { authorizePayment, paymentEnabled, retrieveIntent } from "@/lib/stripe";
 import { normalizeTarget, phoneVerificationRequired, verifyVerifyToken } from "@/lib/verify";
@@ -39,6 +39,11 @@ const schema = z.object({
   vehicleClass: z.string().optional().nullable(),
   // Krankenfahrt-Kategorie (Phase 15), optional.
   medicalType: z.string().optional().nullable(),
+  // Krankenfahrt-Details (Phase B) + Fahrzeug-Anforderungen (Phase D).
+  ...medicalDetailsSchema,
+  returnAt: z.string().datetime().optional().nullable(),
+  // Buchung im Auftrag einer Einrichtung (Phase E).
+  institutionId: z.string().optional().nullable(),
   // Gezielt gewähltes Taxi von der Live-Karte (Phase 23).
   requestedDriverId: z.string().optional().nullable(),
   notes: z.string().max(500).optional().nullable(),
@@ -198,6 +203,9 @@ export async function POST(req: Request) {
       childSeat: d.childSeat ?? false,
       vehicleClass,
       medicalType: normalizeMedicalType(d.medicalType),
+      ...medicalDetailsData(d),
+      returnAt: d.returnAt ? new Date(d.returnAt) : null,
+      institutionId: d.institutionId ?? null,
       requestedDriverId: d.requestedDriverId ?? null,
       notes: d.notes ?? null,
       isScheduled,
@@ -227,5 +235,45 @@ export async function POST(req: Request) {
     getDispatcher()?.dispatchBooking(booking.id).catch(() => {});
   }
 
-  return NextResponse.json({ id: booking.id, booking: bookingDTO(booking) }, { status: 201 });
+  // Automatische Rückfahrt (Phase B): zweite, geplante Buchung mit vertauschter
+  // Strecke zum gewünschten Zeitpunkt. Zahlung als CASH (kein zweiter Karten-Hold).
+  let returnBookingId: string | null = null;
+  if (d.returnAt) {
+    const retAt = new Date(d.returnAt);
+    if (retAt.getTime() > Date.now() + 60_000) {
+      const ret = await prisma.booking.create({
+        data: {
+          companyId,
+          customerName: d.customerName,
+          customerPhone: d.customerPhone,
+          customerId,
+          pickupAddress: d.destAddress,
+          pickupLat: d.dest.lat,
+          pickupLng: d.dest.lng,
+          destAddress: d.pickupAddress,
+          destLat: d.pickup.lat,
+          destLng: d.pickup.lng,
+          vehicleClass,
+          medicalType: normalizeMedicalType(d.medicalType),
+          ...medicalDetailsData(d),
+          institutionId: d.institutionId ?? null,
+          notes: d.notes ?? null,
+          isScheduled: true,
+          scheduledAt: retAt,
+          distanceMeters: estimate.distanceMeters,
+          durationSeconds: estimate.durationSeconds,
+          priceMin,
+          priceMax,
+          priceApprox,
+          tariff: estimate.tariff,
+          status: "OFFEN",
+          trackingStatus: "GEPLANT",
+          paymentMethod: "CASH",
+        },
+      });
+      returnBookingId = ret.id;
+    }
+  }
+
+  return NextResponse.json({ id: booking.id, returnBookingId, booking: bookingDTO(booking) }, { status: 201 });
 }

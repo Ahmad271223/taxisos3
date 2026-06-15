@@ -239,12 +239,15 @@ export function LiveTaxiMap() {
                 <span className="rounded-full bg-ink-900 px-2.5 py-1 text-[10px] font-extrabold tracking-wider text-brand-500">LIVE</span>
               </div>
 
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-5 gap-2">
                 <QuickTile href="/buchen" testid="quick-now" label="Sofort" primary>
                   <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2"/><path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
                 </QuickTile>
                 <QuickTile href="/buchen/vorbestellung" testid="quick-later" label="Später">
                   <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M3 10h18M8 3v4M16 3v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                </QuickTile>
+                <QuickTile href="/buchen/krankenfahrt" testid="quick-medical" label="Kranken">
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none"><path d="M12 21s-7-5.2-7-11a5 5 0 0 1 9-3 5 5 0 0 1 9 3c0 5.8-7 11-7 11h-4Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/><path d="M12 9v6M9 12h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
                 </QuickTile>
                 <QuickTile href="/buchen/flughafen" testid="quick-airport" label="Flughafen">
                   <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none"><path d="m21 16-9-2-7 4v-2l5-3-2-7h2l4 6 4-1 2 2-3 1 4 2Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>

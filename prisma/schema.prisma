@@ -103,6 +103,13 @@ model Driver {
   // Fahrzeugklasse fuer den Marktplatz (Phase 12): STANDARD | VAN | EXTRA_LUGGAGE
   // | SHUTTLE | BUSINESS | WHEELCHAIR | PET | CHILD_SEAT | VIP. Siehe lib/vehicleClasses.
   vehicleClass String   @default("STANDARD")
+  // Freigabe fuer Krankenfahrten (Phase 15): nur freigegebene Fahrer erhalten
+  // Buchungen mit medicalType. Siehe server/dispatch.ts Kandidatenfilter.
+  medicalAllowed Boolean @default(false)
+  // Fahrzeug-Ausstattung fuer Krankenfahrten (Phase D): Rollstuhlrampe/Lift
+  // bzw. Tragestuhl. Gating zusaetzlich zur Fahrzeugklasse im Dispatcher.
+  hasRamp        Boolean @default(false)
+  hasStretcher   Boolean @default(false)
   active       Boolean  @default(true)
 
   bookings     Booking[]
@@ -167,6 +174,29 @@ model Booking {
   medicalType    String?  // DIALYSE | REHA | KRANKENHAUS | ARZT | SONSTIGE
   recurringId    String?
   recurring      RecurringRide? @relation(fields: [recurringId], references: [id], onDelete: SetNull)
+
+  // Krankenfahrt-Details (Phase B): Patient (falls abweichend vom Besteller),
+  // Mobilität, Begleitpersonen, mitzuführende Ausstattung, Kostenträger.
+  patientName      String?
+  patientBirthDate String?  // ISO "YYYY-MM-DD"
+  mobility         String?  // WALK | CANE | WALKER | WHEELCHAIR | E_WHEELCHAIR
+  companions       Int      @default(0)
+  medicalEquipment String?  // CSV: OXYGEN,WALKER,WHEELCHAIR,LUGGAGE,CANE
+  payerType        String?  // SELF | INSURANCE
+  insuranceName    String?
+  insuranceNumber  String?
+  returnAt         DateTime? // optionale automatische Rückfahrt (Einzelfahrt)
+
+  // Fahrzeug-Anforderungen (Phase D): zusätzlich zur Klasse erzwungene Ausstattung.
+  requiresRamp      Boolean @default(false)
+  requiresStretcher Boolean @default(false)
+
+  // Buchung durch eine Einrichtung (Phase E: Klinik/Pflegeheim/Dialyse).
+  institutionId  String?
+  institution    Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+
+  // Hochgeladene Nachweise (Phase C): Verordnung/Genehmigung etc.
+  documents      MedicalDocument[]
 
   // Kundendaten
   customerName   String
@@ -311,6 +341,23 @@ model RecurringRide {
   vehicleClass    String   @default("WHEELCHAIR")
   medicalType     String?
 
+  // Krankenfahrt-Details (Phase B), analog zu Booking.
+  patientName      String?
+  patientBirthDate String?
+  mobility         String?
+  companions       Int      @default(0)
+  medicalEquipment String?
+  payerType        String?
+  insuranceName    String?
+  insuranceNumber  String?
+  requiresRamp      Boolean @default(false)
+  requiresStretcher Boolean @default(false)
+
+  // Serie durch eine Einrichtung angelegt (Phase E).
+  institutionId   String?
+  institution     Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+  documents       MedicalDocument[]
+
   daysOfWeek      String   // CSV 0–6 (0 = Sonntag)
   timeOfDay       String   // "HH:MM" Hinfahrt
   returnTrip      Boolean  @default(false)
@@ -372,8 +419,114 @@ model Customer {
   recurring    RecurringRide[]
   favorites    Favorite[]
   sosAlerts    SosAlert[]
+  documents    MedicalDocument[]
 
   @@index([phone])
+}
+
+// ---------------------------------------------------------------------------
+// Einrichtung (Phase E): Klinik / Pflegeheim / Dialyse- / Reha-Zentrum mit
+// eigenem Login. Kann Stammpatienten anlegen und für sie Krankenfahrten und
+// Serien buchen sowie Rechnungen/Dokumente verwalten.
+// ---------------------------------------------------------------------------
+model Institution {
+  id           String   @id @default(cuid())
+  name         String
+  type         String   @default("KLINIK") // KLINIK | PFLEGEHEIM | DIALYSE | REHA
+  email        String   @unique
+  passwordHash String
+  phone        String?
+  address      String?
+  active       Boolean  @default(true)
+
+  patients     InstitutionPatient[]
+  bookings     Booking[]
+  recurring    RecurringRide[]
+  documents    MedicalDocument[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// Stammpatient einer Einrichtung – Daten müssen nicht je Fahrt neu erfasst werden.
+model InstitutionPatient {
+  id            String   @id @default(cuid())
+  institutionId String
+  institution   Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  name          String
+  birthDate     String?  // ISO "YYYY-MM-DD"
+  phone         String?
+  defaultPickupAddress String?
+  defaultPickupLat     Float?
+  defaultPickupLng     Float?
+  mobility      String?
+  medicalEquipment String?
+  payerType     String?
+  insuranceName String?
+  insuranceNumber String?
+  notes         String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([institutionId])
+}
+
+// ---------------------------------------------------------------------------
+// Medizinisches Dokument (Phase C): Verordnung, Genehmigung der Krankenkasse,
+// Rezept oder Arztbescheinigung. Inhalt als Base64 in der DB; Admin prüft.
+// ---------------------------------------------------------------------------
+model MedicalDocument {
+  id            String   @id @default(cuid())
+
+  kind          String   // VERORDNUNG | GENEHMIGUNG | REZEPT | BESCHEINIGUNG
+  fileName      String
+  mimeType      String
+  dataBase64    String   // Dateiinhalt (Base64); fuer Demo ausreichend
+
+  // Zuordnung (mind. eine gesetzt)
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  bookingId     String?
+  booking       Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  recurringId   String?
+  recurring     RecurringRide? @relation(fields: [recurringId], references: [id], onDelete: SetNull)
+  institutionId String?
+  institution   Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+
+  uploadedByType String? // CUSTOMER | INSTITUTION | ADMIN
+
+  // Prüf-Workflow (Dokumentenprüfung / Genehmigungsverwaltung)
+  reviewStatus  String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  reviewNote    String?
+  reviewedAt    DateTime?
+
+  createdAt     DateTime @default(now())
+
+  @@index([reviewStatus])
+  @@index([bookingId])
+  @@index([customerId])
+  @@index([institutionId])
+}
+
+// ---------------------------------------------------------------------------
+// Zugriffsprotokoll (Phase F / DSGVO): protokolliert Zugriffe auf
+// Gesundheits-/Patientendaten (wer, was, wann).
+// ---------------------------------------------------------------------------
+model AccessLog {
+  id        String   @id @default(cuid())
+  actorType String   // ADMIN | INSTITUTION | CUSTOMER | SYSTEM
+  actorId   String?
+  action    String   // VIEW | DOWNLOAD | APPROVE | REJECT | CREATE | EXPORT
+  entity    String   // MEDICAL_DOCUMENT | BOOKING | PATIENT | RECURRING
+  entityId  String?
+  detail    String?
+  at        DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([actorType, actorId])
+  @@index([at])
 }
 
 // ---------------------------------------------------------------------------

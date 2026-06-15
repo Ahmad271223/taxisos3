@@ -1,0 +1,64 @@
+# Dev/Test-Setup: PostgreSQL + App-Server (Next.js + Express + Socket.IO) in
+# Containern, damit die E2E-Skripte (scripts/e2e_*.js) ohne lokale Node-/DB-
+# Installation laufen. NUR fuer Entwicklung/Tests gedacht.
+#
+#   docker compose up -d                                   # hochfahren (1. Mal: npm install dauert)
+#   docker compose exec -T app node scripts/e2e_medical_dispatch.js http://127.0.0.1:3000
+#   docker compose down                                    # stoppen (Daten-Volume bleibt)
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: taxios
+      POSTGRES_DB: taxios
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d taxios"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  app:
+    image: node:24-bookworm
+    working_dir: /app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://postgres:taxios@db:5432/taxios?schema=public"
+      AUTH_SECRET: "e2e-test-secret-0123456789abcdef0123456789abcdef"
+      PORT: "3000"
+      NODE_ENV: "development"
+      # Simulator aus -> deterministisch: nur explizit angelegte Fahrer existieren.
+      ENABLE_SIMULATOR: "0"
+      REQUIRE_PHONE_VERIFICATION: "1"
+      # Suchfenster kuerzen, damit haengende Krankenfahrten schnell KEIN_FAHRER werden.
+      SEARCH_MAX_MS: "20000"
+      GEO_PROVIDER: "free"
+      # Test-Stack deterministisch halten: Stripe/Twilio/Resend im MOCK-Modus,
+      # auch wenn .env echte Keys enthaelt (Compose-Env ueberschreibt .env).
+      STRIPE_SECRET_KEY: ""
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ""
+      STRIPE_WEBHOOK_SECRET: ""
+      TWILIO_ACCOUNT_SID: ""
+      TWILIO_AUTH_TOKEN: ""
+      LOCATIONIQ_KEY: ""
+    volumes:
+      - .:/app
+      - app_node_modules:/app/node_modules
+    ports:
+      - "3000:3000"
+    command:
+      - bash
+      - -lc
+      - |
+        set -e
+        echo "[app] npm install ..."
+        npm install --no-audit --no-fund
+        echo "[app] prisma generate + migrate deploy ..."
+        npx prisma generate
+        npx prisma migrate deploy
+        echo "[app] starting server ..."
+        npm run dev
+
+volumes:
+  app_node_modules:

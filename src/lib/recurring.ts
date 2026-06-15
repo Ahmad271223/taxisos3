@@ -21,6 +21,18 @@ type Series = {
   destLng: number;
   vehicleClass: string;
   medicalType: string | null;
+  // Krankenfahrt-Details (Phase B) + Anforderungen (Phase D) + Einrichtung (Phase E).
+  patientName?: string | null;
+  patientBirthDate?: string | null;
+  mobility?: string | null;
+  companions?: number | null;
+  medicalEquipment?: string | null;
+  payerType?: string | null;
+  insuranceName?: string | null;
+  insuranceNumber?: string | null;
+  requiresRamp?: boolean | null;
+  requiresStretcher?: boolean | null;
+  institutionId?: string | null;
   daysOfWeek: string;
   timeOfDay: string;
   returnTrip: boolean;
@@ -85,6 +97,18 @@ async function ensureBooking(series: Series, scheduledAt: Date, outbound: boolea
       destLng: outbound ? series.destLng : series.pickupLng,
       vehicleClass: normalizeClass(series.vehicleClass),
       medicalType: series.medicalType,
+      // Krankenfahrt-Details/Anforderungen aus der Serie übernehmen (Phase B/D/E).
+      patientName: series.patientName ?? null,
+      patientBirthDate: series.patientBirthDate ?? null,
+      mobility: series.mobility ?? null,
+      companions: series.companions ?? 0,
+      medicalEquipment: series.medicalEquipment ?? null,
+      payerType: series.payerType ?? null,
+      insuranceName: series.insuranceName ?? null,
+      insuranceNumber: series.insuranceNumber ?? null,
+      requiresRamp: series.requiresRamp ?? false,
+      requiresStretcher: series.requiresStretcher ?? false,
+      institutionId: series.institutionId ?? null,
       isScheduled: true,
       scheduledAt,
       distanceMeters: price.distanceMeters,

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { normalizeClass } from "@/lib/vehicleClasses";
-import { normalizeMedicalType } from "@/lib/medical";
+import { normalizeMedicalType, medicalDetailsSchema, medicalDetailsData } from "@/lib/medical";
 import { materializeSeries } from "@/lib/recurring";
 import { recurringDTO } from "@/server/serialize";
 
@@ -17,6 +17,7 @@ const schema = z.object({
   dest: point,
   vehicleClass: z.string().optional().nullable(),
   medicalType: z.string().optional().nullable(),
+  ...medicalDetailsSchema,
   daysOfWeek: z.array(z.number().int().min(0).max(6)).min(1),
   timeOfDay: hhmm,
   returnTrip: z.boolean().optional(),
@@ -87,6 +88,7 @@ export async function POST(req: Request) {
       destLng: d.dest.lng,
       vehicleClass: normalizeClass(d.vehicleClass ?? "WHEELCHAIR"),
       medicalType: normalizeMedicalType(d.medicalType),
+      ...medicalDetailsData(d),
       daysOfWeek,
       timeOfDay: d.timeOfDay,
       returnTrip: d.returnTrip ?? false,

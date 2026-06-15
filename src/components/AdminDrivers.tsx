@@ -72,6 +72,9 @@ function NewDriverCard({ onCreated }: { onCreated: (d: any) => void }) {
     vehicleColor: "",
     vehicleSeats: 4,
     vehicleClass: "STANDARD",
+    medicalAllowed: false,
+    hasRamp: false,
+    hasStretcher: false,
   });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -95,7 +98,7 @@ function NewDriverCard({ onCreated }: { onCreated: (d: any) => void }) {
       return;
     }
     onCreated(data.driver);
-    setForm({ name: "", username: "", password: "", phone: "", vehicleModel: "", vehiclePlate: "", vehicleColor: "", vehicleSeats: 4, vehicleClass: "STANDARD" });
+    setForm({ name: "", username: "", password: "", phone: "", vehicleModel: "", vehiclePlate: "", vehicleColor: "", vehicleSeats: 4, vehicleClass: "STANDARD", medicalAllowed: false, hasRamp: false, hasStretcher: false });
     setOpen(false);
   }
 
@@ -120,6 +123,7 @@ function NewDriverCard({ onCreated }: { onCreated: (d: any) => void }) {
         <Field testid="new-driver-color" label="Farbe" value={form.vehicleColor} onChange={(v) => set("vehicleColor", v)} />
         <Field testid="new-driver-seats" label="Sitzplätze" type="number" value={String(form.vehicleSeats)} onChange={(v) => set("vehicleSeats", v)} />
         <ClassSelect testid="new-driver-class" value={form.vehicleClass} onChange={(v) => set("vehicleClass", v)} />
+        <div className="sm:col-span-2"><MedicalToggles form={form} set={set} prefix="new-driver" /></div>
       </div>
       {error && <p className="mt-3 rounded-xl bg-red-50 px-4 py-2 text-sm font-semibold text-red-700" data-testid="new-driver-error">{error}</p>}
       <div className="mt-4 flex gap-3">
@@ -141,6 +145,9 @@ function DriverCard({ driver, onDeleted }: { driver: any; onDeleted: (id: string
     vehicleColor: driver.vehicleColor ?? "",
     vehicleSeats: driver.vehicleSeats ?? 4,
     vehicleClass: driver.vehicleClass ?? "STANDARD",
+    medicalAllowed: driver.medicalAllowed ?? false,
+    hasRamp: driver.hasRamp ?? false,
+    hasStretcher: driver.hasStretcher ?? false,
   });
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -213,6 +220,7 @@ function DriverCard({ driver, onDeleted }: { driver: any; onDeleted: (id: string
           <Field testid={`driver-${driver.username}-seats`} label="Sitzplätze" type="number" value={String(form.vehicleSeats)} onChange={(v) => set("vehicleSeats", v)} />
           <ClassSelect testid={`driver-${driver.username}-class`} value={form.vehicleClass} onChange={(v) => set("vehicleClass", v)} />
         </div>
+        <MedicalToggles form={form} set={set} prefix={`driver-${driver.username}`} />
       </div>
       {delErr && <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{delErr}</p>}
       <div className="mt-4 grid grid-cols-[1fr_auto] gap-3">
@@ -254,6 +262,36 @@ function ClassSelect({ value, onChange, testid }: { value: string; onChange: (v:
           </option>
         ))}
       </select>
+    </div>
+  );
+}
+
+function CheckToggle({ checked, onChange, testid, label }: { checked: boolean; onChange: (v: boolean) => void; testid?: string; label: string }) {
+  return (
+    <label className="flex items-center gap-3 rounded-xl border-2 border-ink-200 bg-white px-3 py-2 text-sm font-semibold text-ink-700">
+      <input
+        type="checkbox"
+        className="h-5 w-5 accent-brand-500"
+        checked={checked}
+        data-testid={testid}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+// Gruppe der Krankenfahrt-Eigenschaften eines Fahrers (Freigabe + Ausstattung).
+function MedicalToggles({ form, set, prefix }: { form: any; set: (k: string, v: any) => void; prefix: string }) {
+  return (
+    <div className="grid gap-2">
+      <CheckToggle testid={`${prefix}-medical`} label="🩺 Für Krankenfahrten freigegeben" checked={!!form.medicalAllowed} onChange={(v) => set("medicalAllowed", v)} />
+      {form.medicalAllowed && (
+        <div className="grid grid-cols-2 gap-2">
+          <CheckToggle testid={`${prefix}-ramp`} label="🦽 Rollstuhlrampe/Lift" checked={!!form.hasRamp} onChange={(v) => set("hasRamp", v)} />
+          <CheckToggle testid={`${prefix}-stretcher`} label="🛏️ Tragestuhl" checked={!!form.hasStretcher} onChange={(v) => set("hasStretcher", v)} />
+        </div>
+      )}
     </div>
   );
 }

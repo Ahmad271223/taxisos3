@@ -42,6 +42,9 @@ interface LiveDriver {
   name: string;
   status: string; // FREI | BESETZT | PAUSE | OFFLINE
   vehicleClass: string; // Fahrzeugklasse (Phase 12 Marktplatz)
+  medicalAllowed: boolean; // Krankenfahrten-Freigabe (Phase 15)
+  hasRamp: boolean; // Rollstuhlrampe/Lift (Phase D)
+  hasStretcher: boolean; // Tragestuhl (Phase D)
   lat: number | null;
   lng: number | null;
   online: boolean;
@@ -93,6 +96,9 @@ export class Dispatcher {
         name: d.name,
         status: "OFFLINE",
         vehicleClass: normalizeClass(d.vehicleClass),
+        medicalAllowed: d.medicalAllowed ?? false,
+        hasRamp: d.hasRamp ?? false,
+        hasStretcher: d.hasStretcher ?? false,
         lat: d.lat ?? null,
         lng: d.lng ?? null,
         online: false,
@@ -169,6 +175,9 @@ export class Dispatcher {
       name: d.name,
       status,
       vehicleClass: normalizeClass(d.vehicleClass),
+      medicalAllowed: d.medicalAllowed ?? false,
+      hasRamp: d.hasRamp ?? false,
+      hasStretcher: d.hasStretcher ?? false,
       lat: d.lat ?? prev?.lat ?? null,
       lng: d.lng ?? prev?.lng ?? null,
       online: true,
@@ -220,6 +229,9 @@ export class Dispatcher {
         name: "",
         status: "PAUSE",
         vehicleClass: "STANDARD",
+        medicalAllowed: false,
+        hasRamp: false,
+        hasStretcher: false,
         lat,
         lng,
         online: true,
@@ -325,12 +337,22 @@ export class Dispatcher {
 
     const pickup = { lat: b.pickupLat, lng: b.pickupLng };
     const wantClass = normalizeClass(b.vehicleClass);
+    // Krankenfahrt (Phase 15): nur fuer Krankenfahrten freigegebene Fahrer
+    // duerfen ein Angebot erhalten. Ist keiner freigegeben, bleibt der Auftrag
+    // in SUCHE und laeuft nach SEARCH_MAX_MS in KEIN_FAHRER (sicheres Haengen).
+    const needsMedical = !!b.medicalType;
+    // Fahrzeug-Anforderungen (Phase D): Rampe/Tragestuhl zusaetzlich erzwingen.
+    const needsRamp = !!b.requiresRamp;
+    const needsStretcher = !!b.requiresStretcher;
 
     // Kandidaten: ONLINE + FREI ODER (BESETZT + nahe Ziel) und im Radius.
     // Nur Fahrer der angefragten Fahrzeugklasse erhalten ein Angebot (Marktplatz).
     let candidates = this.getLiveDrivers()
       .filter((d) => d.online && d.lat != null && d.lng != null && !declined.has(d.id))
       .filter((d) => normalizeClass(d.vehicleClass) === wantClass)
+      .filter((d) => !needsMedical || d.medicalAllowed)
+      .filter((d) => !needsRamp || d.hasRamp)
+      .filter((d) => !needsStretcher || d.hasStretcher)
       .filter(
         (d) =>
           d.status === "FREI" ||
@@ -345,7 +367,7 @@ export class Dispatcher {
     // Ist es nicht (mehr) frei verfügbar, Markierung löschen und normal weiter.
     if (phaseIndex === 0 && b.requestedDriverId) {
       const td = this.getLiveDrivers().find(
-        (d) => d.id === b.requestedDriverId && d.online && d.lat != null && d.lng != null && d.status === "FREI" && !declined.has(d.id),
+        (d) => d.id === b.requestedDriverId && d.online && d.lat != null && d.lng != null && d.status === "FREI" && !declined.has(d.id) && (!needsMedical || d.medicalAllowed) && (!needsRamp || d.hasRamp) && (!needsStretcher || d.hasStretcher),
       );
       if (td) {
         candidates = [{ d: td, dist: haversineMeters(pickup, { lat: td.lat!, lng: td.lng! }) }];

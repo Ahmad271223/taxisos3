@@ -1,0 +1,66 @@
+# Render Blueprint für TaxiOS (Next.js + Express + Socket.IO + Prisma/Postgres).
+# Deploy: Render → New + → "Blueprint" → dieses Repo wählen.
+# WICHTIG: Dies ist KEINE Static Site, sondern ein Node-Web-Service + Postgres.
+
+databases:
+  - name: taxisos-db
+    plan: free
+    databaseName: taxios
+    user: taxios
+
+services:
+  - type: web
+    name: taxisos3
+    runtime: node
+    plan: free
+    branch: main
+    # devDependencies (tsx, prisma, build-tools) MÜSSEN installiert werden.
+    buildCommand: npm install --include=dev && npx prisma generate && npm run build
+    # Migrationen vor dem Start anwenden, dann den Custom-Server (tsx server.ts) starten.
+    startCommand: npx prisma migrate deploy && npm run start
+    healthCheckPath: /
+    envVars:
+      # DB-Verbindung automatisch aus der oben definierten Postgres-Instanz.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: taxisos-db
+          property: connectionString
+      # Starkes Session-Secret automatisch generieren (sonst crasht Auth in PROD).
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: NODE_VERSION
+        value: "20"
+      - key: ENABLE_SIMULATOR
+        value: "0"
+      - key: REQUIRE_PHONE_VERIFICATION
+        value: "1"
+      - key: SEARCH_MAX_MS
+        value: "180000"
+      - key: NEXT_PUBLIC_PLATFORM_PHONE
+        value: "+49 511 1234567"
+      # ── Optionale Keys: leer = Mock-Modus. Im Render-Dashboard setzen. ──
+      # NEXT_PUBLIC_* werden zur BUILD-Zeit eingebacken -> vor dem Build setzen.
+      - key: NEXT_PUBLIC_MAP_TILES_URL
+        sync: false
+      - key: NEXT_PUBLIC_MAP_TILES_ATTRIB
+        sync: false
+      - key: LOCATIONIQ_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: SUPER_ADMIN_EMAIL
+        sync: false
+      - key: SUPER_ADMIN_PASSWORD
+        sync: false

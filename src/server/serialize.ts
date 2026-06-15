@@ -4,7 +4,7 @@
 import { DRIVER_STATUS_LABEL } from "../lib/status";
 import { parseStops } from "../lib/stops";
 import { vehicleClass as vehicleClassInfo } from "../lib/vehicleClasses";
-import { medicalLabel } from "../lib/medical";
+import { medicalLabel, mobilityLabel, equipmentLabels } from "../lib/medical";
 
 export function iso(d: Date | null | undefined): string | null {
   return d ? new Date(d).toISOString() : null;
@@ -45,7 +45,29 @@ export function driverAdmin(driver: any) {
     vehicleSeats: driver.vehicleSeats ?? 4,
     vehicleClass: driver.vehicleClass ?? "STANDARD",
     vehicleClassLabel: vehicleClassInfo(driver.vehicleClass).label,
+    medicalAllowed: driver.medicalAllowed ?? false,
+    hasRamp: driver.hasRamp ?? false,
+    hasStretcher: driver.hasStretcher ?? false,
     lastSeenAt: iso(driver.lastSeenAt),
+  };
+}
+
+// Krankenfahrt-Details (Phase B) – gemeinsam fuer Booking- und Serien-DTO.
+function medicalDetailsDTO(x: any) {
+  return {
+    patientName: x.patientName ?? null,
+    patientBirthDate: x.patientBirthDate ?? null,
+    mobility: x.mobility ?? null,
+    mobilityLabel: mobilityLabel(x.mobility),
+    companions: x.companions ?? 0,
+    medicalEquipment: x.medicalEquipment ? String(x.medicalEquipment).split(",").filter(Boolean) : [],
+    medicalEquipmentLabels: equipmentLabels(x.medicalEquipment),
+    payerType: x.payerType ?? null,
+    insuranceName: x.insuranceName ?? null,
+    insuranceNumber: x.insuranceNumber ?? null,
+    requiresRamp: x.requiresRamp ?? false,
+    requiresStretcher: x.requiresStretcher ?? false,
+    institutionId: x.institutionId ?? null,
   };
 }
 
@@ -92,6 +114,7 @@ export function recurringDTO(r: any, opts: { upcoming?: any[] } = {}) {
     vehicleClassLabel: vehicleClassInfo(r.vehicleClass).label,
     medicalType: r.medicalType ?? null,
     medicalLabel: medicalLabel(r.medicalType),
+    ...medicalDetailsDTO(r),
     daysOfWeek: r.daysOfWeek,
     dayLabels: dayList,
     timeOfDay: r.timeOfDay,
@@ -125,6 +148,8 @@ export function bookingDTO(b: any, extra: Record<string, any> = {}) {
     recurringId: b.recurringId ?? null,
     medicalType: b.medicalType ?? null,
     medicalLabel: medicalLabel(b.medicalType),
+    ...medicalDetailsDTO(b),
+    returnAt: iso(b.returnAt),
     customerName: b.customerName,
     customerPhone: b.customerPhone,
     pickupAddress: b.pickupAddress,

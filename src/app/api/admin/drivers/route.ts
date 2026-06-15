@@ -28,6 +28,9 @@ const createSchema = z.object({
   vehicleColor: z.string().optional().nullable(),
   vehicleSeats: z.number().int().min(1).max(9).optional(),
   vehicleClass: z.string().optional().nullable(),
+  medicalAllowed: z.boolean().optional(),
+  hasRamp: z.boolean().optional(),
+  hasStretcher: z.boolean().optional(),
 });
 
 export async function POST(req: Request) {
@@ -62,6 +65,9 @@ export async function POST(req: Request) {
       vehicleColor: d.vehicleColor ?? null,
       vehicleSeats: d.vehicleSeats ?? 4,
       vehicleClass: normalizeClass(d.vehicleClass),
+      medicalAllowed: d.medicalAllowed ?? false,
+      hasRamp: d.hasRamp ?? false,
+      hasStretcher: d.hasStretcher ?? false,
       status: "OFFLINE",
     },
   });

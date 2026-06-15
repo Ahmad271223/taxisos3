@@ -76,6 +76,13 @@ export default function PlatformBookingPage({ searchParams }: { searchParams?: {
         <div className="card mt-6 p-6">
           <BookingForm initialVehicleClass={searchParams?.class} initialDriverId={searchParams?.driver} initialDestination={searchParams?.to} />
         </div>
+
+        <div className="mt-6 flex items-center justify-center gap-2 text-[13px] text-ink-500">
+          <span>Klinik, Pflegeheim oder Dialysezentrum?</span>
+          <Link href="/einrichtung" data-testid="to-institution-portal" className="font-bold text-ink-900 underline underline-offset-2 hover:text-brand-600">
+            Einrichtungs-Portal
+          </Link>
+        </div>
       </section>
     </main>
   );

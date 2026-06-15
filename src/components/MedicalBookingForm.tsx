@@ -8,8 +8,18 @@ import { AddressInput } from "@/components/AddressInput";
 import { formatEuro } from "@/lib/format";
 import type { GeocodeResult } from "@/lib/geo";
 import type { MapMarker } from "@/components/Map";
-import { MEDICAL_TYPES } from "@/lib/medical";
+import { MEDICAL_TYPES, MOBILITY_OPTIONS, EQUIPMENT_OPTIONS, PAYER_TYPES } from "@/lib/medical";
 import { VEHICLE_CLASSES } from "@/lib/vehicleClasses";
+
+// Datei -> Base64 (ohne data:-Prefix) für den Dokumenten-Upload (Phase C).
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
 
 const Map = dynamic(() => import("@/components/Map"), { ssr: false });
 
@@ -39,6 +49,65 @@ export function MedicalBookingForm() {
   const [pickup, setPickup] = useState<Addr>({ address: "" });
   const [dest, setDest] = useState<Addr>({ address: "" });
   const [notes, setNotes] = useState("");
+
+  // Phase B: Patient (falls abweichend), Mobilität, Begleitung, Ausstattung, Kostenträger.
+  const [patientDifferent, setPatientDifferent] = useState(false);
+  const [patientName, setPatientName] = useState("");
+  const [patientBirthDate, setPatientBirthDate] = useState("");
+  const [mobility, setMobility] = useState("WALK");
+  const [companions, setCompanions] = useState(0);
+  const [equipment, setEquipment] = useState<Set<string>>(new Set());
+  const [requiresRamp, setRequiresRamp] = useState(false);
+  const [requiresStretcher, setRequiresStretcher] = useState(false);
+  const [payerType, setPayerType] = useState("SELF");
+  const [insuranceName, setInsuranceName] = useState("");
+  const [insuranceNumber, setInsuranceNumber] = useState("");
+  // Phase C: Nachweise (Verordnung/Genehmigung), nach Buchung hochgeladen.
+  const [files, setFiles] = useState<File[]>([]);
+  const [docKind, setDocKind] = useState("VERORDNUNG");
+  // Einzelfahrt: optionale automatische Rückfahrt.
+  const [returnSingle, setReturnSingle] = useState(false);
+  const [returnTimeSingle, setReturnTimeSingle] = useState("");
+
+  function toggleEquip(k: string) {
+    setEquipment((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+  }
+
+  // Gemeinsame Krankenfahrt-Detailfelder fuer beide Submit-Pfade.
+  function medicalDetailFields() {
+    return {
+      patientName: patientDifferent && patientName.trim() ? patientName.trim() : null,
+      patientBirthDate: patientDifferent && patientBirthDate ? patientBirthDate : null,
+      mobility,
+      companions,
+      medicalEquipment: Array.from(equipment),
+      requiresRamp,
+      requiresStretcher,
+      payerType,
+      insuranceName: payerType === "INSURANCE" ? insuranceName.trim() || null : null,
+      insuranceNumber: payerType === "INSURANCE" ? insuranceNumber.trim() || null : null,
+    };
+  }
+
+  // Nachweise nach erfolgreicher Buchung/Serie hochladen (best effort).
+  async function uploadDocuments(ref: { bookingId?: string; recurringId?: string }) {
+    for (const f of files) {
+      try {
+        const dataBase64 = await fileToBase64(f);
+        await fetch("/api/medical/documents", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind: docKind, fileName: f.name, mimeType: f.type || "application/octet-stream", dataBase64, ...ref }),
+        });
+      } catch {
+        /* ein fehlgeschlagener Upload darf die Buchung nicht blockieren */
+      }
+    }
+  }
 
   // Einmalig
   const [date, setDate] = useState("");
@@ -162,6 +231,7 @@ export function MedicalBookingForm() {
     setSubmitting(true);
     let scheduledAt: string | null = null;
     if (date && time) scheduledAt = new Date(`${date}T${time}`).toISOString();
+    const returnAt = returnSingle && date && returnTimeSingle ? new Date(`${date}T${returnTimeSingle}`).toISOString() : null;
     try {
       const res = await fetch("/api/bookings", {
         method: "POST",
@@ -175,8 +245,10 @@ export function MedicalBookingForm() {
           dest: { lat: dest.lat, lng: dest.lng },
           vehicleClass,
           medicalType,
+          ...medicalDetailFields(),
           notes: notes || null,
           scheduledAt,
+          returnAt,
           verificationToken,
         }),
       });
@@ -186,6 +258,7 @@ export function MedicalBookingForm() {
         setSubmitting(false);
         return;
       }
+      if (files.length) await uploadDocuments({ bookingId: data.id });
       router.push(`/verfolgen/${data.id}`);
     } catch {
       setError("Netzwerkfehler. Bitte erneut versuchen.");
@@ -205,6 +278,7 @@ export function MedicalBookingForm() {
           dest: { address: dest.address, lat: dest.lat, lng: dest.lng },
           vehicleClass,
           medicalType,
+          ...medicalDetailFields(),
           daysOfWeek: Array.from(days),
           timeOfDay,
           returnTrip,
@@ -220,6 +294,7 @@ export function MedicalBookingForm() {
         setSubmitting(false);
         return;
       }
+      if (files.length && data.id) await uploadDocuments({ recurringId: data.id });
       router.push("/konto");
     } catch {
       setError("Netzwerkfehler. Bitte erneut versuchen.");
@@ -299,6 +374,91 @@ export function MedicalBookingForm() {
         <p className="text-sm text-ink-600" data-testid="medical-quote">Pro Fahrt ca. <span className="font-extrabold text-ink-900">{formatEuro(quote.priceApprox ?? quote.priceMid)}</span></p>
       )}
 
+      {/* Phase B/C/D: Patient, Mobilität, Ausstattung, Kostenträger, Nachweise */}
+      <details className="rounded-2xl border-2 border-ink-200 bg-white p-4" data-testid="medical-details" open>
+        <summary className="cursor-pointer font-display font-extrabold text-ink-900">Patient &amp; Mobilität</summary>
+        <div className="mt-4 grid gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="label">Mobilität</label>
+              <select className="field" data-testid="medical-mobility" value={mobility} onChange={(e) => setMobility(e.target.value)}>
+                {MOBILITY_OPTIONS.map((m) => <option key={m.key} value={m.key}>{m.icon} {m.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">Begleitpersonen</label>
+              <input className="field" type="number" min={0} max={6} data-testid="medical-companions" value={companions} onChange={(e) => setCompanions(Math.max(0, Math.min(6, Number(e.target.value) || 0)))} />
+            </div>
+          </div>
+
+          <div>
+            <label className="label">Mitzuführende Ausstattung</label>
+            <div className="flex flex-wrap gap-2" data-testid="medical-equipment">
+              {EQUIPMENT_OPTIONS.map((eq) => (
+                <button key={eq.key} type="button" data-testid={`equip-${eq.key}`} onClick={() => toggleEquip(eq.key)}
+                  className={`rounded-xl border-2 px-3 py-2 text-sm font-bold transition ${equipment.has(eq.key) ? "border-brand-500 bg-brand-50 text-ink-900" : "border-ink-200 bg-white text-ink-600"}`}>
+                  {eq.icon} {eq.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="flex items-center gap-2 rounded-xl border-2 border-ink-200 bg-white px-3 py-2 text-sm font-semibold text-ink-700">
+              <input type="checkbox" className="h-5 w-5 accent-brand-500" data-testid="medical-ramp" checked={requiresRamp} onChange={(e) => setRequiresRamp(e.target.checked)} /> 🦽 Rollstuhlrampe nötig
+            </label>
+            <label className="flex items-center gap-2 rounded-xl border-2 border-ink-200 bg-white px-3 py-2 text-sm font-semibold text-ink-700">
+              <input type="checkbox" className="h-5 w-5 accent-brand-500" data-testid="medical-stretcher" checked={requiresStretcher} onChange={(e) => setRequiresStretcher(e.target.checked)} /> 🛏️ Tragestuhl nötig
+            </label>
+          </div>
+
+          <div>
+            <label className="flex items-center gap-2 text-sm font-semibold text-ink-700">
+              <input type="checkbox" data-testid="medical-patient-different" checked={patientDifferent} onChange={(e) => setPatientDifferent(e.target.checked)} /> Patient weicht vom Besteller ab
+            </label>
+            {patientDifferent && (
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <input className="field" data-testid="medical-patient-name" placeholder="Name des Patienten" value={patientName} onChange={(e) => setPatientName(e.target.value)} />
+                <input className="field" type="date" data-testid="medical-patient-birth" value={patientBirthDate} onChange={(e) => setPatientBirthDate(e.target.value)} />
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="label">Kostenträger</label>
+            <div className="grid grid-cols-2 gap-2" data-testid="medical-payer">
+              {PAYER_TYPES.map((p) => (
+                <button key={p.key} type="button" data-testid={`payer-${p.key}`} onClick={() => setPayerType(p.key)}
+                  className={`rounded-xl border-2 px-3 py-2 text-sm font-bold transition ${payerType === p.key ? "border-brand-500 bg-brand-50 text-ink-900" : "border-ink-200 bg-white text-ink-600"}`}>
+                  {p.icon} {p.label}
+                </button>
+              ))}
+            </div>
+            {payerType === "INSURANCE" && (
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <input className="field" data-testid="medical-insurance-name" placeholder="Krankenkasse" value={insuranceName} onChange={(e) => setInsuranceName(e.target.value)} />
+                <input className="field" data-testid="medical-insurance-number" placeholder="Versichertennummer" value={insuranceNumber} onChange={(e) => setInsuranceNumber(e.target.value)} />
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="label">Nachweise (PDF/Foto)</label>
+            <div className="grid gap-2 sm:grid-cols-[180px_1fr]">
+              <select className="field" data-testid="medical-doc-kind" value={docKind} onChange={(e) => setDocKind(e.target.value)}>
+                <option value="VERORDNUNG">Verordnung</option>
+                <option value="GENEHMIGUNG">Genehmigung</option>
+                <option value="REZEPT">Rezept</option>
+                <option value="BESCHEINIGUNG">Arztbescheinigung</option>
+              </select>
+              <input className="field" type="file" multiple accept="application/pdf,image/*" data-testid="medical-docs"
+                onChange={(e) => setFiles(Array.from(e.target.files ?? []))} />
+            </div>
+            {files.length > 0 && <p className="mt-1 text-xs text-ink-500" data-testid="medical-docs-count">{files.length} Datei(en) als {docKind.toLowerCase()} ausgewählt</p>}
+          </div>
+        </div>
+      </details>
+
       {mode === "single" ? (
         <>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -310,6 +470,17 @@ export function MedicalBookingForm() {
               <label className="label">Uhrzeit (optional)</label>
               <input className="field" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
             </div>
+          </div>
+          <div className="rounded-2xl border-2 border-ink-200 bg-white p-3">
+            <label className="flex items-center gap-2 text-sm font-semibold text-ink-700">
+              <input type="checkbox" data-testid="single-return" checked={returnSingle} onChange={(e) => setReturnSingle(e.target.checked)} /> Rückfahrt am selben Tag planen
+            </label>
+            {returnSingle && (
+              <div className="mt-2">
+                <input className="field" type="time" data-testid="single-return-time" value={returnTimeSingle} onChange={(e) => setReturnTimeSingle(e.target.value)} />
+                {!date && <p className="mt-1 text-xs text-amber-600">Bitte oben ein Datum wählen, damit die Rückfahrt geplant werden kann.</p>}
+              </div>
+            )}
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>

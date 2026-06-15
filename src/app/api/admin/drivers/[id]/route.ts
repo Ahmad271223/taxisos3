@@ -15,6 +15,9 @@ const schema = z.object({
   vehicleColor: z.string().optional().nullable(),
   vehicleSeats: z.number().int().min(1).max(9).optional(),
   vehicleClass: z.string().optional().nullable(),
+  medicalAllowed: z.boolean().optional(),
+  hasRamp: z.boolean().optional(),
+  hasStretcher: z.boolean().optional(),
   active: z.boolean().optional(),
 });
 
