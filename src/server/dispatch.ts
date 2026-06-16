@@ -377,6 +377,15 @@ export class Dispatcher {
       }
     }
 
+    // Hotel Smart Fleet Routing: in den ersten Phasen bevorzugt die Whitelist-
+    // Flotte anfragen. Gibt es dort Fahrer im Radius -> nur diese; sonst normaler
+    // Open-Marketplace-Fallback (keine Einschränkung -> Fahrt stockt nie).
+    const preferredCompanies = csvToSet(b.preferredCompanyIds);
+    if (preferredCompanies.size > 0 && phaseIndex <= 1 && !b.requestedDriverId) {
+      const pref = candidates.filter((c) => preferredCompanies.has(c.d.companyId));
+      if (pref.length > 0) candidates = pref;
+    }
+
     if (candidates.length === 0) {
       // Phase ohne Kandidaten: direkt zur naechsten Phase.
       if (previous) clearTimeout(previous.timer);

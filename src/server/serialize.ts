@@ -186,6 +186,7 @@ export function bookingDTO(b: any, extra: Record<string, any> = {}) {
     hotelId: b.hotelId ?? null,
     roomNumber: b.roomNumber ?? null,
     hotelPayment: b.hotelPayment ?? null,
+    isVip: b.isVip ?? false,
     meetGreetFee: b.meetGreetFee ?? null,
     waitMinutes: b.waitMinutes ?? null,
     waitFee: b.waitFee ?? null,

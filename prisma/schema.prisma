@@ -208,6 +208,9 @@ model Booking {
   hotel          Hotel? @relation(fields: [hotelId], references: [id], onDelete: SetNull)
   roomNumber     String?
   hotelPayment   String?   // DIRECT | ROOM | CORPORATE
+  // Hotel-Flotten-Whitelist (CSV bevorzugter Firmen-IDs) + VIP-Layer.
+  preferredCompanyIds String @default("")
+  isVip          Boolean @default(false)
 
   // Hochgeladene Nachweise (Phase C): Verordnung/Genehmigung etc.
   documents      MedicalDocument[]
@@ -559,6 +562,8 @@ model Hotel {
   phone        String?
   address      String?
   active       Boolean  @default(true)
+  // Smart Fleet Routing: bevorzugte Taxifirmen (CSV company-IDs). Leer = offen.
+  preferredCompanyIds String @default("")
 
   bookings     Booking[]
 

@@ -79,6 +79,7 @@ function Dashboard({ hotel, onLogout }: { hotel: Hotel; onLogout: () => void }) 
       <div className="mx-auto grid max-w-3xl gap-4 px-5 py-6">
         <NewGuestRideCard onCreated={loadRides} />
         <RidesCard rides={rides} />
+        <FleetWhitelistCard />
         <ChargeRoomCard />
       </div>
     </main>
@@ -86,7 +87,7 @@ function Dashboard({ hotel, onLogout }: { hotel: Hotel; onLogout: () => void }) 
 }
 
 function NewGuestRideCard({ onCreated }: { onCreated: () => void }) {
-  const empty = { guestName: "", guestPhone: "", roomNumber: "", hotelPayment: "ROOM", vehicleClass: "STANDARD", scheduledAt: "" };
+  const empty = { guestName: "", guestPhone: "", roomNumber: "", hotelPayment: "ROOM", vehicleClass: "STANDARD", scheduledAt: "", isVip: false };
   const [form, setForm] = useState(empty);
   const [pickup, setPickup] = useState<Addr>({ address: "" });
   const [dest, setDest] = useState<Addr>({ address: "" });
@@ -102,7 +103,7 @@ function NewGuestRideCard({ onCreated }: { onCreated: () => void }) {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         guestName: form.guestName, guestPhone: form.guestPhone || null, roomNumber: form.roomNumber || null,
-        hotelPayment: form.hotelPayment, vehicleClass: form.vehicleClass,
+        hotelPayment: form.hotelPayment, vehicleClass: form.vehicleClass, isVip: form.isVip,
         pickup: { address: pickup.address, lat: pickup.lat, lng: pickup.lng },
         dest: { address: dest.address, lat: dest.lat, lng: dest.lng },
         scheduledAt: form.scheduledAt ? new Date(form.scheduledAt).toISOString() : null,
@@ -133,11 +134,15 @@ function NewGuestRideCard({ onCreated }: { onCreated: () => void }) {
         <AddressInput label="Abholung" placeholder="Abholadresse" value={pickup.address} onChange={(t) => setPickup({ address: t })} onSelect={(r: GeocodeResult) => setPickup({ address: r.label, lat: r.lat, lng: r.lng })} />
         <AddressInput label="Ziel" placeholder="Zieladresse" value={dest.address} onChange={(t) => setDest({ address: t })} onSelect={(r: GeocodeResult) => setDest({ address: r.label, lat: r.lat, lng: r.lng })} />
         <div className="grid gap-2 sm:grid-cols-2">
-          <select className="field" value={form.vehicleClass} onChange={(e) => set("vehicleClass", e.target.value)}>
+          <select className="field disabled:opacity-50" disabled={form.isVip} value={form.isVip ? "VIP" : form.vehicleClass} onChange={(e) => set("vehicleClass", e.target.value)}>
             {VEHICLE_CLASSES.map((c) => <option key={c.key} value={c.key}>{c.icon} {c.label}</option>)}
           </select>
           <input className="field" type="datetime-local" value={form.scheduledAt} onChange={(e) => set("scheduledAt", e.target.value)} />
         </div>
+        <label className="flex items-center gap-2 rounded-xl border-2 border-ink-200 bg-white px-3 py-2 text-sm font-semibold text-ink-700">
+          <input type="checkbox" className="h-5 w-5 accent-brand-500" data-testid="hotel-vip" checked={form.isVip} onChange={(e) => set("isVip", e.target.checked)} />
+          <span>⭐ VIP-Fahrt (Luxusklasse, priorisiert)</span>
+        </label>
       </div>
       {msg && <p className="mt-2 text-sm font-semibold text-ink-700" data-testid="hotel-ride-msg">{msg}</p>}
       <button onClick={book} disabled={!ok} data-testid="hotel-book" className="btn-primary mt-3 disabled:opacity-60">{busy ? "Bucht …" : "Fahrt buchen"}</button>
@@ -164,6 +169,37 @@ function RidesCard({ rides }: { rides: any[] }) {
         ))}
         {rides.length === 0 && <p className="text-sm text-ink-400">Noch keine Fahrten gebucht.</p>}
       </div>
+    </div>
+  );
+}
+
+function FleetWhitelistCard() {
+  const [companies, setCompanies] = useState<any[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    fetch("/api/hotels/companies").then((r) => r.json()).then((d) => setCompanies(d.companies ?? [])).catch(() => {});
+    fetch("/api/hotels/settings").then((r) => r.json()).then((d) => setSelected(new Set(d.preferredCompanyIds ?? []))).catch(() => {});
+  }, []);
+  const toggle = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  async function save() {
+    await fetch("/api/hotels/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preferredCompanyIds: Array.from(selected) }) });
+    setSaved(true); setTimeout(() => setSaved(false), 2000);
+  }
+  return (
+    <div className="card p-6" data-testid="hotel-fleet">
+      <h2 className="mb-1 font-display text-lg font-extrabold text-ink-900">Bevorzugte Flotte</h2>
+      <p className="mb-3 text-xs text-ink-500">Markierte Firmen werden bei Hotel-Fahrten zuerst angefragt. Ist keine im Umkreis frei, wird automatisch der nächste verfügbare Wagen vermittelt (Open-Marketplace-Fallback).</p>
+      <div className="grid gap-1.5">
+        {companies.map((c) => (
+          <label key={c.id} className="flex items-center gap-2 rounded-lg bg-ink-50 px-3 py-1.5 text-sm">
+            <input type="checkbox" className="h-4 w-4 accent-brand-500" checked={selected.has(c.id)} onChange={() => toggle(c.id)} data-testid={`fleet-${c.id}`} />
+            <span className="font-semibold text-ink-800">{c.name}</span>
+          </label>
+        ))}
+        {companies.length === 0 && <p className="text-sm text-ink-400">Keine Firmen verfügbar.</p>}
+      </div>
+      {companies.length > 0 && <button onClick={save} data-testid="fleet-save" className="btn-primary mt-3">{saved ? "✓ Gespeichert" : "Whitelist speichern"}</button>}
     </div>
   );
 }

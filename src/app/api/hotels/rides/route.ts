@@ -21,6 +21,7 @@ const schema = z.object({
   pickup: point,
   dest: point,
   vehicleClass: z.string().optional().nullable(),
+  isVip: z.boolean().optional(),
   scheduledAt: z.string().datetime().optional().nullable(),
 });
 
@@ -56,7 +57,9 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: "Bitte Gast, Strecke und Daten angeben." }, { status: 400 });
   const d = parsed.data;
 
-  const vehicleClass = normalizeClass(d.vehicleClass ?? "STANDARD");
+  // VIP-Layer: Luxusfahrzeug (VIP-Klasse) erzwingen.
+  const isVip = d.isVip ?? false;
+  const vehicleClass = isVip ? "VIP" : normalizeClass(d.vehicleClass ?? "STANDARD");
   const pricing = await pricingForSlug(undefined);
   const est = await estimatePriceViaWith([{ lat: d.pickup.lat, lng: d.pickup.lng }, { lat: d.dest.lat, lng: d.dest.lng }], pricing);
   const factor = await classFactorForSlug(undefined, vehicleClass);
@@ -70,6 +73,8 @@ export async function POST(req: Request) {
       hotelId: hotel.id,
       roomNumber: d.roomNumber ?? null,
       hotelPayment: d.hotelPayment ?? "DIRECT",
+      preferredCompanyIds: hotel.preferredCompanyIds ?? "",
+      isVip,
       customerName: d.guestName,
       customerPhone: (d.guestPhone ?? hotel.phone ?? "").trim() || "—",
       pickupAddress: d.pickup.address,
