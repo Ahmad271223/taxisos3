@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { SignaturePad } from "@/components/SignaturePad";
+import { PickupZoneCard } from "@/components/PickupZoneCard";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { getSocket } from "@/lib/socket";
@@ -287,6 +288,9 @@ export function TrackingView({ id }: { id: string }) {
       </header>
 
       <div className="mx-auto grid max-w-3xl gap-4 px-5 py-5">
+        {booking.pickupZone && !["BEENDET", "STORNIERT"].includes(status) && (
+          <PickupZoneCard pickup={booking.pickupZone} role="Abholung am Flughafen" />
+        )}
         {/* Status-Banner */}
         <div
           data-testid="tracking-banner"

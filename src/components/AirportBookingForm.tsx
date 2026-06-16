@@ -7,6 +7,8 @@ import { AddressInput } from "@/components/AddressInput";
 import { LuggageMatrix } from "@/components/LuggageMatrix";
 import { vehicleClass as vehicleClassInfo } from "@/lib/vehicleClasses";
 import { MEET_GREET_LEVELS, meetGreetFee, FREE_WAIT_MIN, WAIT_PER_MIN } from "@/lib/airportExtras";
+import { resolveAirportPickup } from "@/lib/airportZones";
+import { PickupZoneCard } from "@/components/PickupZoneCard";
 import { formatEuro, formatDateTime } from "@/lib/format";
 import type { GeocodeResult } from "@/lib/geo";
 import type { MapMarker } from "@/components/Map";
@@ -385,6 +387,10 @@ export function AirportBookingForm() {
           Wartezeit: erste {FREE_WAIT_MIN} Min nach Ankunft frei, danach {formatEuro(WAIT_PER_MIN)}/Min. Flugverspätungen werden fair berücksichtigt.
         </p>
       </div>
+
+      {direction === "ARRIVAL" && pickup.address && resolveAirportPickup(pickup.address, flight?.terminal) && (
+        <PickupZoneCard pickup={resolveAirportPickup(pickup.address, flight?.terminal)!} />
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
