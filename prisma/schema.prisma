@@ -110,6 +110,10 @@ model Driver {
   // bzw. Tragestuhl. Gating zusaetzlich zur Fahrzeugklasse im Dispatcher.
   hasRamp        Boolean @default(false)
   hasStretcher   Boolean @default(false)
+  // Fahrerqualifikationen (Phase: Fahrerprofil). pScheinUntil leer = nicht hinterlegt.
+  pScheinUntil      String?  // Personenbeförderungsschein gültig bis (ISO "YYYY-MM-DD")
+  wheelchairTrained Boolean @default(false) // Rollstuhlhilfe geschult
+  qualifications    String?  // Sonderqualifikationen (Freitext)
   active       Boolean  @default(true)
 
   bookings     Booking[]

@@ -4,7 +4,7 @@
 import { DRIVER_STATUS_LABEL } from "../lib/status";
 import { parseStops } from "../lib/stops";
 import { vehicleClass as vehicleClassInfo } from "../lib/vehicleClasses";
-import { medicalLabel, mobilityLabel, equipmentLabels } from "../lib/medical";
+import { medicalLabel, mobilityLabel, equipmentLabels, documentValidity } from "../lib/medical";
 
 export function iso(d: Date | null | undefined): string | null {
   return d ? new Date(d).toISOString() : null;
@@ -48,6 +48,10 @@ export function driverAdmin(driver: any) {
     medicalAllowed: driver.medicalAllowed ?? false,
     hasRamp: driver.hasRamp ?? false,
     hasStretcher: driver.hasStretcher ?? false,
+    pScheinUntil: driver.pScheinUntil ?? null,
+    pSchein: documentValidity(driver.pScheinUntil),
+    wheelchairTrained: driver.wheelchairTrained ?? false,
+    qualifications: driver.qualifications ?? null,
     lastSeenAt: iso(driver.lastSeenAt),
   };
 }

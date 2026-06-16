@@ -75,6 +75,9 @@ function NewDriverCard({ onCreated }: { onCreated: (d: any) => void }) {
     medicalAllowed: false,
     hasRamp: false,
     hasStretcher: false,
+    pScheinUntil: "",
+    wheelchairTrained: false,
+    qualifications: "",
   });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -98,7 +101,7 @@ function NewDriverCard({ onCreated }: { onCreated: (d: any) => void }) {
       return;
     }
     onCreated(data.driver);
-    setForm({ name: "", username: "", password: "", phone: "", vehicleModel: "", vehiclePlate: "", vehicleColor: "", vehicleSeats: 4, vehicleClass: "STANDARD", medicalAllowed: false, hasRamp: false, hasStretcher: false });
+    setForm({ name: "", username: "", password: "", phone: "", vehicleModel: "", vehiclePlate: "", vehicleColor: "", vehicleSeats: 4, vehicleClass: "STANDARD", medicalAllowed: false, hasRamp: false, hasStretcher: false, pScheinUntil: "", wheelchairTrained: false, qualifications: "" });
     setOpen(false);
   }
 
@@ -148,6 +151,9 @@ function DriverCard({ driver, onDeleted }: { driver: any; onDeleted: (id: string
     medicalAllowed: driver.medicalAllowed ?? false,
     hasRamp: driver.hasRamp ?? false,
     hasStretcher: driver.hasStretcher ?? false,
+    pScheinUntil: driver.pScheinUntil ?? "",
+    wheelchairTrained: driver.wheelchairTrained ?? false,
+    qualifications: driver.qualifications ?? "",
   });
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -208,6 +214,7 @@ function DriverCard({ driver, onDeleted }: { driver: any; onDeleted: (id: string
           {driver.status}
         </span>
       </div>
+      <div className="mb-3 flex flex-wrap gap-2"><PScheinChip driver={driver} /></div>
       <div className="grid gap-3">
         <Field testid={`driver-${driver.username}-name`} label="Name" value={form.name} onChange={(v) => set("name", v)} />
         <Field testid={`driver-${driver.username}-phone`} label="Telefon" value={form.phone} onChange={(v) => set("phone", v)} />
@@ -292,8 +299,29 @@ function MedicalToggles({ form, set, prefix }: { form: any; set: (k: string, v: 
           <CheckToggle testid={`${prefix}-stretcher`} label="🛏️ Tragestuhl" checked={!!form.hasStretcher} onChange={(v) => set("hasStretcher", v)} />
         </div>
       )}
+      <div className="grid gap-2 rounded-xl border-2 border-ink-200 bg-white p-3">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-ink-400">Qualifikationen</p>
+        <label className="grid gap-1 text-xs font-semibold text-ink-600">
+          P-Schein gültig bis
+          <input className="field" type="date" data-testid={`${prefix}-pschein`} value={form.pScheinUntil ?? ""} onChange={(e) => set("pScheinUntil", e.target.value)} />
+        </label>
+        <CheckToggle testid={`${prefix}-wheelchair-trained`} label="♿ Rollstuhlhilfe geschult" checked={!!form.wheelchairTrained} onChange={(v) => set("wheelchairTrained", v)} />
+        <input className="field" data-testid={`${prefix}-quals`} placeholder="Sonderqualifikationen (optional)" value={form.qualifications ?? ""} onChange={(e) => set("qualifications", e.target.value)} />
+      </div>
     </div>
   );
+}
+
+function PScheinChip({ driver }: { driver: any }) {
+  if (!driver.pScheinUntil) {
+    return <span className="inline-flex items-center gap-1 rounded-full bg-ink-100 px-2 py-0.5 text-[10px] font-bold text-ink-500">P-Schein: fehlt</span>;
+  }
+  const s = driver.pSchein?.status;
+  const cfg =
+    s === "EXPIRED" ? { dot: "🔴", cls: "bg-red-100 text-red-700", txt: "P-Schein abgelaufen" }
+    : s === "EXPIRING" ? { dot: "🟡", cls: "bg-amber-100 text-amber-800", txt: `P-Schein: ${driver.pSchein.days} T.` }
+    : { dot: "🟢", cls: "bg-green-100 text-green-800", txt: "P-Schein gültig" };
+  return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${cfg.cls}`}>{cfg.dot} {cfg.txt}</span>;
 }
 
 function Field({ label, value, onChange, type = "text", testid }: { label: string; value: string; onChange: (v: string) => void; type?: string; testid?: string }) {

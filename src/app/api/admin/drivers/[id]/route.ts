@@ -18,6 +18,9 @@ const schema = z.object({
   medicalAllowed: z.boolean().optional(),
   hasRamp: z.boolean().optional(),
   hasStretcher: z.boolean().optional(),
+  pScheinUntil: z.string().max(20).optional().nullable(),
+  wheelchairTrained: z.boolean().optional(),
+  qualifications: z.string().max(300).optional().nullable(),
   active: z.boolean().optional(),
 });
 
@@ -41,8 +44,10 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (!parsed.success) {
     return NextResponse.json({ error: "Ungültige Daten" }, { status: 400 });
   }
-  const data = { ...parsed.data };
-  if (data.vehicleClass != null) data.vehicleClass = normalizeClass(data.vehicleClass);
+  // vehicleClass darf nicht null an Prisma (Spalte ist non-null); null = nicht ändern.
+  const { vehicleClass, ...rest } = parsed.data;
+  const data: any = { ...rest };
+  if (vehicleClass != null) data.vehicleClass = normalizeClass(vehicleClass);
   const driver = await prisma.driver.update({ where: { id: params.id }, data });
   return NextResponse.json({ driver: driverAdmin(driver) });
 }

@@ -31,6 +31,9 @@ const createSchema = z.object({
   medicalAllowed: z.boolean().optional(),
   hasRamp: z.boolean().optional(),
   hasStretcher: z.boolean().optional(),
+  pScheinUntil: z.string().max(20).optional().nullable(),
+  wheelchairTrained: z.boolean().optional(),
+  qualifications: z.string().max(300).optional().nullable(),
 });
 
 export async function POST(req: Request) {
@@ -68,6 +71,9 @@ export async function POST(req: Request) {
       medicalAllowed: d.medicalAllowed ?? false,
       hasRamp: d.hasRamp ?? false,
       hasStretcher: d.hasStretcher ?? false,
+      pScheinUntil: d.pScheinUntil ?? null,
+      wheelchairTrained: d.wheelchairTrained ?? false,
+      qualifications: d.qualifications ?? null,
       status: "OFFLINE",
     },
   });
