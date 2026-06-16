@@ -68,6 +68,7 @@ function Dashboard({ host, onLogout }: { host: Host; onLogout: () => void }) {
         <NewPromoCard onCreated={load} />
         <PromoListCard promos={promos} />
         <ZonesCard />
+        <CorporateCard />
       </div>
     </main>
   );
@@ -148,6 +149,103 @@ function ZonesCard() {
           </div>
         ))}
         {zones.length === 0 && <p className="text-sm text-ink-400">Noch keine Sammelpunkte.</p>}
+      </div>
+    </div>
+  );
+}
+
+function euro(cents: number) {
+  return (cents / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" });
+}
+
+// Lädt die QR-Lib erst bei Bedarf clientseitig (kein externer Dienst, kein Leak).
+function QrImage({ url }: { url: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let on = true;
+    import("qrcode").then((QR) => QR.toDataURL(url, { width: 240, margin: 1 }).then((d) => { if (on) setSrc(d); })).catch(() => {});
+    return () => { on = false; };
+  }, [url]);
+  if (!src) return <div className="grid h-[240px] w-[240px] place-items-center rounded-xl bg-ink-50 text-xs text-ink-400">QR …</div>;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt="QR-Code" width={240} height={240} className="rounded-xl border border-ink-100" />;
+}
+
+function CorporateCard() {
+  const [codes, setCodes] = useState<any[]>([]);
+  const [form, setForm] = useState({ label: "", budgetEuro: "", maxRides: "", perRideEuro: "", validUntil: "" });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const load = useCallback(() => fetch("/api/events/corporate").then((r) => r.json()).then((d) => setCodes(d.codes ?? [])).catch(() => {}), []);
+  useEffect(() => { load(); }, [load]);
+
+  async function create() {
+    setBusy(true); setMsg(null);
+    const res = await fetch("/api/events/corporate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        label: form.label || null,
+        budgetEuro: form.budgetEuro ? Number(form.budgetEuro) : null,
+        maxRides: form.maxRides ? Number(form.maxRides) : null,
+        perRideEuro: form.perRideEuro ? Number(form.perRideEuro) : null,
+        validUntil: form.validUntil || null,
+      }),
+    });
+    const d = await res.json(); setBusy(false);
+    if (!res.ok) return setMsg(d.error ?? "Fehlgeschlagen.");
+    setMsg(`✓ Code ${d.code.code} erstellt.`); setForm({ label: "", budgetEuro: "", maxRides: "", perRideEuro: "", validUntil: "" }); setOpenId(d.code.id); load();
+  }
+
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+
+  return (
+    <div className="card p-6" data-testid="event-corporate">
+      <h2 className="mb-1 font-display text-lg font-extrabold text-ink-900">Firmenmobilität · QR-Codes</h2>
+      <p className="mb-3 text-xs text-ink-500">Gib einen QR-Code aus (Einladung, Badge, Aushang). Wer ihn scannt, bucht Fahrten, die euer Firmenkonto übernimmt – gedeckelt über Budget, Anzahl und Max-Betrag pro Fahrt.</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <input className="field sm:col-span-2" data-testid="corp-label" placeholder="Bezeichnung (z. B. Gäste IAA 2026)" value={form.label} onChange={(e) => set("label", e.target.value)} />
+        <label className="grid gap-1 text-xs text-ink-500">Gesamtbudget € (optional)<input className="field" type="number" data-testid="corp-budget" placeholder="z. B. 2000" value={form.budgetEuro} onChange={(e) => set("budgetEuro", e.target.value)} /></label>
+        <label className="grid gap-1 text-xs text-ink-500">Max. Fahrten (optional)<input className="field" type="number" data-testid="corp-maxrides" placeholder="z. B. 100" value={form.maxRides} onChange={(e) => set("maxRides", e.target.value)} /></label>
+        <label className="grid gap-1 text-xs text-ink-500">Max. € pro Fahrt (optional)<input className="field" type="number" data-testid="corp-perride" placeholder="z. B. 60" value={form.perRideEuro} onChange={(e) => set("perRideEuro", e.target.value)} /></label>
+        <label className="grid gap-1 text-xs text-ink-500">Gültig bis (optional)<input className="field" type="date" value={form.validUntil} onChange={(e) => set("validUntil", e.target.value)} /></label>
+      </div>
+      {msg && <p className="mt-2 text-sm font-semibold text-ink-700" data-testid="corp-msg">{msg}</p>}
+      <button onClick={create} disabled={busy} data-testid="corp-save" className="btn-primary mt-3 disabled:opacity-60">{busy ? "…" : "QR-Code erstellen"}</button>
+
+      <div className="mt-4 grid gap-2">
+        {codes.map((c) => {
+          const link = `${origin}/m/${c.code}`;
+          const open = openId === c.id;
+          return (
+            <div key={c.id} className="rounded-xl border border-ink-100 bg-ink-50 p-3" data-testid={`corp-${c.code}`}>
+              <div className="flex items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="font-mono text-base font-extrabold tracking-widest text-ink-900">{c.code}</span>
+                  {c.label && <span className="ml-2 text-sm text-ink-600">{c.label}</span>}
+                </span>
+                <button onClick={() => setOpenId(open ? null : c.id)} className="shrink-0 text-sm font-bold text-brand-700 hover:underline">{open ? "Schließen" : "QR anzeigen"}</button>
+              </div>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-ink-500">
+                <span>Fahrten: {c.usedRides}{c.maxRides ? ` / ${c.maxRides}` : " (unbegrenzt)"}</span>
+                <span>Budget: {euro(c.usedCents)}{c.budgetCents != null ? ` / ${euro(c.budgetCents)}` : " (unbegrenzt)"}</span>
+                {c.perRideCents != null && <span>max. {euro(c.perRideCents)}/Fahrt</span>}
+                {c.validUntil && <span>gültig bis {c.validUntil}</span>}
+              </div>
+              {open && (
+                <div className="mt-3 grid place-items-center gap-2">
+                  <QrImage url={link} />
+                  <div className="flex w-full items-center gap-2">
+                    <input readOnly className="field flex-1 text-xs" value={link} onFocus={(e) => e.currentTarget.select()} />
+                    <button onClick={() => navigator.clipboard?.writeText(link).catch(() => {})} className="btn-ghost shrink-0 text-sm">Link kopieren</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {codes.length === 0 && <p className="text-sm text-ink-400">Noch keine QR-Codes.</p>}
       </div>
     </div>
   );

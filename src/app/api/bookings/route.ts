@@ -7,6 +7,7 @@ import { normalizeClass } from "@/lib/vehicleClasses";
 import { airportPickupTime } from "@/lib/flights";
 import { meetGreetFee } from "@/lib/airportExtras";
 import { promoUsable, promoDiscountAmount } from "@/lib/promo";
+import { normalizeCorporateCode, corporateUsable, corporateReasonText } from "@/lib/corporate";
 import { normalizeMedicalType, medicalDetailsSchema, medicalDetailsData } from "@/lib/medical";
 import { serializeStops } from "@/lib/stops";
 import { authorizePayment, paymentEnabled, retrieveIntent } from "@/lib/stripe";
@@ -61,6 +62,8 @@ const schema = z.object({
   meetGreet: z.enum(["BASIC", "TERMINAL", "PREMIUM"]).optional().nullable(),
   // Event-Promo-Code (Mass Mobility).
   promoCode: z.string().max(30).optional().nullable(),
+  // QR-Firmenmobilität: Mobilitäts-Code, dessen Firmenkonto die Fahrt übernimmt.
+  corporateCode: z.string().max(40).optional().nullable(),
   paymentMethod: z.enum(["CASH", "CARD"]).optional(),
   // Nachweis der Gast-Telefon-Verifizierung (Phase 3h).
   verificationToken: z.string().optional().nullable(),
@@ -165,6 +168,30 @@ export async function POST(req: Request) {
   }
   const priceApproxNet = Math.max(0, Math.round((priceApprox - promoDiscount) * 100) / 100);
 
+  // QR-Firmenmobilität: ist ein gültiger Firmen-Code dabei, übernimmt das
+  // Firmenkonto die Fahrt (gedeckelt über Budget/Anzahl/Pro-Fahrt-Limit). Der
+  // geschätzte Endpreis wird gegen das verbleibende Budget geprüft und verbucht.
+  let corporateCode: string | null = null;
+  let corporatePayer: string | null = null;
+  let corporateFareCents = 0;
+  if (d.corporateCode) {
+    const cc = await prisma.corporateCode.findUnique({
+      where: { code: normalizeCorporateCode(d.corporateCode) },
+      include: { eventHost: { select: { name: true } } },
+    });
+    corporateFareCents = Math.round(priceApproxNet * 100);
+    const check = cc ? corporateUsable(cc, corporateFareCents) : { ok: false as const, reason: undefined };
+    if (!cc || !check.ok) {
+      return NextResponse.json(
+        { error: cc ? corporateReasonText(check.reason) : "Dieser Firmen-Code ist unbekannt.", code: "CORPORATE_INVALID" },
+        { status: 402 },
+      );
+    }
+    corporateCode = cc.code;
+    corporatePayer = cc.eventHost.name;
+  }
+  const corporateActive = corporateCode != null;
+
   // Flughafen-Modul (Phase 14): bei ANKUNFT ergibt sich die Abholzeit aus der
   // geplanten Landung + Verspätung + Gepäckpuffer. Sonst gilt die gewählte Zeit.
   const flightScheduledAt = d.flightScheduledAt ? new Date(d.flightScheduledAt) : null;
@@ -176,8 +203,9 @@ export async function POST(req: Request) {
   const isScheduled = !!scheduledAt && scheduledAt.getTime() > Date.now() + 60_000;
 
   // Kartenzahlung (Authorize-then-Capture). Belastet wird erst nach Fahrtende.
-  const paymentMethod = d.paymentMethod ?? "CASH";
-  let paymentStatus = "OFFEN";
+  // Firmen-Code aktiv -> Zahlart FIRMA (Firmenkonto deckt die Fahrt, kein Karten-Hold).
+  const paymentMethod = corporateActive ? "FIRMA" : (d.paymentMethod ?? "CASH");
+  let paymentStatus = corporateActive ? "FIRMA" : "OFFEN";
   let paymentRef: string | null = null;
   let priceAuthorized: number | null = null;
   if (paymentMethod === "CARD") {
@@ -227,6 +255,9 @@ export async function POST(req: Request) {
       vehicleClass,
       medicalType: normalizeMedicalType(d.medicalType),
       ...medicalDetailsData(d),
+      ...(corporateActive ? { payerType: "FIRMA" } : {}),
+      corporateCode,
+      corporatePayer,
       returnAt: d.returnAt ? new Date(d.returnAt) : null,
       institutionId: d.institutionId ?? null,
       requestedDriverId: d.requestedDriverId ?? null,
@@ -257,6 +288,13 @@ export async function POST(req: Request) {
       priceAuthorized,
     },
   });
+
+  // Firmen-Mobilitäts-Kontingent verbuchen (Anzahl + geschätzte Summe in Cent).
+  if (corporateActive && corporateCode) {
+    await prisma.corporateCode
+      .update({ where: { code: corporateCode }, data: { usedRides: { increment: 1 }, usedCents: { increment: corporateFareCents } } })
+      .catch(() => {});
+  }
 
   if (!isScheduled) {
     getDispatcher()?.dispatchBooking(booking.id).catch(() => {});

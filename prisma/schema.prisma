@@ -308,9 +308,13 @@ model Booking {
   ratingComment  String?
 
   // Zahlung
-  paymentMethod  String   @default("CASH") // CASH | CARD
-  paymentStatus  String   @default("OFFEN") // OFFEN | AUTORISIERT | BEZAHLT | FEHLGESCHLAGEN | STORNIERT
+  paymentMethod  String   @default("CASH") // CASH | CARD | FIRMA
+  paymentStatus  String   @default("OFFEN") // OFFEN | AUTORISIERT | BEZAHLT | FEHLGESCHLAGEN | STORNIERT | FIRMA
   paymentRef     String?  // Stripe PaymentIntent o.ae.
+
+  // QR-Firmenmobilität: per QR-Code eingelöstes Firmenkonto übernimmt die Fahrt.
+  corporateCode  String?  // eingelöster Mobilitäts-Code
+  corporatePayer String?  // Name der zahlenden Firma (für Fahrer/Beleg)
 
   assignedAt     DateTime?
   acceptedAt     DateTime?
@@ -565,11 +569,36 @@ model EventHost {
   phone        String?
   active       Boolean  @default(true)
 
-  promos       PromoCode[]
-  zones        EventZone[]
+  promos          PromoCode[]
+  zones           EventZone[]
+  corporateCodes  CorporateCode[]
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// QR-Firmenmobilität: ein Mobilitäts-Code, den die Firma als QR ausgibt. Gäste/
+// Mitarbeiter scannen ihn und buchen Fahrten, die das Firmenkonto übernimmt –
+// gedeckelt über Budget, Anzahl Fahrten und/oder Max-Betrag pro Fahrt.
+model CorporateCode {
+  id            String   @id @default(cuid())
+  eventHostId   String
+  eventHost     EventHost @relation(fields: [eventHostId], references: [id], onDelete: Cascade)
+
+  code          String   @unique // Token im QR-Link, z. B. "FX7K2P9A"
+  label         String?            // z. B. "Gäste IAA 2026", "Außendienst"
+  budgetCents   Int?               // optionales Gesamtbudget (Cent), null = unbegrenzt
+  maxRides      Int?               // optionale max. Anzahl Fahrten
+  perRideCents  Int?               // optionaler Max-Betrag pro Fahrt (Cent)
+  validUntil    String?            // ISO "YYYY-MM-DD"
+  active        Boolean  @default(true)
+
+  usedRides     Int      @default(0)
+  usedCents     Int      @default(0) // bereits verbuchte Summe (Cent)
+
+  createdAt     DateTime @default(now())
+
+  @@index([eventHostId])
 }
 
 // Geo-Fenced Pickup-Zone (virtueller Taxistand) eines Events: Abholungen im

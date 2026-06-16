@@ -657,7 +657,14 @@ export function TrackingView({ id }: { id: string }) {
         {/* Zahlung (Phase 2g) */}
         <div className="card p-5" data-testid="payment-card">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink-500">Zahlung</h2>
-          {!isCard ? (
+          {booking.paymentMethod === "FIRMA" ? (
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="text-ink-600">Firmenmobilität{booking.corporatePayer ? ` · ${booking.corporatePayer}` : ""}</span>
+              <span className="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-xs font-extrabold text-green-800" data-testid="payment-status">
+                Von Firma übernommen
+              </span>
+            </div>
+          ) : !isCard ? (
             <div className="flex items-center justify-between text-sm">
               <span className="text-ink-600">Barzahlung beim Fahrer</span>
               <span className="font-bold text-ink-900" data-testid="payment-status">

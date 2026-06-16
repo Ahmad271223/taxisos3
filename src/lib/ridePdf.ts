@@ -92,7 +92,7 @@ export async function rideReceiptPdf(d: RideReceiptData): Promise<Uint8Array> {
   row("Fahrzeug", d.vehicleClassLabel);
   if (d.driverName) row("Fahrer", `${d.driverName}${d.plate ? " · " + d.plate : ""}`);
   if (d.distanceMeters != null) row("Strecke", `${(d.distanceMeters / 1000).toLocaleString("de-DE", { maximumFractionDigits: 1 })} km`);
-  row("Zahlart", d.paymentMethod === "CARD" ? "Karte" : "Barzahlung");
+  row("Zahlart", d.paymentMethod === "CARD" ? "Karte" : d.paymentMethod === "FIRMA" ? "Firmenkonto" : "Barzahlung");
 
   // Summe (Personenbeförderung: 7 % USt enthalten)
   y -= 6;

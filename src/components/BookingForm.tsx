@@ -69,6 +69,26 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickup.lat, pickup.lng]);
 
+  // QR-Firmenmobilität: kam der Gast über einen Firmen-QR (?corp=CODE), Code
+  // validieren. Gültig -> Zahlart auf „Firma" und Hinweis-Banner anzeigen.
+  const [corp, setCorp] = useState<{ code: string; company: string; label?: string | null } | null>(null);
+  const [corpError, setCorpError] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const code = new URLSearchParams(window.location.search).get("corp");
+    if (!code) return;
+    let cancelled = false;
+    fetch(`/api/corporate/${encodeURIComponent(code)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        if (d?.valid) setCorp({ code: code.toUpperCase(), company: d.company, label: d.label });
+        else setCorpError(d?.reason ?? "Dieser Firmen-Code ist nicht gültig.");
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   async function checkPromo() {
     const code = promoCode.trim().toUpperCase();
     if (!code) return;
@@ -421,6 +441,7 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
           scheduledAt,
           paymentMethod: payment,
           promoCode: promoInfo?.valid ? promoCode.trim().toUpperCase() : null,
+          corporateCode: corp?.code ?? null,
           verificationToken,
           paymentIntentId: paymentIntentId ?? null,
         }),
@@ -495,10 +516,20 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
         {/* Zahlungsart */}
         <div>
           <p className="eyebrow mb-2">Zahlungsart</p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <PaymentTile selected={payment === "CASH"} onClick={() => setPayment("CASH")} testid="pay-cash" title="Barzahlung" desc="Beim Fahrer bezahlen" icon="cash" />
-            <PaymentTile selected={payment === "CARD"} onClick={() => setPayment("CARD")} testid="pay-card" title="Karte (Online)" desc="Nach der Fahrt per Link" icon="card" />
-          </div>
+          {corp ? (
+            <div className="rounded-2xl border-2 border-green-300 bg-green-50 p-4" data-testid="corp-banner">
+              <p className="font-extrabold text-green-900">🚕 Fahrt wird übernommen von {corp.company}</p>
+              <p className="mt-0.5 text-sm text-green-800">{corp.label ? `${corp.label} · ` : ""}Sie zahlen nichts – die Kosten trägt das Firmenkonto (Code {corp.code}).</p>
+            </div>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <PaymentTile selected={payment === "CASH"} onClick={() => setPayment("CASH")} testid="pay-cash" title="Barzahlung" desc="Beim Fahrer bezahlen" icon="cash" />
+              <PaymentTile selected={payment === "CARD"} onClick={() => setPayment("CARD")} testid="pay-card" title="Karte (Online)" desc="Nach der Fahrt per Link" icon="card" />
+            </div>
+          )}
+          {corpError && !corp && (
+            <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800" data-testid="corp-error">{corpError}</p>
+          )}
         </div>
 
         {/* Telefon-Verifizierung (Phase 3h) – entfällt für bestätigte Kontonummer */}
