@@ -25,6 +25,7 @@ import { computeCommission } from "../lib/commission";
 import { bookingRoutePoints, parseStops, serializeStops, type Stop } from "../lib/stops";
 import { waitCharge } from "../lib/airportExtras";
 import { capturePayment, voidPayment } from "../lib/stripe";
+import { settleCorporateComplete, releaseCorporate } from "./corporateSettle";
 import { bookingDTO, driverAdmin } from "./serialize";
 
 const PHASE_DURATION_MS = 15_000;
@@ -719,6 +720,9 @@ export class Dispatcher {
       this.driverActiveBookingDest.delete(driverId);
       this.driverNearCompletion.delete(driverId);
 
+      // QR-Firmenmobilität: Hold auf den tatsächlichen Endpreis abrechnen.
+      await settleCorporateComplete(b, fare);
+
       // Bonus-/Punktesystem (Phase 18): 1 Punkt je vollem Euro Fahrpreis.
       if (b.customerId && fare > 0) {
         await prisma.customer
@@ -765,6 +769,8 @@ export class Dispatcher {
       await prisma.cancellationLog.create({
         data: { bookingId, actorType: "DRIVER", actorId: driverId },
       });
+      // QR-Firmenmobilität: gebuchten Hold + Fahrt wieder freigeben.
+      await releaseCorporate(b);
       this.driverActiveBooking.delete(driverId);
       this.driverActiveBookingDest.delete(driverId);
       this.driverNearCompletion.delete(driverId);
@@ -837,6 +843,8 @@ export class Dispatcher {
     await prisma.cancellationLog.create({
       data: { bookingId, actorType, reason: opts.reason ?? null },
     });
+    // QR-Firmenmobilität: gebuchten Hold + Fahrt wieder freigeben.
+    await releaseCorporate(b);
     if (b.driverId) {
       // War es eine reservierte Folgefahrt? Dann nicht den aktiven Status veraendern.
       if (this.driverReservedBooking.get(b.driverId) === bookingId) {

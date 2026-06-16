@@ -258,6 +258,7 @@ export async function POST(req: Request) {
       ...(corporateActive ? { payerType: "FIRMA" } : {}),
       corporateCode,
       corporatePayer,
+      corporateSettledCents: corporateActive ? corporateFareCents : null,
       returnAt: d.returnAt ? new Date(d.returnAt) : null,
       institutionId: d.institutionId ?? null,
       requestedDriverId: d.requestedDriverId ?? null,

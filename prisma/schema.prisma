@@ -315,6 +315,9 @@ model Booking {
   // QR-Firmenmobilität: per QR-Code eingelöstes Firmenkonto übernimmt die Fahrt.
   corporateCode  String?  // eingelöster Mobilitäts-Code
   corporatePayer String?  // Name der zahlenden Firma (für Fahrer/Beleg)
+  // Aktuell auf das Firmen-Budget gebuchter Betrag (Cent): beim Buchen der
+  // geschätzte Preis (Hold), nach Fahrtende der Endpreis, bei Storno 0.
+  corporateSettledCents Int?
 
   assignedAt     DateTime?
   acceptedAt     DateTime?
