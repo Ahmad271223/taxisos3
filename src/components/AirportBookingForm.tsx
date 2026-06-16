@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { AddressInput } from "@/components/AddressInput";
+import { LuggageMatrix } from "@/components/LuggageMatrix";
+import { vehicleClass as vehicleClassInfo } from "@/lib/vehicleClasses";
 import { formatEuro, formatDateTime } from "@/lib/format";
 import type { GeocodeResult } from "@/lib/geo";
 import type { MapMarker } from "@/components/Map";
@@ -33,6 +35,7 @@ export function AirportBookingForm() {
   const [flightError, setFlightError] = useState<string | null>(null);
 
   const [passengers, setPassengers] = useState(1);
+  const [vehicleClass, setVehicleClass] = useState("STANDARD");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [quote, setQuote] = useState<any | null>(null);
@@ -183,6 +186,7 @@ export function AirportBookingForm() {
       destAddress: dest.address,
       dest: { lat: dest.lat, lng: dest.lng },
       passengers,
+      vehicleClass,
       flightNumber: flightNumber || null,
       flightDirection: direction,
       terminal: flight?.terminal ?? null,
@@ -343,6 +347,12 @@ export function AirportBookingForm() {
           <label className="label">Personen</label>
           <input className="field" type="number" min={1} max={8} value={passengers} onChange={(e) => setPassengers(Math.max(1, Number(e.target.value)))} />
         </div>
+      </div>
+
+      <div>
+        <label className="label">Gepäck (für passende Fahrzeugwahl)</label>
+        <LuggageMatrix passengers={passengers} onRecommend={setVehicleClass} />
+        <p className="mt-1 text-xs text-ink-500" data-testid="airport-vclass">Fahrzeug: {vehicleClassInfo(vehicleClass).icon} {vehicleClassInfo(vehicleClass).label}</p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
