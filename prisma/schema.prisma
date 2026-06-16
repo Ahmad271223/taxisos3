@@ -252,6 +252,12 @@ model Booking {
   flightScheduledAt DateTime?
   flightDelayMinutes Int      @default(0)
 
+  // Airport-Extras: Meet & Greet Service-Stufe + Wartezeit-Fairpreis.
+  meetGreet      String?   // BASIC | TERMINAL | PREMIUM
+  meetGreetFee   Float?    // Aufschlag für den Service (EUR)
+  waitMinutes    Int?      // abgerechnete Wartezeit (über dem Freikontingent)
+  waitFee        Float?    // Wartezeit-Gebühr (EUR)
+
   // Schaetzung / Preis
   distanceMeters Int?
   durationSeconds Int?

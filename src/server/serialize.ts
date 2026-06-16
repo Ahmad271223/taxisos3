@@ -5,6 +5,7 @@ import { DRIVER_STATUS_LABEL } from "../lib/status";
 import { parseStops } from "../lib/stops";
 import { vehicleClass as vehicleClassInfo } from "../lib/vehicleClasses";
 import { medicalLabel, mobilityLabel, equipmentLabels, documentValidity } from "../lib/medical";
+import { meetGreetLabel } from "../lib/airportExtras";
 
 export function iso(d: Date | null | undefined): string | null {
   return d ? new Date(d).toISOString() : null;
@@ -178,6 +179,11 @@ export function bookingDTO(b: any, extra: Record<string, any> = {}) {
     flightStatus: b.flightStatus ?? null,
     flightScheduledAt: iso(b.flightScheduledAt),
     flightDelayMinutes: b.flightDelayMinutes ?? 0,
+    meetGreet: b.meetGreet ?? null,
+    meetGreetLabel: meetGreetLabel(b.meetGreet),
+    meetGreetFee: b.meetGreetFee ?? null,
+    waitMinutes: b.waitMinutes ?? null,
+    waitFee: b.waitFee ?? null,
     distanceMeters: b.distanceMeters ?? null,
     durationSeconds: b.durationSeconds ?? null,
     priceMin: b.priceMin ?? null,

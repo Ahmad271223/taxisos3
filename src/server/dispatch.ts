@@ -23,6 +23,7 @@ import { pricingForSlug, classFactorForCompanyId, applyClassFactor } from "../li
 import { normalizeClass } from "../lib/vehicleClasses";
 import { computeCommission } from "../lib/commission";
 import { bookingRoutePoints, parseStops, serializeStops, type Stop } from "../lib/stops";
+import { waitCharge } from "../lib/airportExtras";
 import { capturePayment, voidPayment } from "../lib/stripe";
 import { bookingDTO, driverAdmin } from "./serialize";
 
@@ -659,8 +660,13 @@ export class Dispatcher {
         data: { status: "AKTIV", trackingStatus: "FAHRT_LAEUFT", startedAt: new Date() },
       });
     } else if (action === "complete") {
-      // Endpreis: priceExact (nach Annahme festgelegt) > priceMax > priceMin
-      const fare = b.priceExact ?? b.priceMax ?? b.priceMin ?? 0;
+      // Endpreis: Basisfahrpreis + Meet&Greet-Aufschlag + Wartezeit (Fairpreis).
+      // priceMax/priceMin enthalten den Meet&Greet-Aufschlag bereits, priceExact
+      // nicht -> Basis konsistent normalisieren, Aufschlag genau einmal addieren.
+      const wait = waitCharge(b.arrivedAt, b.startedAt);
+      const mgFee = b.meetGreetFee ?? 0;
+      const baseFare = b.priceExact != null ? b.priceExact : Math.max(0, (b.priceMax ?? b.priceMin ?? 0) - mgFee);
+      const fare = Math.round((baseFare + mgFee + wait.fee) * 100) / 100;
       // Provision basierend auf Firma (Tier) berechnen.
       let platformFeeRate: number | null = null;
       let platformFee: number | null = null;
@@ -691,6 +697,8 @@ export class Dispatcher {
           trackingStatus: "BEENDET",
           completedAt: new Date(),
           fare,
+          waitMinutes: wait.minutes || null,
+          waitFee: wait.fee || null,
           platformFeeRate,
           platformFee,
           companyNet,

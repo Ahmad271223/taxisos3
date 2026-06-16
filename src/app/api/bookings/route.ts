@@ -5,6 +5,7 @@ import { estimatePriceViaWith } from "@/lib/geo";
 import { pricingForSlug, classFactorForSlug, applyClassFactor } from "@/lib/pricing";
 import { normalizeClass } from "@/lib/vehicleClasses";
 import { airportPickupTime } from "@/lib/flights";
+import { meetGreetFee } from "@/lib/airportExtras";
 import { normalizeMedicalType, medicalDetailsSchema, medicalDetailsData } from "@/lib/medical";
 import { serializeStops } from "@/lib/stops";
 import { authorizePayment, paymentEnabled, retrieveIntent } from "@/lib/stripe";
@@ -55,6 +56,8 @@ const schema = z.object({
   flightStatus: z.string().max(20).optional().nullable(),
   flightScheduledAt: z.string().datetime().optional().nullable(),
   flightDelayMinutes: z.number().int().min(0).max(2880).optional().nullable(),
+  // Airport Meet & Greet Service-Stufe.
+  meetGreet: z.enum(["BASIC", "TERMINAL", "PREMIUM"]).optional().nullable(),
   paymentMethod: z.enum(["CASH", "CARD"]).optional(),
   // Nachweis der Gast-Telefon-Verifizierung (Phase 3h).
   verificationToken: z.string().optional().nullable(),
@@ -135,12 +138,14 @@ export async function POST(req: Request) {
   // Plattform-Buchung -> Plattform-Standardfaktor; explizite Firma -> Firmenfaktor.
   const vehicleClass = normalizeClass(d.vehicleClass);
   const classF = await classFactorForSlug(d.company ?? undefined, vehicleClass);
-  const priceMin = applyClassFactor(estimate.priceMin, classF);
-  const priceMax = applyClassFactor(estimate.priceMax, classF);
+  // Meet & Greet Aufschlag (Airport): flughafenabhängig, in den Preis einrechnen.
+  const mgFee = meetGreetFee(d.meetGreet, d.pickupAddress, d.destAddress);
+  const priceMin = applyClassFactor(estimate.priceMin, classF) + mgFee;
+  const priceMax = applyClassFactor(estimate.priceMax, classF) + mgFee;
 
   // „ca."-Vorabpreis (Plattform-Durchschnitt) – gilt bis ein Fahrer feststeht.
   const rate = await getPlatformRate();
-  const priceApprox = applyClassFactor(approxFare(rate, estimate.distanceMeters, estimate.durationSeconds), classF);
+  const priceApprox = applyClassFactor(approxFare(rate, estimate.distanceMeters, estimate.durationSeconds), classF) + mgFee;
 
   // Flughafen-Modul (Phase 14): bei ANKUNFT ergibt sich die Abholzeit aus der
   // geplanten Landung + Verspätung + Gepäckpuffer. Sonst gilt die gewählte Zeit.
@@ -216,6 +221,8 @@ export async function POST(req: Request) {
       flightStatus: d.flightStatus ?? null,
       flightScheduledAt,
       flightDelayMinutes,
+      meetGreet: d.meetGreet ?? null,
+      meetGreetFee: mgFee || null,
       distanceMeters: estimate.distanceMeters,
       durationSeconds: estimate.durationSeconds,
       priceMin,

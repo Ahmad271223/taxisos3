@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { AddressInput } from "@/components/AddressInput";
 import { LuggageMatrix } from "@/components/LuggageMatrix";
 import { vehicleClass as vehicleClassInfo } from "@/lib/vehicleClasses";
+import { MEET_GREET_LEVELS, meetGreetFee, FREE_WAIT_MIN, WAIT_PER_MIN } from "@/lib/airportExtras";
 import { formatEuro, formatDateTime } from "@/lib/format";
 import type { GeocodeResult } from "@/lib/geo";
 import type { MapMarker } from "@/components/Map";
@@ -36,6 +37,7 @@ export function AirportBookingForm() {
 
   const [passengers, setPassengers] = useState(1);
   const [vehicleClass, setVehicleClass] = useState("STANDARD");
+  const [meetGreet, setMeetGreet] = useState("BASIC");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [quote, setQuote] = useState<any | null>(null);
@@ -187,6 +189,7 @@ export function AirportBookingForm() {
       dest: { lat: dest.lat, lng: dest.lng },
       passengers,
       vehicleClass,
+      meetGreet,
       flightNumber: flightNumber || null,
       flightDirection: direction,
       terminal: flight?.terminal ?? null,
@@ -353,6 +356,34 @@ export function AirportBookingForm() {
         <label className="label">Gepäck (für passende Fahrzeugwahl)</label>
         <LuggageMatrix passengers={passengers} onRecommend={setVehicleClass} />
         <p className="mt-1 text-xs text-ink-500" data-testid="airport-vclass">Fahrzeug: {vehicleClassInfo(vehicleClass).icon} {vehicleClassInfo(vehicleClass).label}</p>
+      </div>
+
+      <div>
+        <label className="label">Meet &amp; Greet</label>
+        <div className="grid gap-2" data-testid="meet-greet">
+          {MEET_GREET_LEVELS.map((lv) => {
+            const fee = meetGreetFee(lv.key, pickup.address, dest.address);
+            const active = meetGreet === lv.key;
+            return (
+              <button
+                type="button"
+                key={lv.key}
+                onClick={() => setMeetGreet(lv.key)}
+                data-testid={`mg-${lv.key}`}
+                className={`flex items-center justify-between gap-3 rounded-xl border-2 px-3 py-2.5 text-left transition ${active ? "border-brand-500 bg-brand-50" : "border-ink-200 bg-white hover:border-ink-300"}`}
+              >
+                <span className="min-w-0">
+                  <span className="block text-sm font-bold text-ink-900">{lv.label}</span>
+                  <span className="block text-xs text-ink-500">{lv.desc}</span>
+                </span>
+                <span className="shrink-0 text-sm font-extrabold text-ink-900">{fee > 0 ? `+ ${formatEuro(fee)}` : "inkl."}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-1 text-xs text-ink-500">
+          Wartezeit: erste {FREE_WAIT_MIN} Min nach Ankunft frei, danach {formatEuro(WAIT_PER_MIN)}/Min. Flugverspätungen werden fair berücksichtigt.
+        </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
