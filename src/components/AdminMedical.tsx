@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Brand } from "@/components/Brand";
+import { formatEuro } from "@/lib/format";
 
 const KIND_LABEL: Record<string, string> = {
   VERORDNUNG: "Verordnung", GENEHMIGUNG: "Genehmigung", REZEPT: "Rezept", BESCHEINIGUNG: "Bescheinigung",
@@ -16,6 +17,7 @@ export function AdminMedical() {
   const router = useRouter();
   const [docs, setDocs] = useState<any[]>([]);
   const [log, setLog] = useState<any[]>([]);
+  const [dash, setDash] = useState<any | null>(null);
   const [authOk, setAuthOk] = useState(false);
 
   const loadDocs = () =>
@@ -24,12 +26,13 @@ export function AdminMedical() {
       .then((d) => { if (d) { setDocs(d.documents ?? []); setAuthOk(true); } })
       .catch(() => {});
   const loadLog = () => fetch("/api/admin/accesslog").then((r) => r.json()).then((d) => setLog(d.entries ?? [])).catch(() => {});
+  const loadDash = () => fetch("/api/admin/medical/dashboard").then((r) => (r.ok ? r.json() : null)).then((d) => d && setDash(d)).catch(() => {});
 
-  useEffect(() => { loadDocs(); loadLog(); }, []);
+  useEffect(() => { loadDocs(); loadLog(); loadDash(); }, []);
 
   async function review(id: string, reviewStatus: string) {
     await fetch(`/api/medical/documents/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reviewStatus }) });
-    loadDocs(); loadLog();
+    loadDocs(); loadLog(); loadDash();
   }
 
   if (!authOk) return <main className="grid min-h-screen place-items-center bg-ink-100 text-ink-500">Lädt …</main>;
@@ -39,13 +42,35 @@ export function AdminMedical() {
   return (
     <main className="min-h-screen bg-ink-50">
       <header className="border-b border-ink-100 bg-white">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-5 py-4">
-          <Brand href="/admin" subtitle="Krankenfahrten – Dokumente" />
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-4">
+          <Brand href="/admin" subtitle="Krankenfahrten-Center" />
           <Link href="/admin" data-testid="back-to-dashboard" className="text-sm font-bold text-ink-500 hover:text-ink-900">← Dashboard</Link>
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-4xl gap-5 px-5 py-6">
+      <div className="mx-auto grid max-w-5xl gap-5 px-5 py-6">
+        {dash && (
+          <section className="card p-6" data-testid="medical-dashboard">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="font-display text-lg font-extrabold text-ink-900">Übersicht · {dash.monthLabel}</h2>
+              <span className="rounded-full bg-ink-900 px-2.5 py-1 text-[10px] font-extrabold tracking-wider text-brand-500">LIVE</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              <Kpi label="Heute" value={dash.kpis.today} />
+              <Kpi label="In Bearbeitung" value={dash.kpis.inProgress} />
+              <Kpi label="Abgeschlossen" value={dash.kpis.completedThisMonth} />
+              <Kpi label="Umsatz" value={formatEuro(dash.kpis.revenueThisMonth)} accent />
+              <Kpi label="Offene Dok." value={dash.kpis.pendingDocs} warn={dash.kpis.pendingDocs > 0} />
+              <Kpi label="Serienfahrten" value={dash.kpis.activeSeries} />
+            </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <Breakdown title="Nach Krankenkasse" rows={dash.byPayer} empty="Noch keine Krankenfahrten" />
+              <Breakdown title="Nach Einrichtung" rows={dash.byInstitution} empty="Keine Einrichtungsfahrten" />
+              <Breakdown title="Nach Fahrtart" rows={(dash.byType ?? []).map((t: any) => ({ name: t.label, count: t.count }))} empty="Noch keine Krankenfahrten" noRevenue />
+            </div>
+          </section>
+        )}
+
         <section className="card p-6">
           <h2 className="mb-3 font-display text-lg font-extrabold text-ink-900">Dokumentenprüfung ({pending.length} offen)</h2>
           <div className="grid gap-2" data-testid="doc-list">
@@ -82,5 +107,37 @@ export function AdminMedical() {
         </section>
       </div>
     </main>
+  );
+}
+
+function Kpi({ label, value, accent, warn }: { label: string; value: React.ReactNode; accent?: boolean; warn?: boolean }) {
+  return (
+    <div className={`rounded-2xl p-3 ${accent ? "bg-ink-900" : warn ? "bg-amber-50 ring-1 ring-amber-200" : "bg-ink-50"}`}>
+      <p className={`text-[10px] font-semibold uppercase tracking-wider ${accent ? "text-white/60" : "text-ink-400"}`}>{label}</p>
+      <p className={`font-display text-xl font-extrabold ${accent ? "text-brand-500" : warn ? "text-amber-700" : "text-ink-900"}`}>{value}</p>
+    </div>
+  );
+}
+
+function Breakdown({ title, rows, empty, noRevenue }: { title: string; rows: any[]; empty?: string; noRevenue?: boolean }) {
+  return (
+    <div className="rounded-2xl bg-ink-50 p-4">
+      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-400">{title}</p>
+      <div className="grid gap-1.5">
+        {(!rows || rows.length === 0) ? (
+          <p className="text-xs text-ink-400">{empty ?? "Keine Daten"}</p>
+        ) : (
+          rows.map((r, i) => (
+            <div key={i} className="flex items-center justify-between gap-2 text-sm">
+              <span className="min-w-0 truncate text-ink-700">{r.name}</span>
+              <span className="shrink-0 font-bold text-ink-900">
+                {r.count}
+                {!noRevenue && r.revenue ? <span className="text-ink-500"> · {formatEuro(r.revenue)}</span> : null}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
   );
 }
