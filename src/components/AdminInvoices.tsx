@@ -104,13 +104,13 @@ export function AdminInvoices() {
   return (
     <main className="min-h-screen bg-ink-50">
       <header className="border-b border-ink-100 bg-white">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-5 py-4">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
           <Brand href="/admin" subtitle="Provisions-Abrechnung" />
           <Link href="/admin" className="text-sm font-bold text-ink-500 hover:text-ink-900">← Dashboard</Link>
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-3xl gap-4 px-5 py-6">
+      <div className="mx-auto grid max-w-6xl gap-4 px-5 py-6">
         <div className="card flex flex-wrap items-end justify-between gap-4 p-5">
           <div>
             <label className="label" htmlFor="month">Abrechnungsmonat</label>
@@ -161,9 +161,10 @@ export function AdminInvoices() {
           <div className="card p-6 text-center font-semibold text-red-600" data-testid="invoice-error">{error}</div>
         )}
 
-        {/* (A) Firma ↔ Kunden: Umsatz aus Fahrten und Netto-Auszahlung an die Firma. */}
         {data && !loading && !error && (
-          <div className="card p-6" data-testid="revenue-overview">
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            {/* (A) Firma ↔ Kunden: Umsatz aus Fahrten und Netto-Auszahlung an die Firma. */}
+            <div className="card p-6" data-testid="revenue-overview">
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-ink-100 pb-4">
               <div>
                 <p className="eyebrow text-ink-500">Kundenumsatz &amp; Auszahlung</p>
@@ -223,12 +224,9 @@ export function AdminInvoices() {
             <p className="mt-4 text-xs text-ink-400">
               Das behält Ihr Unternehmen aus den Fahrten. Die Plattform-Provision wird separat in Rechnung gestellt (siehe unten) – zzgl. {Math.round(data.vatRate * 100)} % USt = {formatEuro(data.gross)}.
             </p>
-          </div>
-        )}
-
-        {/* (B) Firma ↔ Plattform: Provisions-/Gebührenrechnung. */}
-        {data && !loading && !error && (
-          <div className="card p-6" data-testid="invoice-preview">
+            </div>
+            {/* (B) Firma ↔ Plattform: Provisions-/Gebührenrechnung. */}
+            <div className="card p-6" data-testid="invoice-preview">
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-ink-100 pb-4">
               <div>
                 <p className="eyebrow text-ink-500">Gebühren-Rechnung (Plattform-Provision)</p>
@@ -293,6 +291,7 @@ export function AdminInvoices() {
             <p className="mt-4 text-xs text-ink-400">
               {data.trips} abgerechnete Fahrt(en) · Bruttoumsatz {formatEuro(data.grossRevenue)}. Leistung: Vermittlungsgebühr der Plattform.
             </p>
+            </div>
           </div>
         )}
 
