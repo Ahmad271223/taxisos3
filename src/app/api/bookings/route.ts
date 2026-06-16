@@ -6,6 +6,7 @@ import { pricingForSlug, classFactorForSlug, applyClassFactor } from "@/lib/pric
 import { normalizeClass } from "@/lib/vehicleClasses";
 import { airportPickupTime } from "@/lib/flights";
 import { meetGreetFee } from "@/lib/airportExtras";
+import { promoUsable, promoDiscountAmount } from "@/lib/promo";
 import { normalizeMedicalType, medicalDetailsSchema, medicalDetailsData } from "@/lib/medical";
 import { serializeStops } from "@/lib/stops";
 import { authorizePayment, paymentEnabled, retrieveIntent } from "@/lib/stripe";
@@ -58,6 +59,8 @@ const schema = z.object({
   flightDelayMinutes: z.number().int().min(0).max(2880).optional().nullable(),
   // Airport Meet & Greet Service-Stufe.
   meetGreet: z.enum(["BASIC", "TERMINAL", "PREMIUM"]).optional().nullable(),
+  // Event-Promo-Code (Mass Mobility).
+  promoCode: z.string().max(30).optional().nullable(),
   paymentMethod: z.enum(["CASH", "CARD"]).optional(),
   // Nachweis der Gast-Telefon-Verifizierung (Phase 3h).
   verificationToken: z.string().optional().nullable(),
@@ -147,6 +150,21 @@ export async function POST(req: Request) {
   const rate = await getPlatformRate();
   const priceApprox = applyClassFactor(approxFare(rate, estimate.distanceMeters, estimate.durationSeconds), classF) + mgFee;
 
+  // Event-Promo-Code (Mass Mobility): Rabatt auf den Vorabpreis. Gültiger Code
+  // -> Rabatt berechnen, Nutzung hochzählen, Endpreis später entsprechend mindern.
+  let promoCode: string | null = null;
+  let promoDiscount = 0;
+  if (d.promoCode) {
+    const code = d.promoCode.toUpperCase().replace(/\s+/g, "");
+    const promo = await prisma.promoCode.findUnique({ where: { code } });
+    if (promo && promoUsable(promo)) {
+      promoCode = code;
+      promoDiscount = promoDiscountAmount(promo, priceApprox);
+      await prisma.promoCode.update({ where: { code }, data: { usedCount: { increment: 1 } } }).catch(() => {});
+    }
+  }
+  const priceApproxNet = Math.max(0, Math.round((priceApprox - promoDiscount) * 100) / 100);
+
   // Flughafen-Modul (Phase 14): bei ANKUNFT ergibt sich die Abholzeit aus der
   // geplanten Landung + Verspätung + Gepäckpuffer. Sonst gilt die gewählte Zeit.
   const flightScheduledAt = d.flightScheduledAt ? new Date(d.flightScheduledAt) : null;
@@ -227,7 +245,9 @@ export async function POST(req: Request) {
       durationSeconds: estimate.durationSeconds,
       priceMin,
       priceMax,
-      priceApprox,
+      priceApprox: priceApproxNet,
+      promoCode,
+      promoDiscount: promoDiscount || null,
       tariff: estimate.tariff,
       status: "OFFEN",
       trackingStatus: isScheduled ? "GEPLANT" : "SUCHE",

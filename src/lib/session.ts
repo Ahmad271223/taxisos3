@@ -7,13 +7,14 @@ import {
   CUSTOMER_COOKIE,
   INSTITUTION_COOKIE,
   HOTEL_COOKIE,
+  EVENT_COOKIE,
   type SessionPayload,
   type Role,
 } from "./auth";
 
 // Liest die Session aus dem rollen-passenden Cookie. `kind` wählt den Bereich;
 // ohne `kind` werden Admin -> Fahrer -> Kunde -> Legacy der Reihe nach probiert.
-export function getSession(kind?: "admin" | "driver" | "customer" | "institution" | "hotel"): SessionPayload | null {
+export function getSession(kind?: "admin" | "driver" | "customer" | "institution" | "hotel" | "event"): SessionPayload | null {
   const jar = cookies();
   const read = (name: string) => verifySession(jar.get(name)?.value);
   if (kind === "driver") return read(DRIVER_COOKIE) ?? read(SESSION_COOKIE);
@@ -21,7 +22,8 @@ export function getSession(kind?: "admin" | "driver" | "customer" | "institution
   if (kind === "customer") return read(CUSTOMER_COOKIE);
   if (kind === "institution") return read(INSTITUTION_COOKIE);
   if (kind === "hotel") return read(HOTEL_COOKIE);
-  return read(ADMIN_COOKIE) ?? read(DRIVER_COOKIE) ?? read(CUSTOMER_COOKIE) ?? read(INSTITUTION_COOKIE) ?? read(HOTEL_COOKIE) ?? read(SESSION_COOKIE);
+  if (kind === "event") return read(EVENT_COOKIE);
+  return read(ADMIN_COOKIE) ?? read(DRIVER_COOKIE) ?? read(CUSTOMER_COOKIE) ?? read(INSTITUTION_COOKIE) ?? read(HOTEL_COOKIE) ?? read(EVENT_COOKIE) ?? read(SESSION_COOKIE);
 }
 
 export function requireRole(role: Role): SessionPayload | null {
@@ -30,6 +32,7 @@ export function requireRole(role: Role): SessionPayload | null {
       : role === "CUSTOMER" ? "customer"
       : role === "INSTITUTION" ? "institution"
       : role === "HOTEL" ? "hotel"
+      : role === "EVENT" ? "event"
       : "admin";
   const s = getSession(kind);
   if (!s || s.role !== role) return null;

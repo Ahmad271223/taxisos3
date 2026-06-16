@@ -675,7 +675,8 @@ export class Dispatcher {
       const wait = waitCharge(b.arrivedAt, b.startedAt);
       const mgFee = b.meetGreetFee ?? 0;
       const baseFare = b.priceExact != null ? b.priceExact : Math.max(0, (b.priceMax ?? b.priceMin ?? 0) - mgFee);
-      const fare = Math.round((baseFare + mgFee + wait.fee) * 100) / 100;
+      // Event-Promo-Rabatt mindert den Endpreis (nie unter 0).
+      const fare = Math.max(0, Math.round((baseFare + mgFee + wait.fee - (b.promoDiscount ?? 0)) * 100) / 100);
       // Provision basierend auf Firma (Tier) berechnen.
       let platformFeeRate: number | null = null;
       let platformFee: number | null = null;

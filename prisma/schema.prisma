@@ -212,6 +212,10 @@ model Booking {
   preferredCompanyIds String @default("")
   isVip          Boolean @default(false)
 
+  // Event-Promo-Code (Mass Mobility): eingelöster Code + gewährter Rabatt (EUR).
+  promoCode      String?
+  promoDiscount  Float?
+
   // Hochgeladene Nachweise (Phase C): Verordnung/Genehmigung etc.
   documents      MedicalDocument[]
 
@@ -547,6 +551,43 @@ model MedicalDocument {
   @@index([bookingId])
   @@index([customerId])
   @@index([institutionId])
+}
+
+// ---------------------------------------------------------------------------
+// Event-Veranstalter (Mass Mobility): eigenes Konto, das Promo-Codes für
+// Events vergibt (z. B. „IAA2026"), subventionierte/gesponserte Fahrten.
+// ---------------------------------------------------------------------------
+model EventHost {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  phone        String?
+  active       Boolean  @default(true)
+
+  promos       PromoCode[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model PromoCode {
+  id            String   @id @default(cuid())
+  eventHostId   String
+  eventHost     EventHost @relation(fields: [eventHostId], references: [id], onDelete: Cascade)
+
+  code          String   @unique // z. B. "IAA2026"
+  label         String?
+  discountType  String   @default("PERCENT") // PERCENT | FIXED
+  discountValue Float    // Prozent (0–100) oder fester EUR-Betrag
+  validUntil    String?  // ISO "YYYY-MM-DD"
+  maxUses       Int?
+  usedCount     Int      @default(0)
+  active        Boolean  @default(true)
+
+  createdAt     DateTime @default(now())
+
+  @@index([eventHostId])
 }
 
 // ---------------------------------------------------------------------------

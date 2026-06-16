@@ -90,6 +90,12 @@ export default function PlatformBookingPage({ searchParams }: { searchParams?: {
               Hotel-Portal
             </Link>
           </div>
+          <div className="flex items-center gap-2">
+            <span>Event-Veranstalter?</span>
+            <Link href="/event" data-testid="to-event-portal" className="font-bold text-ink-900 underline underline-offset-2 hover:text-brand-600">
+              Event-Portal
+            </Link>
+          </div>
         </div>
       </section>
     </main>

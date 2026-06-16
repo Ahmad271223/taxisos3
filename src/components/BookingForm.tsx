@@ -39,6 +39,24 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [payment, setPayment] = useState<"CASH" | "CARD">("CASH");
+  const [promoCode, setPromoCode] = useState("");
+  const [promoInfo, setPromoInfo] = useState<{ valid: boolean; label?: string } | null>(null);
+  const [promoBusy, setPromoBusy] = useState(false);
+
+  async function checkPromo() {
+    const code = promoCode.trim().toUpperCase();
+    if (!code) return;
+    setPromoBusy(true);
+    try {
+      const r = await fetch(`/api/promo/${encodeURIComponent(code)}`);
+      const d = r.ok ? await r.json() : { valid: false };
+      setPromoInfo({ valid: !!d.valid, label: d.label });
+    } catch {
+      setPromoInfo({ valid: false });
+    } finally {
+      setPromoBusy(false);
+    }
+  }
   // Fahrzeugklasse (Phase 12 Marktplatz) – Kunde wählt vor der Buchung.
   // Vorauswahl z. B. aus der Live-Karte (?class=VAN).
   const [vehicleClass, setVehicleClass] = useState(() => normalizeClass(initialVehicleClass));
@@ -376,6 +394,7 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
           notes: notes || null,
           scheduledAt,
           paymentMethod: payment,
+          promoCode: promoInfo?.valid ? promoCode.trim().toUpperCase() : null,
           verificationToken,
           paymentIntentId: paymentIntentId ?? null,
         }),
@@ -591,10 +610,10 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
         title={mapPickFor === "pickup" ? "Abholort auf der Karte wählen" : "Zielort auf der Karte wählen"}
         initial={
           mapPickFor === "pickup"
-            ? pickup.lat != null
+            ? pickup.lat != null && pickup.lng != null
               ? { address: pickup.address, lat: pickup.lat, lng: pickup.lng }
               : null
-            : dest.lat != null
+            : dest.lat != null && dest.lng != null
             ? { address: dest.address, lat: dest.lat, lng: dest.lng }
             : null
         }
@@ -840,6 +859,17 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
           </div>
         </div>
       </details>
+
+      <div className="grid gap-1.5">
+        <label className="label">Promo-Code (optional)</label>
+        <div className="flex gap-2">
+          <input className="field uppercase" data-testid="promo-input" placeholder="z. B. IAA2026" value={promoCode} onChange={(e) => { setPromoCode(e.target.value.toUpperCase()); setPromoInfo(null); }} />
+          <button type="button" onClick={checkPromo} disabled={promoBusy || !promoCode.trim()} data-testid="promo-check" className="shrink-0 rounded-xl bg-ink-900 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{promoBusy ? "…" : "Prüfen"}</button>
+        </div>
+        {promoInfo && (promoInfo.valid
+          ? <p className="text-xs font-bold text-green-700" data-testid="promo-ok">✓ {promoInfo.label} – wird vom Preis abgezogen.</p>
+          : <p className="text-xs font-bold text-red-600" data-testid="promo-bad">Code ungültig oder abgelaufen.</p>)}
+      </div>
 
       {error && <p className="rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</p>}
 
