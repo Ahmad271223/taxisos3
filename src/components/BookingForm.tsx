@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { AddressInput } from "@/components/AddressInput";
@@ -42,6 +42,32 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
   const [promoCode, setPromoCode] = useState("");
   const [promoInfo, setPromoInfo] = useState<{ valid: boolean; label?: string } | null>(null);
   const [promoBusy, setPromoBusy] = useState(false);
+
+  // Event Geo-Sammelpunkt: liegt die Abholung in einer Event-Zone, wird sie auf
+  // den virtuellen Taxistand gelenkt (Sammelpunkt). Einmal pro Zone snappen.
+  const [eventZone, setEventZone] = useState<{ id: string; name: string } | null>(null);
+  const snappedZoneRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (pickup.lat == null || pickup.lng == null) { setEventZone(null); snappedZoneRef.current = null; return; }
+    let cancelled = false;
+    fetch(`/api/event-zones/nearby?lat=${pickup.lat}&lng=${pickup.lng}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const z = d.zone;
+        if (z && snappedZoneRef.current !== z.id) {
+          snappedZoneRef.current = z.id;
+          setEventZone({ id: z.id, name: z.name });
+          setPickup({ address: `${z.name} (Event-Sammelpunkt)`, lat: z.lat, lng: z.lng });
+        } else if (!z) {
+          setEventZone(null);
+          snappedZoneRef.current = null;
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickup.lat, pickup.lng]);
 
   async function checkPromo() {
     const code = promoCode.trim().toUpperCase();
@@ -859,6 +885,13 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
           </div>
         </div>
       </details>
+
+      {eventZone && (
+        <div className="rounded-2xl border-2 border-brand-300 bg-brand-50 p-3 text-sm" data-testid="event-zone-notice">
+          <p className="font-bold text-ink-900">📍 Event-Sammelpunkt: {eventZone.name}</p>
+          <p className="text-xs text-ink-600">Die Abholung wurde auf den virtuellen Taxistand gesetzt – bitte dort warten.</p>
+        </div>
+      )}
 
       <div className="grid gap-1.5">
         <label className="label">Promo-Code (optional)</label>

@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Brand } from "@/components/Brand";
+import { AddressInput } from "@/components/AddressInput";
+import type { GeocodeResult } from "@/lib/geo";
 
 interface Host { id: string; name: string; email: string }
 
@@ -65,6 +67,7 @@ function Dashboard({ host, onLogout }: { host: Host; onLogout: () => void }) {
       <div className="mx-auto grid max-w-3xl gap-4 px-5 py-6">
         <NewPromoCard onCreated={load} />
         <PromoListCard promos={promos} />
+        <ZonesCard />
       </div>
     </main>
   );
@@ -106,6 +109,46 @@ function NewPromoCard({ onCreated }: { onCreated: () => void }) {
       </div>
       {msg && <p className="mt-2 text-sm font-semibold text-ink-700" data-testid="promo-msg">{msg}</p>}
       <button onClick={create} disabled={busy || !form.code.trim()} data-testid="promo-save" className="btn-primary mt-3 disabled:opacity-60">{busy ? "…" : "Code erstellen"}</button>
+    </div>
+  );
+}
+
+function ZonesCard() {
+  const [zones, setZones] = useState<any[]>([]);
+  const [name, setName] = useState("");
+  const [center, setCenter] = useState<{ address: string; lat?: number; lng?: number }>({ address: "" });
+  const [radius, setRadius] = useState("300");
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => fetch("/api/events/zones").then((r) => r.json()).then((d) => setZones(d.zones ?? [])).catch(() => {}), []);
+  useEffect(() => { load(); }, [load]);
+  const ok = name.trim() && center.lat != null && !busy;
+  async function add() {
+    setBusy(true);
+    const res = await fetch("/api/events/zones", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, lat: center.lat, lng: center.lng, radiusMeters: Number(radius) || 300 }) });
+    setBusy(false);
+    if (res.ok) { setName(""); setCenter({ address: "" }); setRadius("300"); load(); }
+  }
+  return (
+    <div className="card p-6" data-testid="event-zones">
+      <h2 className="mb-1 font-display text-lg font-extrabold text-ink-900">Geo-Sammelpunkte</h2>
+      <p className="mb-3 text-xs text-ink-500">Virtuelle Taxistände für dein Event: Abholungen im Radius werden automatisch auf den Sammelpunkt gelenkt (verhindert Chaos/Stau).</p>
+      <div className="grid gap-2">
+        <input className="field" data-testid="zone-name" placeholder="Name (z. B. Messe Nord – Halle 9)" value={name} onChange={(e) => setName(e.target.value)} />
+        <AddressInput label="Sammelpunkt" placeholder="Adresse des Treffpunkts" value={center.address} onChange={(t) => setCenter({ address: t })} onSelect={(r: GeocodeResult) => setCenter({ address: r.label, lat: r.lat, lng: r.lng })} />
+        <div className="grid grid-cols-[1fr_auto] gap-2">
+          <label className="grid gap-1 text-xs text-ink-500">Radius (Meter)<input className="field" type="number" value={radius} onChange={(e) => setRadius(e.target.value)} /></label>
+          <button onClick={add} disabled={!ok} data-testid="zone-save" className="btn-primary self-end disabled:opacity-60">{busy ? "…" : "Sammelpunkt anlegen"}</button>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2">
+        {zones.map((z) => (
+          <div key={z.id} className="flex items-center justify-between gap-3 rounded-xl bg-ink-50 px-3 py-2 text-sm" data-testid={`zone-${z.id}`}>
+            <span className="font-bold text-ink-900">📍 {z.name}</span>
+            <span className="text-xs text-ink-500">Radius {z.radiusMeters} m</span>
+          </div>
+        ))}
+        {zones.length === 0 && <p className="text-sm text-ink-400">Noch keine Sammelpunkte.</p>}
+      </div>
     </div>
   );
 }

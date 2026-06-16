@@ -566,9 +566,28 @@ model EventHost {
   active       Boolean  @default(true)
 
   promos       PromoCode[]
+  zones        EventZone[]
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// Geo-Fenced Pickup-Zone (virtueller Taxistand) eines Events: Abholungen im
+// Radius werden auf diesen Sammelpunkt gelenkt (verhindert Chaos/Stau).
+model EventZone {
+  id           String   @id @default(cuid())
+  eventHostId  String
+  eventHost    EventHost @relation(fields: [eventHostId], references: [id], onDelete: Cascade)
+
+  name         String
+  lat          Float
+  lng          Float
+  radiusMeters Int      @default(300)
+  active       Boolean  @default(true)
+
+  createdAt    DateTime @default(now())
+
+  @@index([eventHostId])
 }
 
 model PromoCode {

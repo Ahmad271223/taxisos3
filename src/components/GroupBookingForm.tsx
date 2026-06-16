@@ -105,6 +105,13 @@ export function GroupBookingForm() {
 
   // Flotten-Vorschläge neu berechnen, wenn Personen/Gepäck sich ändern.
   const options = suggestFleet(passengers, luggage);
+  // Empfehlung: günstigste Option (sobald Preise feststehen), sonst die mit den
+  // wenigsten Fahrzeugen ("optimale Kosten" – z. B. 1 Van statt 2 Taxis).
+  const recommendedId = (() => {
+    const priced = options.filter((o) => optionPrice(o) > 0);
+    if (priced.length) return priced.reduce((a, b) => (optionPrice(b) < optionPrice(a) ? b : a)).id;
+    return options.reduce((a, b) => (b.vehicleCount < a.vehicleCount ? b : a), options[0])?.id;
+  })();
   useEffect(() => {
     setSelected((prev) => {
       if (prev && options.some((o) => o.id === prev.id)) return prev;
@@ -312,7 +319,10 @@ export function GroupBookingForm() {
                 onClick={() => setSelected(o)}
                 className={`rounded-2xl border-2 p-3 text-left transition ${isSel ? "border-brand-500 bg-brand-50" : "border-ink-200 bg-white hover:border-ink-300"}`}
               >
-                <p className="font-display font-extrabold text-ink-900">{c.icon} {o.label}</p>
+                <p className="font-display font-extrabold text-ink-900">
+                  {c.icon} {o.label}
+                  {o.id === recommendedId && <span className="ml-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-green-700" data-testid={`fleet-${o.id}-rec`}>Empfehlung</span>}
+                </p>
                 <p className="text-[11px] text-ink-500">{o.totalSeats} Plätze · {o.totalLuggage} Gepäck</p>
                 {price > 0 && <p className="mt-1 font-bold text-ink-900" data-testid={`fleet-${o.id}-price`}>ca. {formatEuro(price)} gesamt</p>}
               </button>
