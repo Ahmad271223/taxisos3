@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
-export type Role = "ADMIN" | "DRIVER" | "SUPER_ADMIN" | "CUSTOMER" | "INSTITUTION";
+export type Role = "ADMIN" | "DRIVER" | "SUPER_ADMIN" | "CUSTOMER" | "INSTITUTION" | "HOTEL";
 
 export interface SessionPayload {
   sub: string; // user id (Driver-ID bzw. Company-ID)
@@ -20,11 +20,13 @@ export const ADMIN_COOKIE = "tc_admin"; // ADMIN + SUPER_ADMIN
 export const DRIVER_COOKIE = "tc_driver";
 export const CUSTOMER_COOKIE = "tc_customer";
 export const INSTITUTION_COOKIE = "tc_institution"; // Einrichtungs-Portal (Phase E)
+export const HOTEL_COOKIE = "tc_hotel"; // Hotel-Portal (B2B Mobility)
 
 export function cookieForRole(role: Role): string {
   if (role === "DRIVER") return DRIVER_COOKIE;
   if (role === "CUSTOMER") return CUSTOMER_COOKIE;
   if (role === "INSTITUTION") return INSTITUTION_COOKIE;
+  if (role === "HOTEL") return HOTEL_COOKIE;
   return ADMIN_COOKIE;
 }
 

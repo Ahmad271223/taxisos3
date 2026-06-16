@@ -203,6 +203,12 @@ model Booking {
   institutionPatientId String?
   institutionPatient   InstitutionPatient? @relation(fields: [institutionPatientId], references: [id], onDelete: SetNull)
 
+  // Hotel-Buchung (B2B Mobility): Gast-Fahrt durch ein Hotel.
+  hotelId        String?
+  hotel          Hotel? @relation(fields: [hotelId], references: [id], onDelete: SetNull)
+  roomNumber     String?
+  hotelPayment   String?   // DIRECT | ROOM | CORPORATE
+
   // Hochgeladene Nachweise (Phase C): Verordnung/Genehmigung etc.
   documents      MedicalDocument[]
 
@@ -538,6 +544,26 @@ model MedicalDocument {
   @@index([bookingId])
   @@index([customerId])
   @@index([institutionId])
+}
+
+// ---------------------------------------------------------------------------
+// Hotel (B2B Mobility OS): Hotel-Konto mit eigenem Login. Die Rezeption bucht
+// Fahrten für Gäste (guestless: SMS-Trackinglink) und rechnet wahlweise per
+// Charge-to-Room / Firmenkonto ab.
+// ---------------------------------------------------------------------------
+model Hotel {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  phone        String?
+  address      String?
+  active       Boolean  @default(true)
+
+  bookings     Booking[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 // ---------------------------------------------------------------------------
