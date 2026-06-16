@@ -66,7 +66,7 @@ function Dashboard({ host, onLogout }: { host: Host; onLogout: () => void }) {
       </header>
       <div className="mx-auto grid max-w-3xl gap-4 px-5 py-6">
         <NewPromoCard onCreated={load} />
-        <PromoListCard promos={promos} />
+        <PromoListCard promos={promos} onChanged={load} />
         <ZonesCard />
         <CorporateCard />
       </div>
@@ -141,15 +141,63 @@ function ZonesCard() {
           <button onClick={add} disabled={!ok} data-testid="zone-save" className="btn-primary self-end disabled:opacity-60">{busy ? "…" : "Sammelpunkt anlegen"}</button>
         </div>
       </div>
-      <div className="mt-3 grid gap-2">
-        {zones.map((z) => (
-          <div key={z.id} className="flex items-center justify-between gap-3 rounded-xl bg-ink-50 px-3 py-2 text-sm" data-testid={`zone-${z.id}`}>
-            <span className="font-bold text-ink-900">📍 {z.name}</span>
-            <span className="text-xs text-ink-500">Radius {z.radiusMeters} m</span>
+      <ZoneList zones={zones} onChanged={load} />
+    </div>
+  );
+}
+
+function ZoneList({ zones, onChanged }: { zones: any[]; onChanged: () => void }) {
+  const [editId, setEditId] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [radius, setRadius] = useState("300");
+  const [center, setCenter] = useState<{ address: string; lat?: number; lng?: number }>({ address: "" });
+  const [busy, setBusy] = useState(false);
+
+  function startEdit(z: any) { setEditId(z.id); setName(z.name); setRadius(String(z.radiusMeters)); setCenter({ address: "" }); }
+  async function patch(id: string, body: any) {
+    setBusy(true);
+    await fetch(`/api/events/zones/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => {});
+    setBusy(false); onChanged();
+  }
+  async function saveEdit(id: string) {
+    const body: any = { name, radiusMeters: Number(radius) || 300 };
+    if (center.lat != null && center.lng != null) { body.lat = center.lat; body.lng = center.lng; }
+    await patch(id, body); setEditId(null);
+  }
+  async function remove(z: any) {
+    if (!window.confirm(`Sammelpunkt „${z.name}" wirklich löschen?`)) return;
+    setBusy(true);
+    await fetch(`/api/events/zones/${z.id}`, { method: "DELETE" }).catch(() => {});
+    setBusy(false); onChanged();
+  }
+
+  return (
+    <div className="mt-3 grid gap-2">
+      {zones.map((z) => {
+        const editing = editId === z.id;
+        return (
+          <div key={z.id} className={`rounded-xl border px-3 py-2 text-sm ${z.active ? "border-ink-100 bg-ink-50" : "border-ink-200 bg-white opacity-60"}`} data-testid={`zone-${z.id}`}>
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-bold text-ink-900">📍 {z.name}{!z.active && <span className="ml-2 rounded-full bg-ink-200 px-2 py-0.5 text-[10px] font-bold text-ink-600">Pausiert</span>}</span>
+              <span className="shrink-0 text-xs text-ink-500">Radius {z.radiusMeters} m</span>
+            </div>
+            <div className="mt-1 flex justify-end">
+              <ManageButtons active={z.active} editing={editing} testidBase={`zone-${z.id}`} onToggle={() => patch(z.id, { active: !z.active })} onEdit={() => (editing ? setEditId(null) : startEdit(z))} onDelete={() => remove(z)} />
+            </div>
+            {editing && (
+              <div className="mt-2 grid gap-2 border-t border-ink-100 pt-2">
+                <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+                <AddressInput label="Punkt verschieben (optional)" placeholder="Neue Adresse – leer lassen, um Position zu behalten" value={center.address} onChange={(t) => setCenter({ address: t })} onSelect={(r: GeocodeResult) => setCenter({ address: r.label, lat: r.lat, lng: r.lng })} />
+                <div className="grid grid-cols-[1fr_auto] gap-2">
+                  <label className="grid gap-1 text-xs text-ink-500">Radius (Meter)<input className="field" type="number" value={radius} onChange={(e) => setRadius(e.target.value)} /></label>
+                  <button onClick={() => saveEdit(z.id)} disabled={busy || !name.trim()} data-testid={`zone-${z.id}-save`} className="btn-primary self-end disabled:opacity-60">Speichern</button>
+                </div>
+              </div>
+            )}
           </div>
-        ))}
-        {zones.length === 0 && <p className="text-sm text-ink-400">Noch keine Sammelpunkte.</p>}
-      </div>
+        );
+      })}
+      {zones.length === 0 && <p className="text-sm text-ink-400">Noch keine Sammelpunkte.</p>}
     </div>
   );
 }
@@ -177,9 +225,45 @@ function CorporateCard() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [eform, setEform] = useState<any>({});
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const setE = (k: string, v: string) => setEform((f: any) => ({ ...f, [k]: v }));
   const load = useCallback(() => fetch("/api/events/corporate").then((r) => r.json()).then((d) => setCodes(d.codes ?? [])).catch(() => {}), []);
   useEffect(() => { load(); }, [load]);
+
+  function startEdit(c: any) {
+    setEditId(c.id);
+    setEform({
+      label: c.label ?? "",
+      budgetEuro: c.budgetCents != null ? String(c.budgetCents / 100) : "",
+      maxRides: c.maxRides != null ? String(c.maxRides) : "",
+      perRideEuro: c.perRideCents != null ? String(c.perRideCents / 100) : "",
+      validUntil: c.validUntil ?? "",
+    });
+  }
+  async function patch(id: string, body: any) {
+    setBusy(true);
+    await fetch(`/api/events/corporate/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => {});
+    setBusy(false); load();
+  }
+  async function saveEdit(id: string) {
+    await patch(id, {
+      label: eform.label || null,
+      budgetEuro: eform.budgetEuro ? Number(eform.budgetEuro) : null,
+      maxRides: eform.maxRides ? Number(eform.maxRides) : null,
+      perRideEuro: eform.perRideEuro ? Number(eform.perRideEuro) : null,
+      validUntil: eform.validUntil || null,
+    });
+    setEditId(null);
+  }
+  async function remove(c: any) {
+    if (!window.confirm(`QR-Code ${c.code} wirklich löschen? Bereits gebuchte Fahrten bleiben erhalten.`)) return;
+    setBusy(true);
+    await fetch(`/api/events/corporate/${c.id}`, { method: "DELETE" }).catch(() => {});
+    setBusy(false); load();
+  }
 
   async function create() {
     setBusy(true); setMsg(null);
@@ -219,11 +303,12 @@ function CorporateCard() {
           const link = `${origin}/m/${c.code}`;
           const open = openId === c.id;
           return (
-            <div key={c.id} className="rounded-xl border border-ink-100 bg-ink-50 p-3" data-testid={`corp-${c.code}`}>
+            <div key={c.id} className={`rounded-xl border p-3 ${c.active ? "border-ink-100 bg-ink-50" : "border-ink-200 bg-white opacity-70"}`} data-testid={`corp-${c.code}`}>
               <div className="flex items-center justify-between gap-3">
                 <span className="min-w-0">
                   <span className="font-mono text-base font-extrabold tracking-widest text-ink-900">{c.code}</span>
                   {c.label && <span className="ml-2 text-sm text-ink-600">{c.label}</span>}
+                  {!c.active && <span className="ml-2 rounded-full bg-ink-200 px-2 py-0.5 text-[10px] font-bold text-ink-600">Pausiert</span>}
                 </span>
                 <button onClick={() => setOpenId(open ? null : c.id)} className="shrink-0 text-sm font-bold text-brand-700 hover:underline">{open ? "Schließen" : "QR anzeigen"}</button>
               </div>
@@ -233,6 +318,19 @@ function CorporateCard() {
                 {c.perRideCents != null && <span>max. {euro(c.perRideCents)}/Fahrt</span>}
                 {c.validUntil && <span>gültig bis {c.validUntil}</span>}
               </div>
+              <div className="mt-1 flex justify-end">
+                <ManageButtons active={c.active} editing={editId === c.id} testidBase={`corp-${c.code}`} onToggle={() => patch(c.id, { active: !c.active })} onEdit={() => (editId === c.id ? setEditId(null) : startEdit(c))} onDelete={() => remove(c)} />
+              </div>
+              {editId === c.id && (
+                <div className="mt-2 grid gap-2 border-t border-ink-100 pt-2 sm:grid-cols-2">
+                  <input className="field sm:col-span-2" placeholder="Bezeichnung" value={eform.label} onChange={(e) => setE("label", e.target.value)} />
+                  <label className="grid gap-1 text-xs text-ink-500">Gesamtbudget €<input className="field" type="number" value={eform.budgetEuro} onChange={(e) => setE("budgetEuro", e.target.value)} /></label>
+                  <label className="grid gap-1 text-xs text-ink-500">Max. Fahrten<input className="field" type="number" value={eform.maxRides} onChange={(e) => setE("maxRides", e.target.value)} /></label>
+                  <label className="grid gap-1 text-xs text-ink-500">Max. € pro Fahrt<input className="field" type="number" value={eform.perRideEuro} onChange={(e) => setE("perRideEuro", e.target.value)} /></label>
+                  <label className="grid gap-1 text-xs text-ink-500">Gültig bis<input className="field" type="date" value={eform.validUntil} onChange={(e) => setE("validUntil", e.target.value)} /></label>
+                  <button onClick={() => saveEdit(c.id)} disabled={busy} data-testid={`corp-${c.code}-save`} className="btn-primary self-end disabled:opacity-60 sm:col-span-2">Speichern</button>
+                </div>
+              )}
               {open && (
                 <div className="mt-3 grid place-items-center gap-2">
                   <QrImage url={link} />
@@ -247,24 +345,93 @@ function CorporateCard() {
         })}
         {codes.length === 0 && <p className="text-sm text-ink-400">Noch keine QR-Codes.</p>}
       </div>
+
+      <div className="mt-5 border-t border-ink-100 pt-4">
+        <h3 className="font-display text-sm font-extrabold text-ink-900">Monats-Abrechnung</h3>
+        <p className="mb-2 text-xs text-ink-500">Alle über eure QR-Codes übernommenen Fahrten eines Monats als PDF.</p>
+        <div className="flex items-center gap-2">
+          <input className="field" type="month" data-testid="corp-stmt-month" value={month} onChange={(e) => setMonth(e.target.value)} />
+          <a href={`/api/events/corporate/statement?month=${month}`} target="_blank" rel="noopener noreferrer" data-testid="corp-stmt-download" className="btn-ghost shrink-0 text-sm">PDF herunterladen</a>
+        </div>
+      </div>
     </div>
   );
 }
 
-function PromoListCard({ promos }: { promos: any[] }) {
+// Geteilte Verwaltungs-Buttons (Pausieren/Aktivieren · Bearbeiten · Löschen).
+function ManageButtons({ active, editing, onToggle, onEdit, onDelete, testidBase }: {
+  active: boolean; editing: boolean; onToggle: () => void; onEdit: () => void; onDelete: () => void; testidBase?: string;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      <button onClick={onToggle} data-testid={testidBase ? `${testidBase}-toggle` : undefined} className="rounded-lg px-2 py-1 text-xs font-bold text-ink-600 hover:bg-ink-100">{active ? "Pausieren" : "Aktivieren"}</button>
+      <button onClick={onEdit} data-testid={testidBase ? `${testidBase}-edit` : undefined} className="rounded-lg px-2 py-1 text-xs font-bold text-brand-700 hover:bg-brand-50">{editing ? "Schließen" : "Bearbeiten"}</button>
+      <button onClick={onDelete} data-testid={testidBase ? `${testidBase}-delete` : undefined} className="rounded-lg px-2 py-1 text-xs font-bold text-red-600 hover:bg-red-50">Löschen</button>
+    </div>
+  );
+}
+
+function PromoListCard({ promos, onChanged }: { promos: any[]; onChanged: () => void }) {
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState<any>({});
+  const [busy, setBusy] = useState(false);
+  const setF = (k: string, v: string) => setForm((f: any) => ({ ...f, [k]: v }));
+
+  function startEdit(p: any) {
+    setEditId(p.id);
+    setForm({ label: p.label ?? "", discountType: p.discountType, discountValue: String(p.discountValue), validUntil: p.validUntil ?? "", maxUses: p.maxUses != null ? String(p.maxUses) : "" });
+  }
+  async function patch(id: string, body: any) {
+    setBusy(true);
+    await fetch(`/api/events/promos/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => {});
+    setBusy(false); onChanged();
+  }
+  async function saveEdit(id: string) {
+    await patch(id, { label: form.label || null, discountType: form.discountType, discountValue: Number(form.discountValue), validUntil: form.validUntil || null, maxUses: form.maxUses ? Number(form.maxUses) : null });
+    setEditId(null);
+  }
+  async function remove(p: any) {
+    if (!window.confirm(`Promo-Code ${p.code} wirklich löschen?`)) return;
+    setBusy(true);
+    await fetch(`/api/events/promos/${p.id}`, { method: "DELETE" }).catch(() => {});
+    setBusy(false); onChanged();
+  }
+
   return (
     <div className="card p-6">
       <h2 className="mb-3 font-display text-lg font-extrabold text-ink-900">Promo-Codes ({promos.length})</h2>
       <div className="grid gap-2">
-        {promos.map((p) => (
-          <div key={p.id} className="flex items-center justify-between gap-3 rounded-xl bg-ink-50 px-3 py-2 text-sm" data-testid={`promo-${p.code}`}>
-            <span className="min-w-0">
-              <span className="font-mono font-extrabold tracking-wider text-ink-900">{p.code}</span>
-              <span className="ml-2 text-ink-600">{p.discountType === "FIXED" ? `${p.discountValue} €` : `${p.discountValue} %`}{p.label ? ` · ${p.label}` : ""}</span>
-            </span>
-            <span className="shrink-0 text-xs text-ink-500">{p.usedCount}{p.maxUses ? `/${p.maxUses}` : ""} eingelöst</span>
-          </div>
-        ))}
+        {promos.map((p) => {
+          const editing = editId === p.id;
+          return (
+            <div key={p.id} className={`rounded-xl border px-3 py-2 text-sm ${p.active ? "border-ink-100 bg-ink-50" : "border-ink-200 bg-white opacity-60"}`} data-testid={`promo-${p.code}`}>
+              <div className="flex items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="font-mono font-extrabold tracking-wider text-ink-900">{p.code}</span>
+                  <span className="ml-2 text-ink-600">{p.discountType === "FIXED" ? `${p.discountValue} €` : `${p.discountValue} %`}{p.label ? ` · ${p.label}` : ""}</span>
+                  {!p.active && <span className="ml-2 rounded-full bg-ink-200 px-2 py-0.5 text-[10px] font-bold text-ink-600">Pausiert</span>}
+                </span>
+                <span className="shrink-0 text-xs text-ink-500">{p.usedCount}{p.maxUses ? `/${p.maxUses}` : ""} eingelöst</span>
+              </div>
+              <div className="mt-1 flex justify-end">
+                <ManageButtons active={p.active} editing={editing} testidBase={`promo-${p.code}`} onToggle={() => patch(p.id, { active: !p.active })} onEdit={() => (editing ? setEditId(null) : startEdit(p))} onDelete={() => remove(p)} />
+              </div>
+              {editing && (
+                <div className="mt-2 grid gap-2 border-t border-ink-100 pt-2 sm:grid-cols-2">
+                  <input className="field" placeholder="Beschreibung" value={form.label} onChange={(e) => setF("label", e.target.value)} />
+                  <select className="field" value={form.discountType} onChange={(e) => setF("discountType", e.target.value)}>
+                    <option value="PERCENT">Prozent (%)</option>
+                    <option value="FIXED">Fester Betrag (€)</option>
+                  </select>
+                  <input className="field" type="number" placeholder="Wert" value={form.discountValue} onChange={(e) => setF("discountValue", e.target.value)} />
+                  <label className="grid gap-1 text-xs text-ink-500">Gültig bis<input className="field" type="date" value={form.validUntil} onChange={(e) => setF("validUntil", e.target.value)} /></label>
+                  <label className="grid gap-1 text-xs text-ink-500">Max. Einlösungen<input className="field" type="number" value={form.maxUses} onChange={(e) => setF("maxUses", e.target.value)} /></label>
+                  <button onClick={() => saveEdit(p.id)} disabled={busy} data-testid={`promo-${p.code}-save`} className="btn-primary self-end disabled:opacity-60">Speichern</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
         {promos.length === 0 && <p className="text-sm text-ink-400">Noch keine Codes.</p>}
       </div>
     </div>
