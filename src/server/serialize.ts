@@ -211,6 +211,8 @@ export function bookingDTO(b: any, extra: Record<string, any> = {}) {
     startedAt: iso(b.startedAt),
     completedAt: iso(b.completedAt),
     createdAt: iso(b.createdAt),
+    hasSignature: !!b.signature,
+    signatureAt: iso(b.signature?.signedAt),
     ...extra,
   };
 }

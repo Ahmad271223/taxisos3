@@ -206,6 +206,9 @@ model Booking {
   // Hochgeladene Nachweise (Phase C): Verordnung/Genehmigung etc.
   documents      MedicalDocument[]
 
+  // Digitaler Fahrtnachweis (Unterschrift des Fahrgasts).
+  signature      RideSignature?
+
   // Kundendaten
   customerName   String
   customerPhone  String
@@ -525,6 +528,22 @@ model MedicalDocument {
   @@index([bookingId])
   @@index([customerId])
   @@index([institutionId])
+}
+
+// ---------------------------------------------------------------------------
+// Digitaler Fahrtnachweis: Unterschrift des Fahrgasts (PNG) + Zeitstempel + GPS,
+// fest an die Fahrt gekoppelt. Dient als Nachweis (z. B. für Krankenkassen).
+// ---------------------------------------------------------------------------
+model RideSignature {
+  id         String   @id @default(cuid())
+  bookingId  String   @unique
+  booking    Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  signedName String?
+  dataBase64 String   // Unterschrift als PNG (Base64-Data-URL-Inhalt)
+  lat        Float?
+  lng        Float?
+  signedAt   DateTime @default(now())
+  createdAt  DateTime @default(now())
 }
 
 // ---------------------------------------------------------------------------

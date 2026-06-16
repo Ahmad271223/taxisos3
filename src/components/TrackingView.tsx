@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { SignaturePad } from "@/components/SignaturePad";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { getSocket } from "@/lib/socket";
@@ -31,6 +32,30 @@ export function TrackingView({ id }: { id: string }) {
   const [changeError, setChangeError] = useState<string | null>(null);
   const [sosState, setSosState] = useState<"idle" | "sending" | "sent">("idle");
   const [sosRescue, setSosRescue] = useState<any | null>(null);
+  const [sigOpen, setSigOpen] = useState(false);
+  const [sigBusy, setSigBusy] = useState(false);
+
+  // Fahrtnachweis: Unterschrift + GPS speichern.
+  async function submitSignature(dataUrl: string, name: string) {
+    setSigBusy(true);
+    const send = (lat?: number, lng?: number) =>
+      fetch(`/api/bookings/${id}/signature`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataBase64: dataUrl, signedName: name || null, lat: lat ?? null, lng: lng ?? null }),
+      })
+        .then(() => {
+          setSigOpen(false);
+          setBooking((b: any) => (b ? { ...b, hasSignature: true, signatureAt: new Date().toISOString() } : b));
+        })
+        .catch(() => {})
+        .finally(() => setSigBusy(false));
+    if (typeof navigator !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((p) => send(p.coords.latitude, p.coords.longitude), () => send(), { timeout: 6000 });
+    } else {
+      send();
+    }
+  }
 
   // SOS-/Notfallmeldung (Phase 17/21): Standort sichern, Meldung absetzen und
   // automatisch den nächsten freien Fahrer zum Standort schicken.
@@ -383,6 +408,34 @@ export function TrackingView({ id }: { id: string }) {
             </div>
             <span className="shrink-0 rounded-xl bg-ink-900 px-4 py-2 text-sm font-bold text-white">PDF öffnen</span>
           </a>
+        )}
+
+        {/* Digitaler Fahrtnachweis (Unterschrift) – bei Krankenfahrten */}
+        {status === "BEENDET" && booking.medicalType && (
+          <div className="card p-4" data-testid="signature-card">
+            {booking.hasSignature ? (
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <div>
+                  <p className="font-semibold text-green-700">✓ Fahrtnachweis unterschrieben</p>
+                  <p className="text-ink-500">{booking.signatureAt ? new Date(booking.signatureAt).toLocaleString("de-DE") : ""}</p>
+                </div>
+                <a href={`/api/bookings/${id}/signature?format=png`} target="_blank" rel="noreferrer" data-testid="view-signature" className="shrink-0 rounded-xl bg-ink-100 px-3 py-2 text-sm font-bold text-ink-700 hover:bg-ink-200">Ansehen</a>
+              </div>
+            ) : !sigOpen ? (
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm text-ink-600">
+                  <p className="font-semibold text-ink-900">Fahrtnachweis unterschreiben</p>
+                  <p>Digitale Unterschrift als Nachweis – z. B. für die Krankenkasse.</p>
+                </div>
+                <button onClick={() => setSigOpen(true)} data-testid="open-signature" className="shrink-0 rounded-xl bg-ink-900 px-4 py-2 text-sm font-bold text-white hover:bg-ink-800">Unterschreiben</button>
+              </div>
+            ) : (
+              <div className="grid gap-2">
+                <p className="text-sm font-semibold text-ink-900">Bitte im Feld unterschreiben:</p>
+                <SignaturePad onSubmit={submitSignature} busy={sigBusy} />
+              </div>
+            )}
+          </div>
         )}
 
         {/* Ziel ändern / Zwischenstopp einlegen (Phase 2f) */}
