@@ -161,11 +161,77 @@ export function AdminInvoices() {
           <div className="card p-6 text-center font-semibold text-red-600" data-testid="invoice-error">{error}</div>
         )}
 
+        {/* (A) Firma ↔ Kunden: Umsatz aus Fahrten und Netto-Auszahlung an die Firma. */}
+        {data && !loading && !error && (
+          <div className="card p-6" data-testid="revenue-overview">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-ink-100 pb-4">
+              <div>
+                <p className="eyebrow text-ink-500">Kundenumsatz &amp; Auszahlung</p>
+                <p className="font-display text-xl font-extrabold text-ink-900">{data.recipient.name}</p>
+                <p className="text-sm text-ink-500">Zeitraum: {data.periodLabel}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs uppercase tracking-wide text-ink-400">Netto-Verdienst</p>
+                <p className="font-display text-2xl font-extrabold text-green-700" data-testid="revenue-payout">{formatEuro(data.grossRevenue - data.net)}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-ink-100 text-left text-xs uppercase tracking-wide text-ink-500">
+                    <th className="py-2 pr-2">Datum</th>
+                    <th className="py-2 pr-2">Fahrt</th>
+                    <th className="py-2 pr-2 text-right">Fahrpreis</th>
+                    <th className="py-2 pr-2 text-right">Provision</th>
+                    <th className="py-2 text-right">Ihr Anteil</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.lines.length === 0 ? (
+                    <tr><td colSpan={5} className="py-6 text-center text-ink-400">Keine abgeschlossenen Fahrten in diesem Monat.</td></tr>
+                  ) : (
+                    data.lines.map((l: any, i: number) => (
+                      <tr key={i} className="border-b border-ink-50">
+                        <td className="py-1.5 pr-2 text-ink-600">{dmy(l.date)}</td>
+                        <td className="py-1.5 pr-2 text-ink-700">{l.route}</td>
+                        <td className="py-1.5 pr-2 text-right">{formatEuro(l.fare)}</td>
+                        <td className="py-1.5 pr-2 text-right text-red-600">− {formatEuro(l.fee)}</td>
+                        <td className="py-1.5 text-right font-semibold text-green-700">{formatEuro(l.fare - l.fee)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-4 grid justify-end gap-1 text-sm">
+              <div className="flex justify-between gap-12">
+                <span className="text-ink-500">Bruttoumsatz (Fahrgäste)</span>
+                <span className="font-semibold" data-testid="revenue-gross">{formatEuro(data.grossRevenue)}</span>
+              </div>
+              <div className="flex justify-between gap-12">
+                <span className="text-ink-500">abzgl. Plattform-Provision</span>
+                <span className="text-red-600">− {formatEuro(data.net)}</span>
+              </div>
+              <div className="mt-1 flex justify-between gap-12 border-t border-ink-200 pt-2">
+                <span className="font-bold text-ink-900">Netto-Auszahlung an Sie</span>
+                <span className="font-display text-lg font-extrabold text-green-700">{formatEuro(data.grossRevenue - data.net)}</span>
+              </div>
+            </div>
+
+            <p className="mt-4 text-xs text-ink-400">
+              Das behält Ihr Unternehmen aus den Fahrten. Die Plattform-Provision wird separat in Rechnung gestellt (siehe unten) – zzgl. {Math.round(data.vatRate * 100)} % USt = {formatEuro(data.gross)}.
+            </p>
+          </div>
+        )}
+
+        {/* (B) Firma ↔ Plattform: Provisions-/Gebührenrechnung. */}
         {data && !loading && !error && (
           <div className="card p-6" data-testid="invoice-preview">
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-ink-100 pb-4">
               <div>
-                <p className="eyebrow text-ink-500">Rechnung</p>
+                <p className="eyebrow text-ink-500">Gebühren-Rechnung (Plattform-Provision)</p>
                 <p className="font-display text-xl font-extrabold text-ink-900" data-testid="invoice-no">{data.invoiceNo}</p>
                 <p className="text-sm text-ink-500">Zeitraum: {data.periodLabel}</p>
               </div>
