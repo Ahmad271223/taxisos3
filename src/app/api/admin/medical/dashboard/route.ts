@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
-import { medicalLabel } from "@/lib/medical";
+import { medicalLabel, documentValidity } from "@/lib/medical";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +43,19 @@ export async function GET() {
   const inToday = (d: Date | null) => !!d && d >= todayStart && d < todayEnd;
 
   const completed = monthRides.filter((b) => b.status === "ABGESCHLOSSEN");
+
+  // Dokument-Ablauf-Ampel: Nachweise mit Gültigkeitsdatum zu Buchungen dieser
+  // Firma; alles, was bald abläuft oder abgelaufen ist, kommt in die Warnungen.
+  const validityDocs = await prisma.medicalDocument.findMany({
+    where: { validUntil: { not: null }, booking: { companyId } },
+    select: { id: true, kind: true, fileName: true, validUntil: true, bookingId: true },
+  });
+  const warnings = validityDocs
+    .map((d) => ({ ...d, ...documentValidity(d.validUntil) }))
+    .filter((d) => d.status === "EXPIRING" || d.status === "EXPIRED")
+    .sort((a, b) => (a.days ?? 0) - (b.days ?? 0))
+    .slice(0, 25);
+
   const kpis = {
     total: monthRides.length,
     today: monthRides.filter((b) => inToday(refDate(b))).length,
@@ -51,6 +64,8 @@ export async function GET() {
     revenueThisMonth: r2(completed.reduce((s, b) => s + (b.fare ?? 0), 0)),
     activeSeries: new Set(monthRides.filter((b) => b.recurringId).map((b) => b.recurringId)).size,
     pendingDocs: await prisma.medicalDocument.count({ where: { reviewStatus: "PENDING", booking: { companyId } } }),
+    expiringDocs: warnings.filter((d) => d.status === "EXPIRING").length,
+    expiredDocs: warnings.filter((d) => d.status === "EXPIRED").length,
   };
 
   // Aufschlüsselung nach Krankenkasse (Privatzahler separat).
@@ -92,5 +107,5 @@ export async function GET() {
 
   const monthLabel = new Intl.DateTimeFormat("de-DE", { month: "long", year: "numeric" }).format(monthStart);
 
-  return NextResponse.json({ monthLabel, kpis, byPayer, byInstitution, byType });
+  return NextResponse.json({ monthLabel, kpis, byPayer, byInstitution, byType, warnings });
 }

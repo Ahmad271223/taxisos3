@@ -55,14 +55,32 @@ export function AdminMedical() {
               <h2 className="font-display text-lg font-extrabold text-ink-900">Übersicht · {dash.monthLabel}</h2>
               <span className="rounded-full bg-ink-900 px-2.5 py-1 text-[10px] font-extrabold tracking-wider text-brand-500">LIVE</span>
             </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <Kpi label="Heute" value={dash.kpis.today} />
               <Kpi label="In Bearbeitung" value={dash.kpis.inProgress} />
               <Kpi label="Abgeschlossen" value={dash.kpis.completedThisMonth} />
               <Kpi label="Umsatz" value={formatEuro(dash.kpis.revenueThisMonth)} accent />
               <Kpi label="Offene Dok." value={dash.kpis.pendingDocs} warn={dash.kpis.pendingDocs > 0} />
               <Kpi label="Serienfahrten" value={dash.kpis.activeSeries} />
+              <Kpi label="Dok. laufen ab" value={dash.kpis.expiringDocs ?? 0} warn={(dash.kpis.expiringDocs ?? 0) > 0} />
+              <Kpi label="Dok. abgelaufen" value={dash.kpis.expiredDocs ?? 0} danger={(dash.kpis.expiredDocs ?? 0) > 0} />
             </div>
+
+            {(dash.warnings ?? []).length > 0 && (
+              <div className="mt-4 rounded-2xl border-2 border-amber-200 bg-amber-50 p-4" data-testid="doc-warnings">
+                <p className="mb-2 text-sm font-extrabold text-amber-800">⚠️ Dokumente prüfen ({dash.warnings.length})</p>
+                <div className="grid gap-1.5">
+                  {dash.warnings.map((w: any) => (
+                    <div key={w.id} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="min-w-0 truncate text-ink-800">{KIND_LABEL[w.kind] ?? w.kind} · {w.fileName}</span>
+                      <span className={`shrink-0 font-bold ${w.status === "EXPIRED" ? "text-red-700" : "text-amber-700"}`}>
+                        {w.status === "EXPIRED" ? `abgelaufen (${w.validUntil})` : `läuft in ${w.days} T. ab`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="mt-4 grid gap-4 md:grid-cols-3">
               <Breakdown title="Nach Krankenkasse" rows={dash.byPayer} empty="Noch keine Krankenfahrten" />
               <Breakdown title="Nach Einrichtung" rows={dash.byInstitution} empty="Keine Einrichtungsfahrten" />
@@ -81,6 +99,7 @@ export function AdminMedical() {
                 <div className="min-w-0">
                   <p className="truncate font-bold text-ink-900">{KIND_LABEL[d.kind] ?? d.kind} · {d.fileName}</p>
                   <p className="text-xs text-ink-500">{new Date(d.createdAt).toLocaleString("de-DE")}{d.bookingId ? ` · Buchung ${d.bookingId.slice(0, 6)}` : ""}</p>
+                  {d.validUntil && <ValidityChip status={d.status} days={d.days} validUntil={d.validUntil} />}
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold ${STATUS_STYLE[d.reviewStatus] ?? "bg-ink-100 text-ink-600"}`}>{d.reviewStatus}</span>
@@ -112,13 +131,25 @@ export function AdminMedical() {
   );
 }
 
-function Kpi({ label, value, accent, warn }: { label: string; value: React.ReactNode; accent?: boolean; warn?: boolean }) {
+function Kpi({ label, value, accent, warn, danger }: { label: string; value: React.ReactNode; accent?: boolean; warn?: boolean; danger?: boolean }) {
+  const box = accent ? "bg-ink-900" : danger ? "bg-red-50 ring-1 ring-red-200" : warn ? "bg-amber-50 ring-1 ring-amber-200" : "bg-ink-50";
+  const txt = accent ? "text-brand-500" : danger ? "text-red-700" : warn ? "text-amber-700" : "text-ink-900";
   return (
-    <div className={`rounded-2xl p-3 ${accent ? "bg-ink-900" : warn ? "bg-amber-50 ring-1 ring-amber-200" : "bg-ink-50"}`}>
+    <div className={`rounded-2xl p-3 ${box}`}>
       <p className={`text-[10px] font-semibold uppercase tracking-wider ${accent ? "text-white/60" : "text-ink-400"}`}>{label}</p>
-      <p className={`font-display text-xl font-extrabold ${accent ? "text-brand-500" : warn ? "text-amber-700" : "text-ink-900"}`}>{value}</p>
+      <p className={`font-display text-xl font-extrabold ${txt}`}>{value}</p>
     </div>
   );
+}
+
+function ValidityChip({ status, days, validUntil }: { status: string; days: number | null; validUntil: string }) {
+  const cfg =
+    status === "EXPIRED"
+      ? { dot: "🔴", cls: "text-red-700", txt: `abgelaufen seit ${Math.abs(days ?? 0)} T.` }
+      : status === "EXPIRING"
+      ? { dot: "🟡", cls: "text-amber-700", txt: `läuft in ${days} T. ab` }
+      : { dot: "🟢", cls: "text-green-700", txt: `gültig bis ${validUntil}` };
+  return <span className={`mt-0.5 inline-flex items-center gap-1 text-[11px] font-bold ${cfg.cls}`}>{cfg.dot} {cfg.txt}</span>;
 }
 
 function BillingSection() {

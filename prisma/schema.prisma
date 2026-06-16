@@ -495,6 +495,8 @@ model MedicalDocument {
   fileName      String
   mimeType      String
   dataBase64    String   // Dateiinhalt (Base64); fuer Demo ausreichend
+  // Gültigkeit (Phase: Ablauf-Ampel). Leer = unbefristet/ohne Angabe.
+  validUntil    String?  // ISO "YYYY-MM-DD"
 
   // Zuordnung (mind. eine gesetzt)
   customerId    String?

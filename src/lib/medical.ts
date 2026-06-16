@@ -70,6 +70,31 @@ export function equipmentLabels(csv: string | null | undefined): string[] {
     .map((k) => EQUIPMENT_OPTIONS.find((e) => e.key === k)?.label ?? k);
 }
 
+// ── Dokument-Ablauf-Ampel ──────────────────────────────────────────────────
+export type DocValidity = "VALID" | "EXPIRING" | "EXPIRED" | "NONE";
+
+// Tage bis zum Datum (negativ = abgelaufen). null bei fehlendem/ungültigem Datum.
+export function daysUntil(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  d.setHours(0, 0, 0, 0);
+  return Math.round((d.getTime() - today.getTime()) / 86_400_000);
+}
+
+// Ab wann „läuft bald ab" (gelb) gilt.
+export const DOC_EXPIRY_WARN_DAYS = 14;
+
+export function documentValidity(validUntil: string | null | undefined): { status: DocValidity; days: number | null } {
+  const days = daysUntil(validUntil);
+  if (days == null) return { status: "NONE", days: null };
+  if (days < 0) return { status: "EXPIRED", days };
+  if (days <= DOC_EXPIRY_WARN_DAYS) return { status: "EXPIRING", days };
+  return { status: "VALID", days };
+}
+
 // Zod-Felder, die in die Buchungs-/Serien-Schemata gespreadet werden.
 export const medicalDetailsSchema = {
   patientName: z.string().max(120).optional().nullable(),

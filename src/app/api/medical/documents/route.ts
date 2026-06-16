@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole, getSession } from "@/lib/session";
 import { logAccess } from "@/lib/accessLog";
+import { documentValidity } from "@/lib/medical";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,7 @@ const schema = z.object({
   fileName: z.string().min(1).max(200),
   mimeType: z.string().min(1).max(120),
   dataBase64: z.string().min(1).max(MAX_BASE64),
+  validUntil: z.string().max(20).optional().nullable(),
   bookingId: z.string().optional().nullable(),
   recurringId: z.string().optional().nullable(),
   customerId: z.string().optional().nullable(),
@@ -58,6 +60,7 @@ export async function POST(req: Request) {
       fileName: d.fileName,
       mimeType: d.mimeType,
       dataBase64: d.dataBase64,
+      validUntil: d.validUntil ?? null,
       bookingId: d.bookingId ?? null,
       recurringId: d.recurringId ?? null,
       customerId: d.customerId ?? customer?.sub ?? null,
@@ -93,9 +96,10 @@ export async function GET(req: Request) {
     take: 200,
     select: {
       id: true, kind: true, fileName: true, mimeType: true, reviewStatus: true, reviewNote: true,
-      reviewedAt: true, createdAt: true, bookingId: true, recurringId: true, customerId: true, institutionId: true,
+      reviewedAt: true, createdAt: true, validUntil: true, bookingId: true, recurringId: true, customerId: true, institutionId: true,
     },
   });
+  const withValidity = docs.map((d) => ({ ...d, ...documentValidity(d.validUntil) }));
   await logAccess({ actorType: "ADMIN", actorId: session.sub, action: "VIEW", entity: "MEDICAL_DOCUMENT", detail: `Liste (${docs.length})` });
-  return NextResponse.json({ documents: docs });
+  return NextResponse.json({ documents: withValidity });
 }

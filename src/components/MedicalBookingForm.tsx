@@ -65,6 +65,7 @@ export function MedicalBookingForm() {
   // Phase C: Nachweise (Verordnung/Genehmigung), nach Buchung hochgeladen.
   const [files, setFiles] = useState<File[]>([]);
   const [docKind, setDocKind] = useState("VERORDNUNG");
+  const [docValidUntil, setDocValidUntil] = useState("");
   // Einzelfahrt: optionale automatische Rückfahrt.
   const [returnSingle, setReturnSingle] = useState(false);
   const [returnTimeSingle, setReturnTimeSingle] = useState("");
@@ -101,7 +102,7 @@ export function MedicalBookingForm() {
         await fetch("/api/medical/documents", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ kind: docKind, fileName: f.name, mimeType: f.type || "application/octet-stream", dataBase64, ...ref }),
+          body: JSON.stringify({ kind: docKind, validUntil: docValidUntil || null, fileName: f.name, mimeType: f.type || "application/octet-stream", dataBase64, ...ref }),
         });
       } catch {
         /* ein fehlgeschlagener Upload darf die Buchung nicht blockieren */
@@ -454,7 +455,11 @@ export function MedicalBookingForm() {
               <input className="field" type="file" multiple accept="application/pdf,image/*" data-testid="medical-docs"
                 onChange={(e) => setFiles(Array.from(e.target.files ?? []))} />
             </div>
-            {files.length > 0 && <p className="mt-1 text-xs text-ink-500" data-testid="medical-docs-count">{files.length} Datei(en) als {docKind.toLowerCase()} ausgewählt</p>}
+            <label className="mt-2 grid gap-1 text-xs text-ink-500">
+              Gültig bis (z. B. Genehmigung/Verordnung) – optional
+              <input className="field" type="date" data-testid="medical-doc-valid" value={docValidUntil} onChange={(e) => setDocValidUntil(e.target.value)} />
+            </label>
+            {files.length > 0 && <p className="mt-1 text-xs text-ink-500" data-testid="medical-docs-count">{files.length} Datei(en) als {docKind.toLowerCase()} ausgewählt{docValidUntil ? `, gültig bis ${docValidUntil}` : ""}</p>}
           </div>
         </div>
       </details>
