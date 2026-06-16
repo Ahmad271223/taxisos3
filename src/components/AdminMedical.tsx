@@ -71,6 +71,8 @@ export function AdminMedical() {
           </section>
         )}
 
+        <BillingSection />
+
         <section className="card p-6">
           <h2 className="mb-3 font-display text-lg font-extrabold text-ink-900">Dokumentenprüfung ({pending.length} offen)</h2>
           <div className="grid gap-2" data-testid="doc-list">
@@ -116,6 +118,46 @@ function Kpi({ label, value, accent, warn }: { label: string; value: React.React
       <p className={`text-[10px] font-semibold uppercase tracking-wider ${accent ? "text-white/60" : "text-ink-400"}`}>{label}</p>
       <p className={`font-display text-xl font-extrabold ${accent ? "text-brand-500" : warn ? "text-amber-700" : "text-ink-900"}`}>{value}</p>
     </div>
+  );
+}
+
+function BillingSection() {
+  const now = new Date();
+  const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
+  const [data, setData] = useState<any | null>(null);
+  useEffect(() => {
+    fetch(`/api/admin/medical/billing?month=${month}`).then((r) => (r.ok ? r.json() : null)).then((d) => d && setData(d)).catch(() => {});
+  }, [month]);
+
+  return (
+    <section className="card p-6" data-testid="medical-billing">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-display text-lg font-extrabold text-ink-900">Krankenkassen-Abrechnung</h2>
+        <div className="flex items-center gap-2">
+          <input className="field max-w-[160px]" type="month" value={month} data-testid="billing-month" onChange={(e) => setMonth(e.target.value)} />
+          <a href={`/api/admin/medical/billing?month=${month}&format=csv`} data-testid="billing-csv" className="shrink-0 rounded-xl bg-ink-900 px-3 py-2.5 text-sm font-extrabold text-white transition hover:bg-ink-800">CSV-Export</a>
+        </div>
+      </div>
+      {data && (
+        <>
+          <div className="grid gap-2">
+            {(data.groups ?? []).map((g: any, i: number) => (
+              <div key={i} className="flex items-center justify-between gap-3 rounded-xl bg-ink-50 px-3 py-2.5">
+                <span className="min-w-0 truncate font-bold text-ink-900">{g.payer}</span>
+                <span className="shrink-0 text-sm text-ink-600">{g.count} Fahrten · {g.km} km · <span className="font-extrabold text-ink-900">{formatEuro(g.fare)}</span></span>
+              </div>
+            ))}
+            {(data.groups ?? []).length === 0 && <p className="text-sm text-ink-400">Keine abgeschlossenen Krankenfahrten in {data.periodLabel}.</p>}
+          </div>
+          {data.total?.count > 0 && (
+            <div className="mt-3 flex items-center justify-between gap-3 border-t border-ink-200 pt-3 text-sm">
+              <span className="font-bold text-ink-900">Gesamt · {data.periodLabel}</span>
+              <span className="text-ink-600">{data.total.count} Fahrten · {data.total.km} km · <span className="font-display text-lg font-extrabold text-ink-900">{formatEuro(data.total.fare)}</span></span>
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 

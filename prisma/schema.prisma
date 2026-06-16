@@ -195,6 +195,10 @@ model Booking {
   institutionId  String?
   institution    Institution? @relation(fields: [institutionId], references: [id], onDelete: SetNull)
 
+  // Verknüpfung zum Stammpatienten der Einrichtung (für die Fahrtenhistorie).
+  institutionPatientId String?
+  institutionPatient   InstitutionPatient? @relation(fields: [institutionPatientId], references: [id], onDelete: SetNull)
+
   // Hochgeladene Nachweise (Phase C): Verordnung/Genehmigung etc.
   documents      MedicalDocument[]
 
@@ -456,7 +460,10 @@ model InstitutionPatient {
 
   name          String
   birthDate     String?  // ISO "YYYY-MM-DD"
+  gender        String?  // M | F | D
   phone         String?
+  email         String?
+  address       String?  // Wohnanschrift
   defaultPickupAddress String?
   defaultPickupLat     Float?
   defaultPickupLng     Float?
@@ -465,7 +472,11 @@ model InstitutionPatient {
   payerType     String?
   insuranceName String?
   insuranceNumber String?
+  kostentraegerNummer String?   // IK-Nummer der Krankenkasse
+  befreiungUntil String?        // Befreiungsausweis gültig bis (ISO)
   notes         String?
+
+  bookings      Booking[]
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

@@ -91,6 +91,7 @@ export async function POST(req: Request) {
   const booking = await prisma.booking.create({
     data: {
       institutionId: inst.id,
+      institutionPatientId: patient?.id ?? null,
       customerName: patientName,
       customerPhone: patientPhone,
       patientName,

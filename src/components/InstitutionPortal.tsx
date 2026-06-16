@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Brand } from "@/components/Brand";
 import { AddressInput } from "@/components/AddressInput";
 import type { GeocodeResult } from "@/lib/geo";
-import { MEDICAL_TYPES, MOBILITY_OPTIONS } from "@/lib/medical";
+import { MEDICAL_TYPES, MOBILITY_OPTIONS, mobilityLabel } from "@/lib/medical";
 import { VEHICLE_CLASSES } from "@/lib/vehicleClasses";
 
 interface Inst { id: string; name: string; type: string; email: string }
@@ -260,18 +260,31 @@ function NewRideCard({ patients, onCreated }: { patients: any[]; onCreated: () =
   );
 }
 
+const EMPTY_PATIENT = { name: "", birthDate: "", gender: "", phone: "", email: "", address: "", mobility: "", payerType: "", insuranceName: "", insuranceNumber: "", kostentraegerNummer: "", befreiungUntil: "" };
+
+function statusShort(s: string): string {
+  return ({ OFFEN: "offen", ZUGEWIESEN: "zugewiesen", AKTIV: "unterwegs", ABGESCHLOSSEN: "erledigt", STORNIERT: "storniert" } as Record<string, string>)[s] ?? s;
+}
+
 function PatientsCard({ patients, onCreated }: { patients: any[]; onCreated: () => void }) {
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", birthDate: "", phone: "", mobility: "" });
+  const [form, setForm] = useState(EMPTY_PATIENT);
   const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState("");
+  const [openId, setOpenId] = useState<string | null>(null);
   const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }));
 
   async function add() {
     setBusy(true);
     const res = await fetch("/api/institutions/patients", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
     setBusy(false);
-    if (res.ok) { setForm({ name: "", birthDate: "", phone: "", mobility: "" }); setOpen(false); onCreated(); }
+    if (res.ok) { setForm(EMPTY_PATIENT); setOpen(false); onCreated(); }
   }
+
+  const ql = q.trim().toLowerCase();
+  const filtered = ql
+    ? patients.filter((p) => [p.name, p.phone, p.insuranceName, p.insuranceNumber].some((v) => (v ?? "").toLowerCase().includes(ql)))
+    : patients;
 
   return (
     <div className="card p-6">
@@ -279,26 +292,105 @@ function PatientsCard({ patients, onCreated }: { patients: any[]; onCreated: () 
         <h2 className="font-display text-lg font-extrabold text-ink-900">Stammpatienten ({patients.length})</h2>
         <button onClick={() => setOpen((o) => !o)} data-testid="patient-toggle" className="text-sm font-bold text-ink-600 hover:text-ink-900">{open ? "Schließen" : "+ Patient"}</button>
       </div>
+
       {open && (
         <div className="mb-4 grid gap-2 sm:grid-cols-2">
           <input className="field" data-testid="patient-name" placeholder="Name *" value={form.name} onChange={(e) => set("name", e.target.value)} />
           <input className="field" type="date" data-testid="patient-birth" value={form.birthDate} onChange={(e) => set("birthDate", e.target.value)} />
+          <select className="field" value={form.gender} onChange={(e) => set("gender", e.target.value)}>
+            <option value="">Geschlecht …</option><option value="M">männlich</option><option value="F">weiblich</option><option value="D">divers</option>
+          </select>
           <input className="field" placeholder="Telefon" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
+          <input className="field" placeholder="E-Mail" value={form.email} onChange={(e) => set("email", e.target.value)} />
+          <input className="field" placeholder="Anschrift" value={form.address} onChange={(e) => set("address", e.target.value)} />
           <select className="field" data-testid="patient-mobility" value={form.mobility} onChange={(e) => set("mobility", e.target.value)}>
             <option value="">Mobilität …</option>
             {MOBILITY_OPTIONS.map((m) => <option key={m.key} value={m.key}>{m.icon} {m.label}</option>)}
           </select>
+          <select className="field" value={form.payerType} onChange={(e) => set("payerType", e.target.value)}>
+            <option value="">Kostenträger …</option><option value="SELF">Privatzahler</option><option value="INSURANCE">Krankenkasse</option>
+          </select>
+          <input className="field" placeholder="Krankenkasse" value={form.insuranceName} onChange={(e) => set("insuranceName", e.target.value)} />
+          <input className="field" placeholder="Versicherungsnummer" value={form.insuranceNumber} onChange={(e) => set("insuranceNumber", e.target.value)} />
+          <input className="field" placeholder="Kostenträger-Nr. (IK)" value={form.kostentraegerNummer} onChange={(e) => set("kostentraegerNummer", e.target.value)} />
+          <label className="grid gap-1 text-xs text-ink-500">Befreiungsausweis gültig bis<input className="field" type="date" value={form.befreiungUntil} onChange={(e) => set("befreiungUntil", e.target.value)} /></label>
           <button onClick={add} disabled={busy || !form.name.trim()} data-testid="patient-save" className="btn-primary sm:col-span-2 disabled:opacity-60">{busy ? "Speichern …" : "Patient speichern"}</button>
         </div>
       )}
+
+      {patients.length > 3 && (
+        <input className="field mb-3" data-testid="patient-search" placeholder="Suche: Name, Telefon, Kasse, Vers.-Nr." value={q} onChange={(e) => setQ(e.target.value)} />
+      )}
+
       <div className="grid gap-2">
-        {patients.map((p) => (
-          <div key={p.id} className="flex items-center justify-between rounded-xl bg-ink-50 px-3 py-2 text-sm">
-            <span className="font-bold text-ink-900">{p.name}</span>
-            <span className="text-ink-500">{p.birthDate ?? ""}</span>
+        {filtered.map((p) => (
+          <div key={p.id} data-testid={`patient-${p.id}`}>
+            <button onClick={() => setOpenId((id) => (id === p.id ? null : p.id))} className="flex w-full items-center justify-between rounded-xl bg-ink-50 px-3 py-2 text-left text-sm transition hover:bg-ink-100">
+              <span className="min-w-0 truncate"><span className="font-bold text-ink-900">{p.name}</span>{p.insuranceName ? <span className="text-ink-500"> · {p.insuranceName}</span> : null}</span>
+              <span className="shrink-0 text-ink-400">{p.birthDate ?? ""} {openId === p.id ? "▲" : "▼"}</span>
+            </button>
+            {openId === p.id && <PatientAkte id={p.id} />}
           </div>
         ))}
-        {patients.length === 0 && <p className="text-sm text-ink-400">Noch keine Patienten angelegt.</p>}
+        {filtered.length === 0 && <p className="text-sm text-ink-400">{patients.length === 0 ? "Noch keine Patienten angelegt." : "Kein Treffer."}</p>}
+      </div>
+    </div>
+  );
+}
+
+function PatientAkte({ id }: { id: string }) {
+  const [data, setData] = useState<any | null>(null);
+  useEffect(() => {
+    fetch(`/api/institutions/patients/${id}`).then((r) => (r.ok ? r.json() : null)).then(setData).catch(() => {});
+  }, [id]);
+  if (!data) return <div className="px-3 py-2 text-xs text-ink-400">Lädt Akte …</div>;
+  const p = data.patient;
+  const F = ({ label, val }: { label: string; val: any }) =>
+    val ? (
+      <div>
+        <dt className="text-[10px] uppercase tracking-wide text-ink-400">{label}</dt>
+        <dd className="font-semibold text-ink-800">{val}</dd>
+      </div>
+    ) : null;
+  return (
+    <div className="mt-1 rounded-xl border border-ink-100 bg-white p-3" data-testid={`akte-${id}`}>
+      <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
+        <F label="Geburtsdatum" val={p.birthDate} />
+        <F label="Geschlecht" val={p.gender === "M" ? "männlich" : p.gender === "F" ? "weiblich" : p.gender === "D" ? "divers" : null} />
+        <F label="Telefon" val={p.phone} />
+        <F label="E-Mail" val={p.email} />
+        <F label="Anschrift" val={p.address} />
+        <F label="Mobilität" val={mobilityLabel(p.mobility)} />
+        <F label="Kostenträger" val={p.payerType === "INSURANCE" ? (p.insuranceName ?? "Krankenkasse") : p.payerType === "SELF" ? "Privatzahler" : null} />
+        <F label="Vers.-Nr." val={p.insuranceNumber} />
+        <F label="Kostenträger-Nr." val={p.kostentraegerNummer} />
+        <F label="Befreiung bis" val={p.befreiungUntil} />
+      </dl>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div>
+          <p className="mb-1 text-[10px] uppercase tracking-wide text-ink-400">Fahrtenhistorie ({data.stats.totalRides})</p>
+          <div className="grid gap-1">
+            {data.rides.slice(0, 8).map((r: any) => (
+              <div key={r.id} className="flex items-center justify-between gap-2 rounded-lg bg-ink-50 px-2 py-1 text-xs">
+                <span className="min-w-0 truncate text-ink-700">{new Date(r.scheduledAt ?? r.createdAt).toLocaleDateString("de-DE")} · {r.medicalLabel ?? "Fahrt"}</span>
+                <span className="shrink-0 font-semibold text-ink-900">{statusShort(r.status)}</span>
+              </div>
+            ))}
+            {data.rides.length === 0 && <p className="text-xs text-ink-400">Noch keine Fahrten.</p>}
+          </div>
+        </div>
+        <div>
+          <p className="mb-1 text-[10px] uppercase tracking-wide text-ink-400">Dokumente ({data.documents.length})</p>
+          <div className="grid gap-1">
+            {data.documents.slice(0, 8).map((d: any) => (
+              <div key={d.id} className="flex items-center justify-between gap-2 rounded-lg bg-ink-50 px-2 py-1 text-xs">
+                <span className="min-w-0 truncate text-ink-700">{d.kind} · {d.fileName}</span>
+                <span className="shrink-0 font-semibold text-ink-500">{d.reviewStatus}</span>
+              </div>
+            ))}
+            {data.documents.length === 0 && <p className="text-xs text-ink-400">Keine Dokumente.</p>}
+          </div>
+        </div>
       </div>
     </div>
   );
