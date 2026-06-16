@@ -6,6 +6,7 @@ import { computePlatformRate, getPlatformRate } from "../lib/platformRate";
 import { prisma } from "../lib/prisma";
 import { lookupFlight, airportPickupTime } from "../lib/flights";
 import { materializeDueRides } from "../lib/recurring";
+import { sendDueReminders } from "../lib/reminders";
 import type { Dispatcher } from "./dispatch";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -102,4 +103,20 @@ export function scheduleRecurringRides(): void {
   };
   run().catch(() => {}); // beim Boot
   setInterval(() => run().catch(() => {}), RECURRING_POLL_MS);
+}
+
+// --- Fahrt-Erinnerungen (24h/2h/30min) -------------------------------------
+const REMINDER_POLL_MS = 5 * 60_000;
+
+export function scheduleRideReminders(): void {
+  const run = async () => {
+    try {
+      const n = await sendDueReminders();
+      if (n > 0) console.log(`  Erinnerungen: ${n} gesendet.`);
+    } catch (e) {
+      console.error("Reminder-Lauf fehlgeschlagen:", e);
+    }
+  };
+  run().catch(() => {}); // beim Boot
+  setInterval(() => run().catch(() => {}), REMINDER_POLL_MS);
 }

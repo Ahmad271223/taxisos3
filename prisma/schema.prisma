@@ -305,6 +305,10 @@ model Booking {
   // Reservierte Folgefahrt (Bolt-Style "near completion")
   isReserved     Boolean  @default(false)
 
+  // Erinnerungen (24h/2h/30min vor der Fahrt): bereits gesendete Offsets als CSV
+  // ("24h,2h,30m"), damit jede Erinnerung genau einmal verschickt wird.
+  remindersSent  String   @default("")
+
   // Notfall-Rettungsfahrt (Phase 21): per SOS automatisch zum Standort disponiert.
   isSos          Boolean  @default(false)
 
