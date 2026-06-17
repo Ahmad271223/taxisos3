@@ -27,6 +27,8 @@ import { waitCharge } from "../lib/airportExtras";
 import { capturePayment, voidPayment } from "../lib/stripe";
 import { settleCorporateComplete, releaseCorporate } from "./corporateSettle";
 import { fixedPriceFor } from "../lib/fixedPrice";
+import { getPlatformConfig } from "../lib/platformConfig";
+import { insuranceFare, riskBufferFare, stopSurcharge, applyFloor } from "../lib/fareAdjust";
 import { bookingDTO, driverAdmin } from "./serialize";
 
 const PHASE_DURATION_MS = 15_000;
@@ -538,34 +540,42 @@ export class Dispatcher {
     let priceIsFixed = false;
     try {
       if (b0) {
-        // Festpreis-Engine: hat das annehmende Unternehmen eine passende
-        // Festpreis-Regel für diese Strecke (nur Direktfahrt ohne Zwischenstopps),
-        // wird dieser feste Preis als Endpreis eingefroren.
-        const hasStops = parseStops(b0.stops).length > 0;
-        if (live?.companyId && !hasStops) {
-          const rules = await prisma.fixedPriceRule.findMany({ where: { companyId: live.companyId, active: true } });
-          const fixed = fixedPriceFor(
-            rules,
-            { lat: b0.pickupLat, lng: b0.pickupLng },
-            { lat: b0.destLat, lng: b0.destLng },
-            normalizeClass(b0.vehicleClass),
-          );
-          if (fixed != null) {
-            priceExact = fixed;
-            priceIsFixed = true;
+        const numStops = parseStops(b0.stops).length;
+        // Meter-Schätzpreis (Klassenfaktor) + Strecke für alle Modi berechnen.
+        const company = live?.companyId
+          ? await prisma.company.findUnique({ where: { id: live.companyId }, select: { slug: true } })
+          : null;
+        const pricing = await pricingForSlug(company?.slug);
+        const est = await estimatePriceViaWith(bookingRoutePoints(b0), pricing);
+        const factor = await classFactorForCompanyId(live?.companyId, normalizeClass(b0.vehicleClass));
+        const metered = applyClassFactor((est.priceMin + est.priceMax) / 2, factor);
+        const km = (est.distanceMeters ?? 0) / 1000;
+
+        // Plattform-Leitplanken + Firmen-Pricing (Buffer/Pro-Stopp) laden.
+        const cfg = await getPlatformConfig();
+        const pr = live?.companyId ? await prisma.pricing.findUnique({ where: { companyId: live.companyId } }) : null;
+
+        // 1) Krankenkassen-/DTA-Tarif hat Vorrang (fester Satz, ohne Markt-Logik).
+        const insFare = b0.payerType === "INSURANCE" ? insuranceFare(km, cfg) : null;
+        if (insFare != null) {
+          priceExact = insFare;
+          priceIsFixed = true;
+        } else {
+          // 2) Manuelle Festpreis-Regel (nur Direktfahrt) -> 3) dynamischer Buffer -> 4) Meter.
+          let base = metered;
+          if (live?.companyId && numStops === 0) {
+            const rules = await prisma.fixedPriceRule.findMany({ where: { companyId: live.companyId, active: true } });
+            const fixed = fixedPriceFor(rules, { lat: b0.pickupLat, lng: b0.pickupLng }, { lat: b0.destLat, lng: b0.destLng }, normalizeClass(b0.vehicleClass));
+            if (fixed != null) { base = fixed; priceIsFixed = true; }
           }
-        }
-        if (!priceIsFixed) {
-          // Sonst: Meter-Tarif des annehmenden Unternehmens.
-          const company = live?.companyId
-            ? await prisma.company.findUnique({ where: { id: live.companyId }, select: { slug: true } })
-            : null;
-          const pricing = await pricingForSlug(company?.slug);
-          const est = await estimatePriceViaWith(bookingRoutePoints(b0), pricing);
-          // Klassenfaktor der annehmenden Firma anwenden (Phase 12 Marktplatz).
-          const factor = await classFactorForCompanyId(live?.companyId, normalizeClass(b0.vehicleClass));
-          // Mittelwert der Spanne als Festpreis (priceMin/priceMax bilden +/- 12%-Korridor).
-          priceExact = applyClassFactor((est.priceMin + est.priceMax) / 2, factor);
+          if (!priceIsFixed) {
+            const buf = riskBufferFare(metered, pr?.fixedBufferPct ?? 0);
+            if (buf != null) { base = buf; priceIsFixed = true; }
+          }
+          // Pro-Stopp-Gebühr + globale Preisuntergrenze.
+          base += stopSurcharge(numStops, pr?.perStopFee ?? 0);
+          base = applyFloor(base, km, cfg);
+          priceExact = base;
         }
       }
     } catch {

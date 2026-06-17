@@ -23,6 +23,9 @@ const schema = z.object({
   perMinute: z.number().min(0).max(100).optional(),
   nightStartHour: z.number().int().min(0).max(23).optional(),
   nightEndHour: z.number().int().min(0).max(23).optional(),
+  // Festpreis-Engine: dynamischer Risiko-Buffer (%) + Aufschlag je Zwischenstopp (€).
+  fixedBufferPct: z.number().min(0).max(100).optional(),
+  perStopFee: z.number().min(0).max(1000).optional(),
 });
 
 export async function PUT(req: Request) {

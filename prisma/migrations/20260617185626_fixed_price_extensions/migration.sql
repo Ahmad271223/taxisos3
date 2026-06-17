@@ -1,0 +1,15 @@
+-- AlterTable
+ALTER TABLE "Pricing" ADD COLUMN     "fixedBufferPct" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "perStopFee" DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+-- CreateTable
+CREATE TABLE "PlatformConfig" (
+    "id" TEXT NOT NULL DEFAULT 'default',
+    "minBaseFare" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "minPerKm" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "insuranceBaseFare" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "insurancePerKm" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "PlatformConfig_pkey" PRIMARY KEY ("id")
+);

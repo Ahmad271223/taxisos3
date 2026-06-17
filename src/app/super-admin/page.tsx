@@ -120,6 +120,9 @@ export default function SuperAdminPage() {
           </div>
         </div>
 
+        {/* Preis-Leitplanken + Kassentarif (DTA) */}
+        <PlatformConfigCard />
+
         {/* Sammel-Abrechnung (Phase 5) */}
         <SuperInvoiceRun />
 
@@ -129,6 +132,56 @@ export default function SuperAdminPage() {
         <Link href="/admin/bewertungen" className="btn-primary w-fit">Alle Bewertungen ansehen</Link>
       </div>
     </main>
+  );
+}
+
+function PlatformConfigCard() {
+  const [cfg, setCfg] = useState<any | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    fetch("/api/super/platform-config").then((r) => (r.ok ? r.json() : null)).then((d) => d && setCfg(d.config)).catch(() => {});
+  }, []);
+  function set(k: string, v: string) { setCfg((c: any) => ({ ...c, [k]: v })); setSaved(false); }
+  async function save() {
+    if (!cfg) return;
+    setSaving(true);
+    const res = await fetch("/api/super/platform-config", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        minBaseFare: Number(cfg.minBaseFare) || 0,
+        minPerKm: Number(cfg.minPerKm) || 0,
+        insuranceBaseFare: Number(cfg.insuranceBaseFare) || 0,
+        insurancePerKm: Number(cfg.insurancePerKm) || 0,
+      }),
+    });
+    setSaving(false);
+    if (res.ok) { setSaved(true); setTimeout(() => setSaved(false), 2500); }
+  }
+  if (!cfg) return null;
+  const F = ({ k, label, suffix }: { k: string; label: string; suffix: string }) => (
+    <div>
+      <label className="label">{label}</label>
+      <div className="flex items-center gap-2">
+        <input className="field" type="number" step="0.10" min="0" data-testid={`pc-${k}`} value={cfg[k] ?? 0} onChange={(e) => set(k, e.target.value)} />
+        <span className="w-20 shrink-0 text-sm font-semibold text-ink-500">{suffix}</span>
+      </div>
+    </div>
+  );
+  return (
+    <div className="card p-6" data-testid="platform-config-card">
+      <h2 className="font-display text-xl font-extrabold text-ink-900">Preis-Leitplanken &amp; Kassentarif</h2>
+      <p className="mt-1 text-sm text-ink-500">Schützt vor ruinösem Unterbieten und legt den Krankenkassen-Tarif (DTA) fest. Alle Werte 0 = deaktiviert.</p>
+      <div className="mt-5 grid gap-4 sm:grid-cols-2">
+        <p className="eyebrow text-ink-400 sm:col-span-2">Preisuntergrenze (Mindest-Endpreis = Grundbetrag + €/km)</p>
+        <F k="minBaseFare" label="Mindest-Grundbetrag" suffix="€" />
+        <F k="minPerKm" label="Mindestpreis pro km" suffix="€ / km" />
+        <p className="eyebrow mt-2 text-ink-400 sm:col-span-2">Krankenkassen-/DTA-Tarif (für Kassenfahrten)</p>
+        <F k="insuranceBaseFare" label="Kassen-Grundbetrag" suffix="€" />
+        <F k="insurancePerKm" label="Kassen-Preis pro km" suffix="€ / km" />
+      </div>
+      <button onClick={save} disabled={saving} data-testid="pc-save" className="btn-primary mt-6">{saving ? "Speichern …" : saved ? "✓ Gespeichert" : "Speichern"}</button>
+    </div>
   );
 }
 

@@ -102,7 +102,32 @@ model Pricing {
   nightStartHour Int      @default(22)
   nightEndHour   Int      @default(6)
 
+  // Festpreis-Engine (dynamisch): ohne manuelle Festpreis-Regel wird der
+  // Meter-Schätzpreis + Risiko-Buffer (%) als garantierter Festpreis gefroren.
+  // 0 = aus (klassischer Meter-Tarif).
+  fixedBufferPct Float    @default(0)
+  // Aufschlag je Zwischenstopp (EUR), zusätzlich zur Streckenberechnung.
+  perStopFee     Float    @default(0)
+
   updatedAt      DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Plattform-Leitplanken (Super-Admin, Singleton id="default"):
+//  - Preisuntergrenzen gegen ruinöses Unterbieten der Firmen
+//  - Krankenkassen-Tarif (DTA): fester Cent-pro-km-Satz für Kassenfahrten
+// Alle Werte 0 = aus.
+// ---------------------------------------------------------------------------
+model PlatformConfig {
+  id                String   @id @default("default")
+  // Preisuntergrenze: Endpreis >= minBaseFare + minPerKm * km.
+  minBaseFare       Float    @default(0)
+  minPerKm          Float    @default(0)
+  // Krankenkassen-/DTA-Tarif für payerType = INSURANCE.
+  insuranceBaseFare Float    @default(0)
+  insurancePerKm    Float    @default(0)
+
+  updatedAt         DateTime @updatedAt
 }
 
 // ---------------------------------------------------------------------------

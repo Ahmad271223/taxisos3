@@ -23,6 +23,8 @@ const FIELDS: { key: string; label: string; suffix: string; step?: string }[] = 
   { key: "perKmWeekend", label: "Preis pro km · Wochenende (Sa/So)", suffix: "€ / km", step: "0.10" },
   { key: "perMinute", label: "Preis pro Minute (optional)", suffix: "€ / min", step: "0.05" },
   { key: "basePrice", label: "Grundpreis", suffix: "€", step: "0.10" },
+  { key: "fixedBufferPct", label: "Dynamischer Festpreis-Buffer (0 = aus)", suffix: "%", step: "1" },
+  { key: "perStopFee", label: "Aufschlag je Zwischenstopp", suffix: "€ / Stopp", step: "0.50" },
 ];
 
 export function AdminPricing() {
@@ -59,6 +61,8 @@ export function AdminPricing() {
       perMinute: Number(form.perMinute ?? 0),
       nightStartHour: Number(form.nightStartHour ?? 22),
       nightEndHour: Number(form.nightEndHour ?? 6),
+      fixedBufferPct: Number(form.fixedBufferPct ?? 0),
+      perStopFee: Number(form.perStopFee ?? 0),
     };
     const res = await fetch("/api/admin/pricing", {
       method: "PUT",
