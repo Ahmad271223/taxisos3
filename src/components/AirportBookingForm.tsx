@@ -9,7 +9,7 @@ import { vehicleClass as vehicleClassInfo } from "@/lib/vehicleClasses";
 import { MEET_GREET_LEVELS, meetGreetFee, FREE_WAIT_MIN, WAIT_PER_MIN } from "@/lib/airportExtras";
 import { resolveAirportPickup } from "@/lib/airportZones";
 import { PickupZoneCard } from "@/components/PickupZoneCard";
-import { formatEuro, formatDateTime } from "@/lib/format";
+import { formatEuro, formatDateTime, formatFlightLocal, flightLocalTimeOnly } from "@/lib/format";
 import type { GeocodeResult } from "@/lib/geo";
 import type { MapMarker } from "@/components/Map";
 
@@ -318,7 +318,10 @@ export function AirportBookingForm() {
             </p>
             <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-ink-600">
               {flight.scheduledAt && (
-                <span>{direction === "ARRIVAL" ? "Geplante Landung" : "Geplanter Abflug"}: <span className="font-bold text-ink-900">{formatDateTime(flight.scheduledAt)}</span></span>
+                <span>{direction === "ARRIVAL" ? "Geplante Landung" : "Geplanter Abflug"} (Ortszeit): <span className="font-bold text-ink-900">{formatFlightLocal(flight.scheduledAt)}</span></span>
+              )}
+              {flight.delayMinutes > 0 && (
+                <span className="font-bold text-red-600">+{flight.delayMinutes} Min{flight.estimatedAt ? ` (erwartet ${flightLocalTimeOnly(flight.estimatedAt)})` : ""}</span>
               )}
               {flight.terminal && <span>Terminal <span className="font-bold text-ink-900">{flight.terminal}</span></span>}
               {flight.gate && <span>Gate <span className="font-bold text-ink-900">{flight.gate}</span></span>}

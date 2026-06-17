@@ -113,7 +113,13 @@ async function liveFlight(flightNumber: string, direction: FlightDirection, date
       return null;
     }
     const leg = direction === "ARRIVAL" ? row.arrival : row.departure;
-    const delayMinutes = Number(leg?.delay ?? 0) || 0;
+    let delayMinutes = Number(leg?.delay ?? 0) || 0;
+    // Verspätung aus erwarteter vs. geplanter Zeit ableiten, falls das delay-Feld
+    // leer ist (beide Zeiten haben denselben Offset -> die Differenz ist korrekt).
+    if (!delayMinutes && leg?.scheduled && leg?.estimated) {
+      const diff = Math.round((Date.parse(leg.estimated) - Date.parse(leg.scheduled)) / 60_000);
+      if (diff > 0) delayMinutes = diff;
+    }
     const status = (row.flight_status ?? "").toUpperCase();
     const passthrough = status === "ACTIVE" || status === "LANDED" || status === "CANCELLED";
     return {
