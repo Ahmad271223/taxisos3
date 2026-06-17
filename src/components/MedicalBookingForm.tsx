@@ -260,7 +260,7 @@ export function MedicalBookingForm() {
         return;
       }
       if (files.length) await uploadDocuments({ bookingId: data.id });
-      router.push(`/verfolgen/${data.id}`);
+      router.push(`/verfolgen/${data.booking?.trackingRef ?? data.id}`);
     } catch {
       setError("Netzwerkfehler. Bitte erneut versuchen.");
       setSubmitting(false);

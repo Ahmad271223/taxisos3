@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getDispatcher } from "@/server/runtime";
+import { bookingRefWhere } from "@/lib/bookingRef";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ const schema = z.object({
  * (trackingStatus in {SUCHE, RESERVIERT_FAHRER, FAHRER_GEFUNDEN, FAHRER_UNTERWEGS, GEPLANT}).
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const booking = await prisma.booking.findUnique({ where: { id: params.id } });
+  const booking = await prisma.booking.findFirst({ where: bookingRefWhere(params.id) });
   if (!booking) {
     return NextResponse.json({ error: "Auftrag nicht gefunden" }, { status: 404 });
   }
@@ -38,9 +39,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     /* body optional */
   }
 
-  await getDispatcher()?.cancelBooking(params.id, { actorType: "CUSTOMER", reason: reason ?? undefined });
+  await getDispatcher()?.cancelBooking(booking.id, { actorType: "CUSTOMER", reason: reason ?? undefined });
   const updated = await prisma.booking.findUnique({
-    where: { id: params.id },
+    where: { id: booking.id },
     include: { driver: true },
   });
   return NextResponse.json({ ok: true, booking: updated });

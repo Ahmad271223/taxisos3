@@ -199,6 +199,9 @@ model BookingGroup {
 
 model Booking {
   id             String   @id @default(cuid())
+  // Hochentropischer Tracking-Token (UUID v4) für Gast-Links /verfolgen/<token>.
+  // Entkoppelt die Capability vom (teils geloggten/sichtbaren) Datensatz-Schlüssel.
+  trackingToken  String?  @unique @default(uuid())
   companyId      String?
   company        Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
 

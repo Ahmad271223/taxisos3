@@ -104,7 +104,7 @@ export async function POST(req: Request) {
   // Guestless: Tracking-Link per SMS an den Gast (ohne Twilio-Key -> Mock-Log).
   let smsSent = false;
   if (d.guestPhone && d.guestPhone.trim()) {
-    const url = `${new URL(req.url).origin}/verfolgen/${booking.id}`;
+    const url = `${new URL(req.url).origin}/verfolgen/${booking.trackingToken ?? booking.id}`;
     const body = `${hotel.name}: Ihr Taxi ist bestellt. Live verfolgen: ${url}`;
     const r = await sendSms(d.guestPhone.trim(), body).catch(() => null);
     smsSent = !!r?.ok;

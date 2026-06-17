@@ -150,6 +150,9 @@ export function messageDTO(m: any) {
 export function bookingDTO(b: any, extra: Record<string, any> = {}) {
   return {
     id: b.id,
+    // Tracking-Token für Gast-Links (fällt für Alt-Buchungen ohne Token auf die ID zurück).
+    trackingRef: b.trackingToken ?? b.id,
+    trackingToken: b.trackingToken ?? null,
     groupId: b.groupId ?? null,
     recurringId: b.recurringId ?? null,
     medicalType: b.medicalType ?? null,

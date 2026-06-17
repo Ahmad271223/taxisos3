@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { bookingDTO } from "@/server/serialize";
+import { bookingRefWhere } from "@/lib/bookingRef";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  const booking = await prisma.booking.findUnique({
-    where: { id: params.id },
+  const booking = await prisma.booking.findFirst({
+    where: bookingRefWhere(params.id),
     include: { driver: true, signature: { select: { signedAt: true } } },
   });
   if (!booking) {

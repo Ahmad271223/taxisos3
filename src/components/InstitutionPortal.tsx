@@ -402,7 +402,7 @@ function RidesCard({ rides }: { rides: any[] }) {
       <h2 className="mb-3 font-display text-lg font-extrabold text-ink-900">Fahrten ({rides.length})</h2>
       <div className="grid gap-2">
         {rides.map((r) => (
-          <Link key={r.id} href={`/verfolgen/${r.id}`} className="flex items-center justify-between rounded-xl bg-ink-50 px-3 py-2.5 text-sm transition hover:bg-ink-100" data-testid={`inst-ride-${r.id}`}>
+          <Link key={r.id} href={`/verfolgen/${r.trackingRef ?? r.id}`} className="flex items-center justify-between rounded-xl bg-ink-50 px-3 py-2.5 text-sm transition hover:bg-ink-100" data-testid={`inst-ride-${r.id}`}>
             <span className="min-w-0">
               <span className="block truncate font-bold text-ink-900">{r.patientName ?? r.customerName} · {r.medicalLabel ?? "Fahrt"}</span>
               <span className="block truncate text-ink-500">{r.pickupAddress} → {r.destAddress}</span>

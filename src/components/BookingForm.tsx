@@ -452,7 +452,7 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
         setSubmitting(false);
         return;
       }
-      router.push(`/verfolgen/${data.id}`);
+      router.push(`/verfolgen/${data.booking?.trackingRef ?? data.id}`);
     } catch {
       setError("Netzwerkfehler. Bitte erneut versuchen.");
       setSubmitting(false);

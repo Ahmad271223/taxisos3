@@ -82,7 +82,7 @@ export function GroupTracking({ groupId }: { groupId: string }) {
             return (
               <Link
                 key={b.id}
-                href={`/verfolgen/${b.id}`}
+                href={`/verfolgen/${b.trackingRef ?? b.id}`}
                 data-testid={`group-vehicle-${i}`}
                 className="card flex items-center justify-between gap-3 p-4 transition hover:ring-2 hover:ring-brand-500"
               >

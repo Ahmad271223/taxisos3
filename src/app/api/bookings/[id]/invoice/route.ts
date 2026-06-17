@@ -3,13 +3,14 @@ import { prisma } from "@/lib/prisma";
 import { rideReceiptPdf } from "@/lib/ridePdf";
 import { vehicleClass as vehicleClassInfo } from "@/lib/vehicleClasses";
 import { parseStops } from "@/lib/stops";
+import { bookingRefWhere } from "@/lib/bookingRef";
 
 export const dynamic = "force-dynamic";
 
 // Fahrtbeleg als PDF (Phase 19) – nur für abgeschlossene Fahrten.
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  const b = await prisma.booking.findUnique({
-    where: { id: params.id },
+  const b = await prisma.booking.findFirst({
+    where: bookingRefWhere(params.id),
     include: { driver: true, company: { select: { name: true } } },
   });
   if (!b) return NextResponse.json({ error: "Nicht gefunden" }, { status: 404 });

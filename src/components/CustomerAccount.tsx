@@ -372,7 +372,7 @@ function LoggedIn({
             <div className="grid gap-2">
               {bookings.map((b) => (
                 <div key={b.id} className="rounded-xl border border-ink-100 p-3 text-sm">
-                  <Link href={`/verfolgen/${b.id}`} className="flex items-center justify-between gap-3 hover:opacity-80">
+                  <Link href={`/verfolgen/${b.trackingRef ?? b.id}`} className="flex items-center justify-between gap-3 hover:opacity-80">
                     <div className="min-w-0">
                       <p className="line-clamp-2 font-semibold text-ink-900">{b.pickupAddress} → {b.destAddress}</p>
                       <p className="text-xs text-ink-500">{formatDateTime(b.createdAt)} · {TRACKING_LABEL[b.trackingStatus] ?? b.trackingStatus}</p>

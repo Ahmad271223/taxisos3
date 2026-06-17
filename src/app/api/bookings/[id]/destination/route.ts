@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getDispatcher } from "@/server/runtime";
 import { bookingDTO } from "@/server/serialize";
+import { bookingRefWhere } from "@/lib/bookingRef";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ const schema = z
  * über die komplette Route neu berechnet. Erlaubt bis zum Fahrtende.
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const booking = await prisma.booking.findUnique({ where: { id: params.id } });
+  const booking = await prisma.booking.findFirst({ where: bookingRefWhere(params.id) });
   if (!booking) {
     return NextResponse.json({ error: "Auftrag nicht gefunden" }, { status: 404 });
   }
@@ -59,7 +60,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const addStop = parsed.data.addStop
     ? { address: parsed.data.addStop.address, lat: parsed.data.addStop.lat, lng: parsed.data.addStop.lng }
     : undefined;
-  const r = await dispatcher.changeDestination(params.id, { dest, addStop });
+  const r = await dispatcher.changeDestination(booking.id, { dest, addStop });
   if (!r.ok) {
     const status = r.error?.includes("nicht gefunden") ? 404 : 409;
     return NextResponse.json({ error: r.error ?? "Änderung fehlgeschlagen." }, { status });
@@ -67,7 +68,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   // Sicherheitshalber frisch laden (Dispatcher liefert DTO bereits zurueck).
   const fresh = await prisma.booking.findUnique({
-    where: { id: params.id },
+    where: { id: booking.id },
     include: { driver: true },
   });
   return NextResponse.json({ ok: true, booking: r.booking ?? (fresh ? bookingDTO(fresh) : null) });
