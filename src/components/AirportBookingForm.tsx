@@ -8,6 +8,7 @@ import { LuggageMatrix } from "@/components/LuggageMatrix";
 import { vehicleClass as vehicleClassInfo } from "@/lib/vehicleClasses";
 import { MEET_GREET_LEVELS, meetGreetFee, FREE_WAIT_MIN, WAIT_PER_MIN } from "@/lib/airportExtras";
 import { resolveAirportPickup } from "@/lib/airportZones";
+import { airportByIata } from "@/lib/airports";
 import { PickupZoneCard } from "@/components/PickupZoneCard";
 import { formatEuro, formatDateTime, formatFlightLocal, flightLocalTimeOnly } from "@/lib/format";
 import type { GeocodeResult } from "@/lib/geo";
@@ -137,6 +138,10 @@ export function AirportBookingForm() {
           setFlightDate(iso.slice(0, 10));
           setFlightTime(iso.slice(11, 16));
         }
+        // Flughafen automatisch setzen (Adresse + Pin) anhand der IATA des
+        // relevanten Legs – bei ANKUNFT der Zielflughafen, bei ABFLUG der Start.
+        const ap = airportByIata(d.flight?.airportIata);
+        if (ap) setAirport({ address: `${ap.name} (${ap.iata})`, lat: ap.lat, lng: ap.lng });
       }
     } catch {
       setFlightError("Netzwerkfehler.");
