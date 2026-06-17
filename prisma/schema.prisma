@@ -730,9 +730,32 @@ model Hotel {
   preferredCompanyIds String @default("")
 
   bookings     Booking[]
+  guests       HotelGuest[]
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// Stammgäste eines Hotels: für 30-Sekunden-Buchung (Profil + Stammziel + VIP).
+model HotelGuest {
+  id                    String   @id @default(cuid())
+  hotelId               String
+  hotel                 Hotel    @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  name                  String
+  phone                 String?
+  roomNumber            String?
+  language              String?  // bevorzugte Sprache
+  preferredVehicleClass String?  // bevorzugtes Fahrzeug (STANDARD | VAN | VIP ...)
+  defaultDestAddress    String?  // Stammziel (z. B. Flughafen)
+  defaultDestLat        Float?
+  defaultDestLng        Float?
+  isVip                 Boolean  @default(false)
+  notes                 String?  // besondere Hinweise
+
+  createdAt             DateTime @default(now())
+
+  @@index([hotelId])
 }
 
 // ---------------------------------------------------------------------------

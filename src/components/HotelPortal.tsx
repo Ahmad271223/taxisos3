@@ -65,8 +65,10 @@ function AuthScreen({ onAuthed }: { onAuthed: (h: Hotel) => void }) {
 
 function Dashboard({ hotel, onLogout }: { hotel: Hotel; onLogout: () => void }) {
   const [rides, setRides] = useState<any[]>([]);
+  const [guests, setGuests] = useState<any[]>([]);
   const loadRides = useCallback(() => fetch("/api/hotels/rides").then((r) => r.json()).then((d) => setRides(d.rides ?? [])).catch(() => {}), []);
-  useEffect(() => { loadRides(); const iv = setInterval(loadRides, 8000); return () => clearInterval(iv); }, [loadRides]);
+  const loadGuests = useCallback(() => fetch("/api/hotels/guests").then((r) => r.json()).then((d) => setGuests(d.guests ?? [])).catch(() => {}), []);
+  useEffect(() => { loadRides(); loadGuests(); const iv = setInterval(loadRides, 8000); return () => clearInterval(iv); }, [loadRides, loadGuests]);
 
   return (
     <main className="min-h-screen bg-ink-50">
@@ -77,7 +79,9 @@ function Dashboard({ hotel, onLogout }: { hotel: Hotel; onLogout: () => void }) 
         </div>
       </header>
       <div className="mx-auto grid max-w-3xl gap-4 px-5 py-6">
-        <NewGuestRideCard onCreated={loadRides} />
+        <OverviewCard rides={rides} />
+        <NewGuestRideCard onCreated={loadRides} guests={guests} />
+        <GuestBookCard guests={guests} onChanged={loadGuests} />
         <RidesCard rides={rides} />
         <FleetWhitelistCard />
         <ChargeRoomCard />
@@ -86,7 +90,43 @@ function Dashboard({ hotel, onLogout }: { hotel: Hotel; onLogout: () => void }) 
   );
 }
 
-function NewGuestRideCard({ onCreated }: { onCreated: () => void }) {
+// Übersicht: Kennzahlen aus den Fahrten + Schnellbuttons.
+function OverviewCard({ rides }: { rides: any[] }) {
+  const today = new Date().toDateString();
+  const isToday = (r: any) => r.createdAt && new Date(r.createdAt).toDateString() === today;
+  const open = (s: string) => !["BEENDET", "STORNIERT"].includes(s);
+  const todayCount = rides.filter(isToday).length;
+  const upcoming = rides.filter((r) => r.trackingStatus === "GEPLANT").length;
+  const enRoute = rides.filter((r) => ["FAHRER_UNTERWEGS", "FAHRER_ANGEKOMMEN", "FAHRT_LAEUFT"].includes(r.trackingStatus)).length;
+  const openCount = rides.filter((r) => open(r.trackingStatus)).length;
+  return (
+    <div className="card p-6" data-testid="hotel-overview">
+      <h2 className="mb-3 font-display text-lg font-extrabold text-ink-900">Übersicht</h2>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat label="Fahrten heute" value={todayCount} testid="ov-today" />
+        <Stat label="Kommende Abholungen" value={upcoming} testid="ov-upcoming" />
+        <Stat label="Fahrer unterwegs" value={enRoute} testid="ov-enroute" />
+        <Stat label="Offene Fahrten" value={openCount} testid="ov-open" />
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+        <a href="#hotel-book" className="rounded-xl bg-brand-500 px-3 py-2.5 text-center text-sm font-extrabold text-ink-900 hover:bg-brand-400">🚕 Gast-Taxi</a>
+        <Link href="/buchen/flughafen" className="rounded-xl border-2 border-ink-200 bg-white px-3 py-2.5 text-center text-sm font-extrabold text-ink-900 hover:border-ink-900">✈️ Flughafentransfer</Link>
+        <Link href="/buchen/gruppe" className="rounded-xl border-2 border-ink-200 bg-white px-3 py-2.5 text-center text-sm font-extrabold text-ink-900 hover:border-ink-900">👥 Gruppenfahrt</Link>
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, testid }: { label: string; value: any; testid?: string }) {
+  return (
+    <div className="rounded-xl bg-ink-50 p-3 text-center" data-testid={testid}>
+      <p className="font-display text-2xl font-extrabold text-ink-900">{value}</p>
+      <p className="mt-0.5 text-[11px] font-semibold text-ink-500">{label}</p>
+    </div>
+  );
+}
+
+function NewGuestRideCard({ onCreated, guests }: { onCreated: () => void; guests: any[] }) {
   const empty = { guestName: "", guestPhone: "", roomNumber: "", hotelPayment: "ROOM", vehicleClass: "STANDARD", scheduledAt: "", isVip: false };
   const [form, setForm] = useState(empty);
   const [pickup, setPickup] = useState<Addr>({ address: "" });
@@ -95,6 +135,12 @@ function NewGuestRideCard({ onCreated }: { onCreated: () => void }) {
   const [msg, setMsg] = useState<string | null>(null);
   const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }));
   const ok = form.guestName.trim() && pickup.lat != null && dest.lat != null && !busy;
+
+  // Stammgast übernehmen: Profil + Stammziel automatisch ausfüllen.
+  function fillFromGuest(g: any) {
+    setForm((f) => ({ ...f, guestName: g.name, guestPhone: g.phone ?? "", roomNumber: g.roomNumber ?? "", vehicleClass: g.preferredVehicleClass || f.vehicleClass, isVip: !!g.isVip }));
+    if (g.defaultDestAddress && g.defaultDestLat != null) setDest({ address: g.defaultDestAddress, lat: g.defaultDestLat, lng: g.defaultDestLng ?? undefined });
+  }
 
   async function book() {
     setBusy(true);
@@ -118,8 +164,14 @@ function NewGuestRideCard({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <div className="card p-6">
+    <div className="card p-6" id="hotel-book">
       <h2 className="mb-3 font-display text-lg font-extrabold text-ink-900">Gast-Fahrt buchen</h2>
+      {guests.length > 0 && (
+        <select className="field mb-2" data-testid="hotel-guest-picker" defaultValue="" onChange={(e) => { const g = guests.find((x) => x.id === e.target.value); if (g) fillFromGuest(g); e.currentTarget.value = ""; }}>
+          <option value="">⭐ Stammgast wählen (automatisch ausfüllen) …</option>
+          {guests.map((g) => <option key={g.id} value={g.id}>{g.name}{g.roomNumber ? ` · Zi. ${g.roomNumber}` : ""}{g.isVip ? " · VIP" : ""}</option>)}
+        </select>
+      )}
       <div className="grid gap-2 sm:grid-cols-2">
         <input className="field" data-testid="hotel-guest" placeholder="Gastname *" value={form.guestName} onChange={(e) => set("guestName", e.target.value)} />
         <input className="field" data-testid="hotel-guest-phone" placeholder="Gast-Handy (für SMS)" value={form.guestPhone} onChange={(e) => set("guestPhone", e.target.value)} />
@@ -146,6 +198,75 @@ function NewGuestRideCard({ onCreated }: { onCreated: () => void }) {
       </div>
       {msg && <p className="mt-2 text-sm font-semibold text-ink-700" data-testid="hotel-ride-msg">{msg}</p>}
       <button onClick={book} disabled={!ok} data-testid="hotel-book" className="btn-primary mt-3 disabled:opacity-60">{busy ? "Bucht …" : "Fahrt buchen"}</button>
+    </div>
+  );
+}
+
+// Stammgäste verwalten (Profil + Stammziel + VIP) für die 30-Sekunden-Buchung.
+function GuestBookCard({ guests, onChanged }: { guests: any[]; onChanged: () => void }) {
+  const empty = { name: "", phone: "", roomNumber: "", language: "", preferredVehicleClass: "", isVip: false, notes: "" };
+  const [form, setForm] = useState<any>(empty);
+  const [dest, setDest] = useState<Addr>({ address: "" });
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+
+  async function add() {
+    if (!form.name.trim()) return;
+    setBusy(true);
+    const res = await fetch("/api/hotels/guests", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: form.name, phone: form.phone || null, roomNumber: form.roomNumber || null,
+        language: form.language || null, preferredVehicleClass: form.preferredVehicleClass || null,
+        isVip: !!form.isVip, notes: form.notes || null,
+        defaultDestAddress: dest.lat != null ? dest.address : null, defaultDestLat: dest.lat ?? null, defaultDestLng: dest.lng ?? null,
+      }),
+    });
+    setBusy(false);
+    if (res.ok) { setForm(empty); setDest({ address: "" }); setOpen(false); onChanged(); }
+  }
+  async function remove(g: any) {
+    if (!window.confirm(`Stammgast „${g.name}" löschen?`)) return;
+    await fetch(`/api/hotels/guests/${g.id}`, { method: "DELETE" }).catch(() => {});
+    onChanged();
+  }
+
+  return (
+    <div className="card p-6" data-testid="hotel-guests">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-display text-lg font-extrabold text-ink-900">Stammgäste ({guests.length})</h2>
+        <button onClick={() => setOpen((o) => !o)} className="text-sm font-bold text-brand-700 hover:underline">{open ? "Schließen" : "+ Neuer Stammgast"}</button>
+      </div>
+      {open && (
+        <div className="mb-4 grid gap-2 rounded-2xl border border-ink-100 p-3 sm:grid-cols-2">
+          <input className="field" data-testid="guest-name" placeholder="Name *" value={form.name} onChange={(e) => set("name", e.target.value)} />
+          <input className="field" placeholder="Telefon" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
+          <input className="field" placeholder="Zimmer (Standard)" value={form.roomNumber} onChange={(e) => set("roomNumber", e.target.value)} />
+          <input className="field" placeholder="Sprache (z. B. Englisch)" value={form.language} onChange={(e) => set("language", e.target.value)} />
+          <select className="field" value={form.preferredVehicleClass} onChange={(e) => set("preferredVehicleClass", e.target.value)}>
+            <option value="">Bevorzugtes Fahrzeug …</option>
+            {VEHICLE_CLASSES.map((c) => <option key={c.key} value={c.key}>{c.icon} {c.label}</option>)}
+          </select>
+          <label className="flex items-center gap-2 rounded-xl border-2 border-ink-200 bg-white px-3 text-sm font-semibold text-ink-700"><input type="checkbox" className="h-5 w-5 accent-brand-500" checked={form.isVip} onChange={(e) => set("isVip", e.target.checked)} />⭐ VIP-Status</label>
+          <div className="sm:col-span-2"><AddressInput label="Stammziel (optional, z. B. Flughafen)" placeholder="Zieladresse" value={dest.address} onChange={(t) => setDest({ address: t })} onSelect={(r: GeocodeResult) => setDest({ address: r.label, lat: r.lat, lng: r.lng })} /></div>
+          <input className="field sm:col-span-2" placeholder="Besondere Hinweise" value={form.notes} onChange={(e) => set("notes", e.target.value)} />
+          <button onClick={add} disabled={busy || !form.name.trim()} data-testid="guest-save" className="btn-primary sm:col-span-2 disabled:opacity-60">{busy ? "…" : "Stammgast speichern"}</button>
+        </div>
+      )}
+      <div className="grid gap-2">
+        {guests.map((g) => (
+          <div key={g.id} className="flex items-center justify-between gap-3 rounded-xl bg-ink-50 px-3 py-2 text-sm" data-testid={`guest-${g.id}`}>
+            <span className="min-w-0">
+              <span className="font-bold text-ink-900">{g.name}</span>
+              {g.isVip && <span className="ml-1">⭐</span>}
+              <span className="block truncate text-xs text-ink-500">{[g.roomNumber && `Zi. ${g.roomNumber}`, g.preferredVehicleClass, g.language, g.defaultDestAddress && `→ ${g.defaultDestAddress}`].filter(Boolean).join(" · ")}</span>
+            </span>
+            <button onClick={() => remove(g)} className="shrink-0 text-xs font-bold text-red-600 hover:underline">Löschen</button>
+          </div>
+        ))}
+        {guests.length === 0 && <p className="text-sm text-ink-400">Noch keine Stammgäste.</p>}
+      </div>
     </div>
   );
 }
