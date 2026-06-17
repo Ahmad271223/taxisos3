@@ -280,13 +280,16 @@ export default function PlatformLanding() {
         <footer className="border-t border-ink-100">
           <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-5 py-8 text-sm text-ink-500 sm:flex-row">
             <Brand subtitle="Schnell ein Taxi bestellen" />
-            <div className="flex items-center gap-5">
+            <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 sm:justify-end">
               <Link href="/buchen" className="hover:text-ink-900">Jetzt bestellen</Link>
               <Link href="/konto" className="hover:text-ink-900">Mein Konto</Link>
               <Link href="/buchen/vorbestellung" className="hover:text-ink-900">Vorbestellung</Link>
               <Link href="/registrieren" className="hover:text-ink-900">Firma registrieren</Link>
               <Link href="/admin/login" className="hover:text-ink-900">Firmen-Login</Link>
               <Link href="/fahrer/login" className="hover:text-ink-900">Fahrer-Login</Link>
+              <Link href="/hotel" className="hover:text-ink-900">Hotel</Link>
+              <Link href="/event" className="hover:text-ink-900">Event &amp; Messe</Link>
+              <Link href="/einrichtung" className="hover:text-ink-900">Krankeneinrichtung</Link>
             </div>
           </div>
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-4 border-t border-ink-100 px-5 py-4 text-xs text-ink-400 sm:justify-end">

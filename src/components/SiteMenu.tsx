@@ -49,6 +49,24 @@ const I = {
       <path d="M12 9.5V4M9.8 13.6l-4 3.4M14.2 13.6l4 3.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   ),
+  hotel: (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none">
+      <path d="M3 21h18M6 21V4h9v17M15 21V9h3v12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M9 8h3M9 12h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  ),
+  ticket: (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none">
+      <path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2 2 2 0 0 0 0 4 2 2 0 0 1-2 2H6a2 2 0 0 1-2-2 2 2 0 0 0 0-4Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+      <path d="M14 6v12" stroke="currentColor" strokeWidth="2" strokeDasharray="2 2.5" />
+    </svg>
+  ),
+  hospital: (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none">
+      <rect x="4" y="3" width="16" height="18" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="M12 8v6M9 11h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  ),
 };
 
 const CUSTOMER: Item[] = [
@@ -61,6 +79,13 @@ const PARTNER: Item[] = [
   { href: "/registrieren", label: "Firma registrieren", desc: "Taxiunternehmen anmelden", icon: I.building },
   { href: "/admin/login", label: "Firmen-Login", desc: "Disposition & Verwaltung", icon: I.login },
   { href: "/fahrer/login", label: "Fahrer-Login", desc: "Aufträge annehmen & fahren", icon: I.wheel },
+];
+
+// B2B-Portale: eigene Konten zum Registrieren & Anmelden (jeweils mit Login/Register).
+const B2B: Item[] = [
+  { href: "/hotel", label: "Hotel-Portal", desc: "Gästefahrten buchen & abrechnen", icon: I.hotel },
+  { href: "/event", label: "Event & Messe", desc: "Promo-Codes, Sammelpunkte, Firmen-QR", icon: I.ticket },
+  { href: "/einrichtung", label: "Krankeneinrichtung", desc: "Patientenfahrten & Abrechnung", icon: I.hospital },
 ];
 
 function Row({ item, onClick }: { item: Item; onClick: () => void }) {
@@ -168,9 +193,16 @@ export function SiteMenu() {
             ))}
           </div>
 
-          <p className="eyebrow mb-2.5 mt-7 text-ink-400">Partner</p>
+          <p className="eyebrow mb-2.5 mt-7 text-ink-400">Taxiunternehmen & Fahrer</p>
           <div className="grid gap-2.5">
             {PARTNER.map((it) => (
+              <Row key={it.href} item={it} onClick={close} />
+            ))}
+          </div>
+
+          <p className="eyebrow mb-2.5 mt-7 text-ink-400">Geschäftskunden-Portale</p>
+          <div className="grid gap-2.5">
+            {B2B.map((it) => (
               <Row key={it.href} item={it} onClick={close} />
             ))}
           </div>
