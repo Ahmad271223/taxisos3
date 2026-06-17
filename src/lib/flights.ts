@@ -13,9 +13,16 @@ export const BAGGAGE_BUFFER_MIN = 30;
 export interface FlightInfo {
   flightNumber: string;
   direction: FlightDirection;
-  status: string; // SCHEDULED | DELAYED | LANDED | CANCELLED | UNKNOWN
+  status: string; // SCHEDULED | DELAYED | ACTIVE | LANDED | CANCELLED | UNKNOWN
   delayMinutes: number;
   terminal: string | null;
+  gate: string | null;
+  // Betroffener Flughafen (bei ANKUNFT der Zielflughafen, bei ABFLUG der Startflughafen).
+  airportName: string | null;
+  airportIata: string | null;
+  // Geplante (und ggf. erwartete) Zeit am betroffenen Flughafen, ISO mit Offset.
+  scheduledAt: string | null;
+  estimatedAt: string | null;
   airline: string | null;
   source: "live" | "mock";
 }
@@ -48,12 +55,20 @@ function mockFlight(flightNumber: string, direction: FlightDirection): FlightInf
   const fn = normalizeFlightNumber(flightNumber);
   const delayed = /DELAY|9999/.test(fn);
   const terminals = ["1", "2", "A", "B"];
+  // Plausible geplante Zeit: heute, in ~3 Stunden, runde Stunde.
+  const sched = new Date();
+  sched.setHours(sched.getHours() + 3, 0, 0, 0);
   return {
     flightNumber: fn,
     direction,
     status: delayed ? "DELAYED" : "SCHEDULED",
     delayMinutes: delayed ? 75 : 0,
     terminal: terminals[hash(fn) % terminals.length],
+    gate: null,
+    airportName: "Demo-Flughafen",
+    airportIata: "DEMO",
+    scheduledAt: sched.toISOString(),
+    estimatedAt: null,
     airline: fn.slice(0, 2) || null,
     source: "mock",
   };
@@ -76,12 +91,18 @@ async function liveFlight(flightNumber: string, direction: FlightDirection, date
     const leg = direction === "ARRIVAL" ? row.arrival : row.departure;
     const delayMinutes = Number(leg?.delay ?? 0) || 0;
     const status = (row.flight_status ?? "").toUpperCase();
+    const passthrough = status === "ACTIVE" || status === "LANDED" || status === "CANCELLED";
     return {
       flightNumber: fn,
       direction,
-      status: status === "ACTIVE" || status === "LANDED" ? status : delayMinutes > 0 ? "DELAYED" : "SCHEDULED",
+      status: passthrough ? status : delayMinutes > 0 ? "DELAYED" : "SCHEDULED",
       delayMinutes,
       terminal: leg?.terminal ?? null,
+      gate: leg?.gate ?? null,
+      airportName: leg?.airport ?? null,
+      airportIata: leg?.iata ?? null,
+      scheduledAt: leg?.scheduled ?? null,
+      estimatedAt: leg?.estimated ?? null,
       airline: row.airline?.name ?? fn.slice(0, 2) ?? null,
       source: "live",
     };

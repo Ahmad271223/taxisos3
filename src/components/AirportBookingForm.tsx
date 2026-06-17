@@ -126,7 +126,16 @@ export function AirportBookingForm() {
       });
       const d = await res.json();
       if (!res.ok) setFlightError(d.error ?? "Flug nicht gefunden.");
-      else setFlight(d.flight);
+      else {
+        setFlight(d.flight);
+        // Datum + Uhrzeit automatisch aus der geplanten Flughafenzeit übernehmen
+        // (Wandzeit am Flughafen – direkt aus dem ISO-String, ohne Zeitzonen-Shift).
+        const iso: string | null = d.flight?.scheduledAt ?? null;
+        if (iso && iso.length >= 16) {
+          setFlightDate(iso.slice(0, 10));
+          setFlightTime(iso.slice(11, 16));
+        }
+      }
     } catch {
       setFlightError("Netzwerkfehler.");
     } finally {
@@ -284,15 +293,41 @@ export function AirportBookingForm() {
         </div>
         {flightError && <p className="mt-2 text-xs font-bold text-red-600" data-testid="flight-error">{flightError}</p>}
         {flight && (
-          <div className="mt-3 rounded-xl bg-ink-50 px-3 py-2 text-sm" data-testid="flight-info">
-            <p className="font-bold text-ink-900">
-              {flight.flightNumber} · Terminal {flight.terminal ?? "?"} ·{" "}
-              {flight.status === "DELAYED" ? <span className="text-red-600">Verspätet +{flight.delayMinutes} Min.</span> : <span className="text-green-700">planmäßig</span>}
+          <div className="mt-3 rounded-xl bg-ink-50 px-3 py-2.5 text-sm" data-testid="flight-info">
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-bold text-ink-900">
+                {flight.airline ? `${flight.airline} ` : ""}{flight.flightNumber}
+              </p>
+              {flight.status === "DELAYED" ? (
+                <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-extrabold text-red-700">Verspätet +{flight.delayMinutes} Min.</span>
+              ) : flight.status === "CANCELLED" ? (
+                <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-extrabold text-red-700">Annulliert</span>
+              ) : flight.status === "LANDED" ? (
+                <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-extrabold text-green-800">Gelandet</span>
+              ) : flight.status === "ACTIVE" ? (
+                <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-extrabold text-ink-900">In der Luft</span>
+              ) : (
+                <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-extrabold text-green-800">Planmäßig</span>
+              )}
+            </div>
+            <p className="mt-1 font-semibold text-ink-800">
+              {direction === "ARRIVAL" ? "🛬 Ankunft: " : "🛫 Abflug: "}
+              {flight.airportName ?? "Flughafen"}{flight.airportIata ? ` (${flight.airportIata})` : ""}
             </p>
+            <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-ink-600">
+              {flight.scheduledAt && (
+                <span>{direction === "ARRIVAL" ? "Geplante Landung" : "Geplanter Abflug"}: <span className="font-bold text-ink-900">{formatDateTime(flight.scheduledAt)}</span></span>
+              )}
+              {flight.terminal && <span>Terminal <span className="font-bold text-ink-900">{flight.terminal}</span></span>}
+              {flight.gate && <span>Gate <span className="font-bold text-ink-900">{flight.gate}</span></span>}
+            </div>
             {arrivalPickup && (
-              <p className="mt-0.5 text-xs text-ink-600" data-testid="arrival-pickup">
+              <p className="mt-1 text-xs text-ink-600" data-testid="arrival-pickup">
                 Voraussichtliche Abholung: <span className="font-bold">{formatDateTime(arrivalPickup.toISOString())}</span> (inkl. {BAGGAGE_BUFFER_MIN} Min. Gepäckpuffer)
               </p>
+            )}
+            {flight.source === "mock" && (
+              <p className="mt-1 text-[11px] font-semibold text-amber-700" data-testid="flight-demo">⚠ Demo-Daten – Live-Fluganbieter nicht konfiguriert (AVIATIONSTACK_KEY).</p>
             )}
           </div>
         )}
