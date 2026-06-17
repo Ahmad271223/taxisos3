@@ -208,6 +208,7 @@ export function bookingDTO(b: any, extra: Record<string, any> = {}) {
     ratingComment: b.ratingComment ?? null,
     paymentMethod: b.paymentMethod ?? "CASH",
     paymentStatus: b.paymentStatus ?? "OFFEN",
+    priceIsFixed: b.priceIsFixed ?? false,
     corporateCode: b.corporateCode ?? null,
     corporatePayer: b.corporatePayer ?? null,
     status: b.status,

@@ -29,9 +29,41 @@ model Company {
   bookings     Booking[]
   pricing      Pricing?
   classPricing VehicleClassPricing[]
+  fixedPrices  FixedPriceRule[]
   invoices     Invoice[]
 
   createdAt    DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Festpreis-Manager (Pricing-Engine): jedes Unternehmen kann für bestimmte
+// Strecken/Zonen einen festen Preis hinterlegen (z. B. "Zentrum → Flughafen
+// = 45 €"). Eine Zone ist Mittelpunkt + Radius. Greift eine Regel, wird der
+// feste Preis statt des Meter-Tarifs verwendet – sowohl in der Live-Spanne als
+// auch beim Einfrieren des Festpreises (priceExact) nach Fahrerannahme.
+// ---------------------------------------------------------------------------
+model FixedPriceRule {
+  id            String  @id @default(cuid())
+  companyId     String
+  company       Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  name          String
+  fromLabel     String?
+  fromLat       Float
+  fromLng       Float
+  fromRadius    Int     @default(1500) // Meter
+  toLabel       String?
+  toLat         Float
+  toLng         Float
+  toRadius      Int     @default(1500) // Meter
+  price         Float                  // fester Endpreis (EUR)
+  bidirectional Boolean @default(true) // gilt auch in Gegenrichtung
+  vehicleClass  String?                // nur für eine Klasse (null = alle)
+  active        Boolean @default(true)
+
+  createdAt     DateTime @default(now())
+
+  @@index([companyId])
 }
 
 // ---------------------------------------------------------------------------
@@ -311,6 +343,10 @@ model Booking {
   paymentMethod  String   @default("CASH") // CASH | CARD | FIRMA
   paymentStatus  String   @default("OFFEN") // OFFEN | AUTORISIERT | BEZAHLT | FEHLGESCHLAGEN | STORNIERT | FIRMA
   paymentRef     String?  // Stripe PaymentIntent o.ae.
+
+  // Festpreis-Engine: wurde der Endpreis aus einer Festpreis-Regel gefroren
+  // (true) oder per Meter-Tarif berechnet (false)?
+  priceIsFixed   Boolean @default(false)
 
   // QR-Firmenmobilität: per QR-Code eingelöstes Firmenkonto übernimmt die Fahrt.
   corporateCode  String?  // eingelöster Mobilitäts-Code

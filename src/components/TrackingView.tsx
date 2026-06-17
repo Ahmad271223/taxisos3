@@ -649,7 +649,9 @@ export function TrackingView({ id }: { id: string }) {
           </div>
           {booking.priceExact != null && status !== "BEENDET" && (
             <p className="mt-3 rounded-xl bg-brand-50 px-3 py-2 text-xs font-semibold text-ink-700">
-              ✓ Festpreis bestätigt nach Annahme durch den Fahrer.
+              {booking.priceIsFixed
+                ? "✓ Garantierter Festpreis für diese Strecke – unabhängig von Verkehr & Umwegen."
+                : "✓ Festpreis bestätigt nach Annahme durch den Fahrer."}
             </p>
           )}
         </div>

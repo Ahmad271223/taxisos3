@@ -1,9 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Brand } from "@/components/Brand";
+import { AddressInput } from "@/components/AddressInput";
+import type { GeocodeResult } from "@/lib/geo";
+
+const FIXED_CLASSES = [
+  { key: "ALL", label: "Alle Klassen" },
+  { key: "STANDARD", label: "Standard" },
+  { key: "BUSINESS", label: "Business" },
+  { key: "VAN", label: "Van" },
+  { key: "SHUTTLE", label: "Shuttle" },
+  { key: "VIP", label: "VIP" },
+  { key: "WHEELCHAIR", label: "Rollstuhl" },
+];
 
 const FIELDS: { key: string; label: string; suffix: string; step?: string }[] = [
   { key: "perKmDay", label: "Preis pro km · Tag (06:00–22:00)", suffix: "€ / km", step: "0.10" },
@@ -102,8 +114,104 @@ export function AdminPricing() {
         </div>
 
         <VehicleClassPricingCard />
+        <FixedPriceCard />
       </div>
     </main>
+  );
+}
+
+// Festpreis-Manager: feste Strecken-/Zonenpreise (z. B. Zentrum → Flughafen = 45 €).
+function FixedPriceCard() {
+  const [rules, setRules] = useState<any[]>([]);
+  const empty = { name: "", price: "", fromRadius: "1500", toRadius: "1500", bidirectional: true, vehicleClass: "ALL" };
+  const [form, setForm] = useState<any>(empty);
+  const [from, setFrom] = useState<{ address: string; lat?: number; lng?: number }>({ address: "" });
+  const [to, setTo] = useState<{ address: string; lat?: number; lng?: number }>({ address: "" });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const setF = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+  const load = useCallback(() => fetch("/api/admin/fixed-prices").then((r) => (r.ok ? r.json() : { rules: [] })).then((d) => setRules(d.rules ?? [])).catch(() => {}), []);
+  useEffect(() => { load(); }, [load]);
+
+  const ok = from.lat != null && to.lat != null && Number(form.price) > 0 && !busy;
+
+  async function create() {
+    setBusy(true); setMsg(null);
+    const res = await fetch("/api/admin/fixed-prices", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: form.name.trim() || `${from.address} → ${to.address}`,
+        fromLabel: from.address, fromLat: from.lat, fromLng: from.lng, fromRadius: Number(form.fromRadius) || 1500,
+        toLabel: to.address, toLat: to.lat, toLng: to.lng, toRadius: Number(form.toRadius) || 1500,
+        price: Number(form.price),
+        bidirectional: !!form.bidirectional,
+        vehicleClass: form.vehicleClass === "ALL" ? null : form.vehicleClass,
+      }),
+    });
+    const d = await res.json(); setBusy(false);
+    if (!res.ok) return setMsg(d.error ?? "Fehlgeschlagen.");
+    setForm(empty); setFrom({ address: "" }); setTo({ address: "" }); load();
+  }
+  async function toggle(r: any) {
+    await fetch(`/api/admin/fixed-prices/${r.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active: !r.active }) }).catch(() => {});
+    load();
+  }
+  async function remove(r: any) {
+    if (!window.confirm(`Festpreis „${r.name}" wirklich löschen?`)) return;
+    await fetch(`/api/admin/fixed-prices/${r.id}`, { method: "DELETE" }).catch(() => {});
+    load();
+  }
+
+  return (
+    <div className="card mt-4 p-6" data-testid="fixed-price-card">
+      <h2 className="font-display text-2xl font-extrabold text-ink-900">Festpreise</h2>
+      <p className="mt-1 text-sm text-ink-500">
+        Hinterlegen Sie feste Preise für bestimmte Strecken (z. B. <strong>Zentrum → Flughafen = 45 €</strong>).
+        Liegt eine Direktfahrt in beiden Zonen, gilt Ihr Festpreis statt des Meter-Tarifs – schon in der
+        Live-Preisspanne des Kunden und als garantierter Endpreis, sobald Ihr Fahrer annimmt.
+      </p>
+
+      <div className="mt-5 grid gap-3">
+        <input className="field" data-testid="fp-name" placeholder="Bezeichnung (optional, z. B. Zentrum → Flughafen)" value={form.name} onChange={(e) => setF("name", e.target.value)} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-2 rounded-2xl border border-ink-100 p-3">
+            <AddressInput label="Start-Zone" placeholder="Adresse Startbereich" value={from.address} onChange={(t) => setFrom({ address: t })} onSelect={(r: GeocodeResult) => setFrom({ address: r.label, lat: r.lat, lng: r.lng })} />
+            <label className="grid gap-1 text-xs text-ink-500">Radius (m)<input className="field" type="number" data-testid="fp-from-radius" value={form.fromRadius} onChange={(e) => setF("fromRadius", e.target.value)} /></label>
+          </div>
+          <div className="grid gap-2 rounded-2xl border border-ink-100 p-3">
+            <AddressInput label="Ziel-Zone" placeholder="Adresse Zielbereich" value={to.address} onChange={(t) => setTo({ address: t })} onSelect={(r: GeocodeResult) => setTo({ address: r.label, lat: r.lat, lng: r.lng })} />
+            <label className="grid gap-1 text-xs text-ink-500">Radius (m)<input className="field" type="number" data-testid="fp-to-radius" value={form.toRadius} onChange={(e) => setF("toRadius", e.target.value)} /></label>
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+          <label className="grid gap-1 text-xs text-ink-500">Festpreis (€)<input className="field" type="number" step="0.50" data-testid="fp-price" placeholder="45" value={form.price} onChange={(e) => setF("price", e.target.value)} /></label>
+          <label className="grid gap-1 text-xs text-ink-500">Fahrzeugklasse<select className="field" data-testid="fp-class" value={form.vehicleClass} onChange={(e) => setF("vehicleClass", e.target.value)}>{FIXED_CLASSES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select></label>
+          <label className="flex items-end gap-2 pb-3 text-sm font-bold text-ink-600"><input type="checkbox" data-testid="fp-bidir" checked={form.bidirectional} onChange={(e) => setF("bidirectional", e.target.checked)} />Gegenrichtung</label>
+        </div>
+        {msg && <p className="text-sm font-semibold text-red-600" data-testid="fp-msg">{msg}</p>}
+        <button onClick={create} disabled={!ok} data-testid="fp-save" className="btn-primary disabled:opacity-60">{busy ? "…" : "Festpreis anlegen"}</button>
+      </div>
+
+      <div className="mt-4 grid gap-2">
+        {rules.map((r) => (
+          <div key={r.id} className={`rounded-xl border px-3 py-2 text-sm ${r.active ? "border-ink-100 bg-ink-50" : "border-ink-200 bg-white opacity-60"}`} data-testid={`fp-${r.id}`}>
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-0">
+                <span className="font-bold text-ink-900">{r.name}</span>
+                {!r.active && <span className="ml-2 rounded-full bg-ink-200 px-2 py-0.5 text-[10px] font-bold text-ink-600">Pausiert</span>}
+                <span className="block text-xs text-ink-500">{r.bidirectional ? "↔" : "→"} {r.vehicleClass ?? "alle Klassen"} · Radius {r.fromRadius}/{r.toRadius} m</span>
+              </span>
+              <span className="shrink-0 font-display text-lg font-extrabold text-ink-900">{Number(r.price).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}</span>
+            </div>
+            <div className="mt-1 flex justify-end gap-1">
+              <button onClick={() => toggle(r)} data-testid={`fp-${r.id}-toggle`} className="rounded-lg px-2 py-1 text-xs font-bold text-ink-600 hover:bg-ink-100">{r.active ? "Pausieren" : "Aktivieren"}</button>
+              <button onClick={() => remove(r)} data-testid={`fp-${r.id}-delete`} className="rounded-lg px-2 py-1 text-xs font-bold text-red-600 hover:bg-red-50">Löschen</button>
+            </div>
+          </div>
+        ))}
+        {rules.length === 0 && <p className="text-sm text-ink-400">Noch keine Festpreise.</p>}
+      </div>
+    </div>
   );
 }
 

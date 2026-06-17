@@ -8,6 +8,7 @@ import { airportPickupTime } from "@/lib/flights";
 import { meetGreetFee } from "@/lib/airportExtras";
 import { promoUsable, promoDiscountAmount } from "@/lib/promo";
 import { normalizeCorporateCode, corporateUsable, corporateReasonText } from "@/lib/corporate";
+import { fixedPriceRange } from "@/lib/fixedPrice";
 import { normalizeMedicalType, medicalDetailsSchema, medicalDetailsData } from "@/lib/medical";
 import { serializeStops } from "@/lib/stops";
 import { authorizePayment, paymentEnabled, retrieveIntent } from "@/lib/stripe";
@@ -146,8 +147,19 @@ export async function POST(req: Request) {
   const classF = await classFactorForSlug(d.company ?? undefined, vehicleClass);
   // Meet & Greet Aufschlag (Airport): flughafenabhängig, in den Preis einrechnen.
   const mgFee = meetGreetFee(d.meetGreet, d.pickupAddress, d.destAddress);
-  const priceMin = applyClassFactor(estimate.priceMin, classF) + mgFee;
-  const priceMax = applyClassFactor(estimate.priceMax, classF) + mgFee;
+  let priceMin = applyClassFactor(estimate.priceMin, classF) + mgFee;
+  let priceMax = applyClassFactor(estimate.priceMax, classF) + mgFee;
+
+  // Festpreis-Engine: bei Direktfahrten (ohne Zwischenstopps) die Spanne – und
+  // damit den Karten-Hold – um passende Festpreis-Regeln aller Firmen weiten.
+  if ((d.stops ?? []).length === 0) {
+    const fixedRules = await prisma.fixedPriceRule.findMany({ where: { active: true } });
+    const fx = fixedPriceRange(fixedRules, { lat: d.pickup.lat, lng: d.pickup.lng }, { lat: d.dest.lat, lng: d.dest.lng }, vehicleClass);
+    if (fx) {
+      priceMin = Math.min(priceMin, fx.min + mgFee);
+      priceMax = Math.max(priceMax, fx.max + mgFee);
+    }
+  }
 
   // „ca."-Vorabpreis (Plattform-Durchschnitt) – gilt bis ein Fahrer feststeht.
   const rate = await getPlatformRate();

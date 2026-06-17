@@ -26,6 +26,7 @@ import { bookingRoutePoints, parseStops, serializeStops, type Stop } from "../li
 import { waitCharge } from "../lib/airportExtras";
 import { capturePayment, voidPayment } from "../lib/stripe";
 import { settleCorporateComplete, releaseCorporate } from "./corporateSettle";
+import { fixedPriceFor } from "../lib/fixedPrice";
 import { bookingDTO, driverAdmin } from "./serialize";
 
 const PHASE_DURATION_MS = 15_000;
@@ -534,18 +535,38 @@ export class Dispatcher {
     // Mehrziel: Gesamtstrecke ueber Abholung -> Stopps -> Ziel (Phase 2e).
     const b0 = await prisma.booking.findUnique({ where: { id: bookingId } });
     let priceExact: number | null = null;
+    let priceIsFixed = false;
     try {
       if (b0) {
-        // companyId wird gleich auf live.companyId gesetzt - dafuer Tarif holen.
-        const company = live?.companyId
-          ? await prisma.company.findUnique({ where: { id: live.companyId }, select: { slug: true } })
-          : null;
-        const pricing = await pricingForSlug(company?.slug);
-        const est = await estimatePriceViaWith(bookingRoutePoints(b0), pricing);
-        // Klassenfaktor der annehmenden Firma anwenden (Phase 12 Marktplatz).
-        const factor = await classFactorForCompanyId(live?.companyId, normalizeClass(b0.vehicleClass));
-        // Mittelwert der Spanne als Festpreis (priceMin/priceMax bilden +/- 12%-Korridor).
-        priceExact = applyClassFactor((est.priceMin + est.priceMax) / 2, factor);
+        // Festpreis-Engine: hat das annehmende Unternehmen eine passende
+        // Festpreis-Regel für diese Strecke (nur Direktfahrt ohne Zwischenstopps),
+        // wird dieser feste Preis als Endpreis eingefroren.
+        const hasStops = parseStops(b0.stops).length > 0;
+        if (live?.companyId && !hasStops) {
+          const rules = await prisma.fixedPriceRule.findMany({ where: { companyId: live.companyId, active: true } });
+          const fixed = fixedPriceFor(
+            rules,
+            { lat: b0.pickupLat, lng: b0.pickupLng },
+            { lat: b0.destLat, lng: b0.destLng },
+            normalizeClass(b0.vehicleClass),
+          );
+          if (fixed != null) {
+            priceExact = fixed;
+            priceIsFixed = true;
+          }
+        }
+        if (!priceIsFixed) {
+          // Sonst: Meter-Tarif des annehmenden Unternehmens.
+          const company = live?.companyId
+            ? await prisma.company.findUnique({ where: { id: live.companyId }, select: { slug: true } })
+            : null;
+          const pricing = await pricingForSlug(company?.slug);
+          const est = await estimatePriceViaWith(bookingRoutePoints(b0), pricing);
+          // Klassenfaktor der annehmenden Firma anwenden (Phase 12 Marktplatz).
+          const factor = await classFactorForCompanyId(live?.companyId, normalizeClass(b0.vehicleClass));
+          // Mittelwert der Spanne als Festpreis (priceMin/priceMax bilden +/- 12%-Korridor).
+          priceExact = applyClassFactor((est.priceMin + est.priceMax) / 2, factor);
+        }
       }
     } catch {
       /* fallback: priceExact bleibt null, wird bei complete neu berechnet */
@@ -562,6 +583,7 @@ export class Dispatcher {
         companyId: live?.companyId ?? undefined,
         acceptedAt: now,
         priceExact,
+        priceIsFixed,
         isReserved: isReservation,
       },
       include: { driver: true },

@@ -5,6 +5,11 @@ import { normalizeStops } from "@/lib/stops";
 import { getPlatformRate, approxFare } from "@/lib/platformRate";
 import { prisma } from "@/lib/prisma";
 import { VEHICLE_CLASSES, normalizeClass, classFits, classMultiplier } from "@/lib/vehicleClasses";
+import { fixedPriceRange } from "@/lib/fixedPrice";
+
+// Spanne mit einem Festpreis zusammenführen (günstigste/teuerste Regel im System).
+const lo = (a: number, b?: number | null) => (b == null ? a : Math.min(a, b));
+const hi = (a: number, b?: number | null) => (b == null ? a : Math.max(a, b));
 
 export const dynamic = "force-dynamic";
 
@@ -55,12 +60,20 @@ export async function POST(req: Request) {
     luggage: Number.isFinite(luggage) ? Number(luggage) : undefined,
   };
 
+  // Festpreis-Engine: bei Direktfahrten (ohne Zwischenstopps) die passenden
+  // Festpreis-Regeln aller Unternehmen laden und in die Spanne einrechnen.
+  const pickupPt = { lat: Number(from.lat), lng: Number(from.lng) };
+  const destPt = { lat: Number(to.lat), lng: Number(to.lng) };
+  const hasStops = normalizeStops(stops).length > 0;
+  const fixedRules = hasStops ? [] : await prisma.fixedPriceRule.findMany({ where: { active: true } });
+
   // Preisvergleich über alle Klassen (Phase 12 Fahrzeug-Marktplatz).
   const classes = await Promise.all(
     VEHICLE_CLASSES.map(async (c) => {
       const factor = companyId
         ? await classFactorForCompanyId(companyId, c.key)
         : { multiplier: classMultiplier(c.key), flatSurcharge: 0, enabled: true };
+      const cFixed = fixedPriceRange(fixedRules, pickupPt, destPt, c.key);
       return {
         key: c.key,
         label: c.label,
@@ -70,8 +83,9 @@ export async function POST(req: Request) {
         luggage: c.luggage,
         desc: c.desc,
         price: applyClassFactor(baseApprox, factor),
-        priceMin: applyClassFactor(estimate.priceMin, factor),
-        priceMax: applyClassFactor(estimate.priceMax, factor),
+        priceMin: lo(applyClassFactor(estimate.priceMin, factor), cFixed?.min),
+        priceMax: hi(applyClassFactor(estimate.priceMax, factor), cFixed?.max),
+        fixedPrice: cFixed?.min ?? null,
         enabled: factor.enabled,
         fits: classFits(c, reqLoad),
         available: availByClass.get(c.key) ?? 0,
@@ -85,11 +99,14 @@ export async function POST(req: Request) {
     ? await classFactorForCompanyId(companyId, selected)
     : { multiplier: classMultiplier(selected), flatSurcharge: 0, enabled: true };
 
+  const selFixed = fixedPriceRange(fixedRules, pickupPt, destPt, selected);
+
   return NextResponse.json({
     ...estimate,
-    priceMin: applyClassFactor(estimate.priceMin, selFactor),
-    priceMax: applyClassFactor(estimate.priceMax, selFactor),
+    priceMin: lo(applyClassFactor(estimate.priceMin, selFactor), selFixed?.min),
+    priceMax: hi(applyClassFactor(estimate.priceMax, selFactor), selFixed?.max),
     priceApprox: applyClassFactor(baseApprox, selFactor),
+    fixedPrice: selFixed?.min ?? null,
     approxPerKm: rate.avgPerKm,
     vehicleClass: selected,
     classes: classes.filter((c) => c.enabled),
