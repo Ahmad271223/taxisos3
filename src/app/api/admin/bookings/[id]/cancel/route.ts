@@ -19,8 +19,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!booking) {
     return NextResponse.json({ error: "Auftrag nicht gefunden" }, { status: 404 });
   }
-  // Admin darf nur eigene Buchungen stornieren (sobald firmenZuordnung existiert).
-  if (booking.companyId && booking.companyId !== session.companyId) {
+  // Admin darf NUR der eigenen Firma zugewiesene Buchungen stornieren. Nicht
+  // zugewiesene Plattform-Buchungen (companyId = null) gehören keiner Firma und
+  // dürfen hier nicht storniert werden (Kunde/System stornieren separat).
+  if (booking.companyId !== session.companyId) {
     return NextResponse.json({ error: "Nicht autorisiert" }, { status: 403 });
   }
   if (booking.status === "ABGESCHLOSSEN" || booking.status === "STORNIERT") {

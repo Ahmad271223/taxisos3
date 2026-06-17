@@ -11,7 +11,9 @@ const schema = z.object({
   phone: z.string().optional().nullable(),
   email: z.string().email(),
   password: z.string().min(6),
-  cityTier: z.enum(["BIG", "SMALL"]).optional(),
+  // cityTier wird NICHT vom Antragsteller übernommen: die Provisionsstufe
+  // (BIG 7 % / SMALL 5 %) bestimmt der Plattform-Betreiber, sonst könnte sich
+  // jede Firma die niedrigere Gebühr selbst zuweisen. Default: SMALL.
 });
 
 function slugify(name: string): string {
@@ -78,7 +80,7 @@ export async function POST(req: Request) {
           phone: d.phone ?? null,
           email,
           passwordHash,
-          cityTier: d.cityTier ?? "SMALL",
+          // cityTier bleibt beim Modell-Default ("SMALL"); Upgrade nur durch Betreiber.
           pricing: { create: {} }, // Standardtarife
         },
       });

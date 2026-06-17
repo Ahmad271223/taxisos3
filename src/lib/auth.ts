@@ -65,13 +65,14 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
 }
 
 export function signSession(payload: SessionPayload): string {
-  return jwt.sign(payload, secret(), { expiresIn: "7d" });
+  return jwt.sign(payload, secret(), { expiresIn: "7d", algorithm: "HS256" });
 }
 
 export function verifySession(token: string | undefined | null): SessionPayload | null {
   if (!token) return null;
   try {
-    return jwt.verify(token, secret()) as SessionPayload;
+    // Algorithmus festnageln: verhindert "alg: none"/Confusion-Angriffe.
+    return jwt.verify(token, secret(), { algorithms: ["HS256"] }) as SessionPayload;
   } catch {
     return null;
   }

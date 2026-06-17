@@ -30,9 +30,12 @@ export async function GET() {
         lat: d.lat,
         lng: d.lng,
         status: d.status, // FREI | BESETZT
-        name: r.name,
+        // Öffentliche Karte: nur Vorname und KEIN Kennzeichen (Datenschutz – sonst
+        // ließen sich Fahrer-Name + Kennzeichen + Live-Position massenhaft abgreifen).
+        // Vollständige Fahrer-/Fahrzeugdaten erst nach der Buchung im Tracking.
+        name: (r.name ?? "").split(" ")[0] || "Fahrer",
         vehicleModel: r.vehicleModel ?? null,
-        vehiclePlate: r.vehiclePlate ?? null,
+        vehiclePlate: null,
         vehicleColor: r.vehicleColor ?? null,
         vehicleSeats: r.vehicleSeats ?? c.seats,
         vehicleClass: c.key,

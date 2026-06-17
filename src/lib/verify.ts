@@ -38,7 +38,7 @@ interface VerifyTokenPayload {
 
 export function signVerifyToken(channel: VerifyChannel, target: string): string {
   const payload: VerifyTokenPayload = { purpose: "verify", channel, target };
-  return jwt.sign(payload, secret(), { expiresIn: TOKEN_TTL });
+  return jwt.sign(payload, secret(), { expiresIn: TOKEN_TTL, algorithm: "HS256" });
 }
 
 // Prueft Token + (optional) ob es zum erwarteten Ziel/Kanal passt.
@@ -48,7 +48,7 @@ export function verifyVerifyToken(
 ): VerifyTokenPayload | null {
   if (!token) return null;
   try {
-    const p = jwt.verify(token, secret()) as VerifyTokenPayload;
+    const p = jwt.verify(token, secret(), { algorithms: ["HS256"] }) as VerifyTokenPayload;
     if (p.purpose !== "verify") return null;
     if (expected?.channel && p.channel !== expected.channel) return null;
     if (expected?.target && p.target !== expected.target) return null;
