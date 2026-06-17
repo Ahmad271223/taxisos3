@@ -59,7 +59,11 @@ async function driverState(driverId: string) {
     where: {
       driverId,
       status: { in: ["ZUGEWIESEN", "AKTIV"] },
-      OR: [{ isScheduled: false }, { scheduledAt: { lte: new Date(Date.now() + SCHEDULED_LEAD_MS) } }],
+      // Nur LIVE laufende Fahrten sind der "aktuelle Auftrag" und sperren den
+      // Status. Eine reservierte Vorbestellung bleibt GEPLANT (erscheint unter
+      // "Meine geplanten Fahrten"), bis der Sweep sie zur Fahrtzeit live schaltet
+      // – sonst würde eine (auch überfällige) geplante Fahrt den Fahrer blockieren.
+      trackingStatus: { not: "GEPLANT" },
     },
     include: { driver: true },
     orderBy: { acceptedAt: "desc" },

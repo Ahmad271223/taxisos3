@@ -1010,6 +1010,23 @@ export class Dispatcher {
         scheduledAt: { lte: dueAt },
       },
     });
+    for (const b of dueReserved) {
+      if (!b.driverId) continue;
+      // Fährt der Fahrer gerade eine andere Fahrt? Dann geht diese Vorbestellung
+      // erst nach deren Abschluss live (über die reservedBooking-Logik im complete).
+      const current = this.driverActiveBooking.get(b.driverId);
+      if (current && current !== b.id) continue;
+      await prisma.booking.update({
+        where: { id: b.id },
+        data: { trackingStatus: "FAHRER_UNTERWEGS", isReserved: false },
+      });
+      this.driverActiveBooking.set(b.driverId, b.id);
+      this.driverActiveBookingDest.set(b.driverId, { lat: b.destLat, lng: b.destLng });
+      await this.setStatusInternal(b.driverId, "BESETZT");
+      await this.emitBooking(b.id);
+      await this.refreshDriver?.(b.driverId);
+    }
+
     // 3) Watchdog: hängende ZUGEWIESEN-Buchungen, die seit > 5 Min nicht
     //    weiterprogressed sind (z. B. nach Server-Neustart), auf OFFEN
     //    zurücksetzen und den Fahrer freigeben. Greift NICHT auf Reservierungen
