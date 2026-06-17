@@ -349,6 +349,16 @@ export function DriverPortal() {
               </button>
             </div>
 
+            {active.trackingStatus === "FAHRER_ANGEKOMMEN" && (
+              <button
+                onClick={() => { if (window.confirm("Gast ist nicht erschienen? Die Fahrt wird storniert (ggf. No-Show-Gebühr).")) tripAction("noshow"); }}
+                data-testid="trip-noshow"
+                className="btn-ghost mt-2 w-full text-sm font-bold text-red-600"
+              >
+                Gast nicht erschienen (No-Show)
+              </button>
+            )}
+
             {/* Ziel ändern / Zwischenstopp (Phase 2f) */}
             {["FAHRER_UNTERWEGS", "FAHRER_ANGEKOMMEN", "FAHRT_LAEUFT"].includes(active.trackingStatus) && (
               <div className="mt-3 border-t border-ink-100 pt-3" data-testid="driver-change-dest">

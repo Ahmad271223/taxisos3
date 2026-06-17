@@ -26,6 +26,8 @@ const schema = z.object({
   // Festpreis-Engine: dynamischer Risiko-Buffer (%) + Aufschlag je Zwischenstopp (€).
   fixedBufferPct: z.number().min(0).max(100).optional(),
   perStopFee: z.number().min(0).max(1000).optional(),
+  // No-Show-Gebühr (€): wenn der Gast nach Ankunft nicht erscheint.
+  noShowFee: z.number().min(0).max(1000).optional(),
 });
 
 export async function PUT(req: Request) {

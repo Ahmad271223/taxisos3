@@ -687,7 +687,7 @@ export class Dispatcher {
   }
 
   // -- Fahrtfortschritt ----------------------------------------------------
-  async tripAction(driverId: string, bookingId: string, action: "arrived" | "start" | "complete" | "cancel"): Promise<{ ok: boolean }> {
+  async tripAction(driverId: string, bookingId: string, action: "arrived" | "start" | "complete" | "cancel" | "noshow"): Promise<{ ok: boolean }> {
     const b = await prisma.booking.findUnique({ where: { id: bookingId } });
     if (!b || b.driverId !== driverId) return { ok: false };
 
@@ -781,6 +781,62 @@ export class Dispatcher {
       } else {
         await this.setStatus(driverId, "FREI");
       }
+    } else if (action === "noshow") {
+      // Gast nicht erschienen: nur nach Ankunft des Fahrers (Wartepflicht erfüllt).
+      if (b.trackingStatus !== "FAHRER_ANGEKOMMEN") return { ok: false };
+      // No-Show-Gebühr aus dem Firmen-Tarif (0 = keine).
+      const pr = b.companyId ? await prisma.pricing.findUnique({ where: { companyId: b.companyId } }) : null;
+      const fee = Math.max(0, pr?.noShowFee ?? 0);
+      // Provision auf die Gebühr.
+      let platformFeeRate: number | null = null;
+      let platformFee: number | null = null;
+      let companyNet: number | null = null;
+      if (fee > 0) {
+        const company = b.companyId ? await prisma.company.findUnique({ where: { id: b.companyId }, select: { cityTier: true } }) : null;
+        const c = computeCommission(fee, company?.cityTier);
+        platformFeeRate = c.rate;
+        platformFee = c.platformFee;
+        companyNet = c.companyNet;
+      }
+      // Karte: Gebühr abbuchen (sonst Hold freigeben). Bar: Gebühr bleibt offen.
+      let paymentStatus = b.paymentStatus;
+      if (b.paymentMethod === "CARD" && b.paymentStatus === "AUTORISIERT") {
+        if (fee > 0) {
+          const cap = await capturePayment(b.paymentRef, Math.min(fee, b.priceAuthorized ?? fee));
+          paymentStatus = cap.status;
+        } else {
+          const v = await voidPayment(b.paymentRef);
+          paymentStatus = v.status;
+        }
+      }
+      await prisma.booking.update({
+        where: { id: bookingId },
+        data: {
+          status: "STORNIERT",
+          trackingStatus: "STORNIERT",
+          cancelledAt: new Date(),
+          cancelledBy: "DRIVER",
+          cancelReason: "NO_SHOW",
+          noShowFee: fee || null,
+          fare: fee || null,
+          platformFeeRate,
+          platformFee,
+          companyNet,
+          paymentStatus,
+        },
+      });
+      await prisma.cancellationLog.create({ data: { bookingId, actorType: "DRIVER", actorId: driverId, reason: "NO_SHOW" } });
+      await releaseCorporate(b);
+      this.driverActiveBooking.delete(driverId);
+      this.driverActiveBookingDest.delete(driverId);
+      this.driverNearCompletion.delete(driverId);
+      const reservedNoShow = this.driverReservedBooking.get(driverId);
+      if (reservedNoShow) {
+        this.driverReservedBooking.delete(driverId);
+        await prisma.booking.update({ where: { id: reservedNoShow }, data: { trackingStatus: "SUCHE", driverId: null, status: "OFFEN", isReserved: false } });
+        await this.startOrContinueDispatch(reservedNoShow, 0);
+      }
+      await this.setStatus(driverId, "FREI");
     } else if (action === "cancel") {
       // Karten-Autorisierung wieder freigeben (Phase 2g).
       let paymentStatus = b.paymentStatus;

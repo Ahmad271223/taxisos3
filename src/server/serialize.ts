@@ -233,6 +233,7 @@ export function bookingDTO(b: any, extra: Record<string, any> = {}) {
     cancelledAt: iso(b.cancelledAt),
     cancelledBy: b.cancelledBy ?? null,
     cancelReason: b.cancelReason ?? null,
+    noShowFee: b.noShowFee ?? null,
     assignedAt: iso(b.assignedAt),
     acceptedAt: iso(b.acceptedAt),
     arrivedAt: iso(b.arrivedAt),

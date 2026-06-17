@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "Booking" ADD COLUMN     "noShowFee" DOUBLE PRECISION;
+
+-- AlterTable
+ALTER TABLE "Pricing" ADD COLUMN     "noShowFee" DOUBLE PRECISION NOT NULL DEFAULT 0;

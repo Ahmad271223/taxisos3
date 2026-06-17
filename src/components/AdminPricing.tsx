@@ -25,6 +25,7 @@ const FIELDS: { key: string; label: string; suffix: string; step?: string }[] = 
   { key: "basePrice", label: "Grundpreis", suffix: "€", step: "0.10" },
   { key: "fixedBufferPct", label: "Dynamischer Festpreis-Buffer (0 = aus)", suffix: "%", step: "1" },
   { key: "perStopFee", label: "Aufschlag je Zwischenstopp", suffix: "€ / Stopp", step: "0.50" },
+  { key: "noShowFee", label: "No-Show-Gebühr (Gast nicht erschienen)", suffix: "€", step: "1" },
 ];
 
 export function AdminPricing() {
@@ -63,6 +64,7 @@ export function AdminPricing() {
       nightEndHour: Number(form.nightEndHour ?? 6),
       fixedBufferPct: Number(form.fixedBufferPct ?? 0),
       perStopFee: Number(form.perStopFee ?? 0),
+      noShowFee: Number(form.noShowFee ?? 0),
     };
     const res = await fetch("/api/admin/pricing", {
       method: "PUT",

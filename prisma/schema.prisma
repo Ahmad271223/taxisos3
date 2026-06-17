@@ -108,6 +108,8 @@ model Pricing {
   fixedBufferPct Float    @default(0)
   // Aufschlag je Zwischenstopp (EUR), zusätzlich zur Streckenberechnung.
   perStopFee     Float    @default(0)
+  // No-Show-Gebühr (EUR): berechnet, wenn der Gast nach Ankunft nicht erscheint. 0 = keine.
+  noShowFee      Float    @default(0)
 
   updatedAt      DateTime @updatedAt
 }
@@ -397,8 +399,9 @@ model Booking {
   startedAt      DateTime?
   completedAt    DateTime?
   cancelledAt    DateTime?
-  cancelReason   String?
+  cancelReason   String?  // ..., NO_SHOW (Gast nicht erschienen)
   cancelledBy    String?  // CUSTOMER | ADMIN | DRIVER | SYSTEM
+  noShowFee      Float?   // berechnete No-Show-Gebühr (wenn cancelReason = NO_SHOW)
 
   // Reservierte Folgefahrt (Bolt-Style "near completion")
   isReserved     Boolean  @default(false)
