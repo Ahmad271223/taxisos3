@@ -20,9 +20,10 @@ export interface FlightInfo {
   // Betroffener Flughafen (bei ANKUNFT der Zielflughafen, bei ABFLUG der Startflughafen).
   airportName: string | null;
   airportIata: string | null;
-  // Geplante (und ggf. erwartete) Zeit am betroffenen Flughafen, ISO mit Offset.
+  // Geplante (und ggf. erwartete/tatsächliche) Zeit am betroffenen Flughafen.
   scheduledAt: string | null;
   estimatedAt: string | null;
+  actualAt: string | null; // tatsächliche Lande-/Startzeit (wenn vorhanden)
   airline: string | null;
   source: "live" | "mock";
 }
@@ -69,6 +70,7 @@ function mockFlight(flightNumber: string, direction: FlightDirection): FlightInf
     airportIata: "DEMO",
     scheduledAt: sched.toISOString(),
     estimatedAt: null,
+    actualAt: null,
     airline: fn.slice(0, 2) || null,
     source: "mock",
   };
@@ -120,12 +122,18 @@ async function liveFlight(flightNumber: string, direction: FlightDirection, date
       const diff = Math.round((Date.parse(leg.estimated) - Date.parse(leg.scheduled)) / 60_000);
       if (diff > 0) delayMinutes = diff;
     }
-    const status = (row.flight_status ?? "").toUpperCase();
-    const passthrough = status === "ACTIVE" || status === "LANDED" || status === "CANCELLED";
+    const raw = (row.flight_status ?? "").toUpperCase();
+    const passthrough = raw === "ACTIVE" || raw === "LANDED" || raw === "CANCELLED";
+    let status = passthrough ? raw : delayMinutes > 0 ? "DELAYED" : "SCHEDULED";
+    // Die tatsächliche Zeit des relevanten Legs ist die Wahrheit (flight_status
+    // hängt bei AviationStack oft nach): liegt sie vor, ist der Flug bei ANKUNFT
+    // gelandet bzw. bei ABFLUG bereits gestartet.
+    const legActual = leg?.actual ?? null;
+    if (legActual) status = direction === "ARRIVAL" ? "LANDED" : "ACTIVE";
     return {
       flightNumber: fn,
       direction,
-      status: passthrough ? status : delayMinutes > 0 ? "DELAYED" : "SCHEDULED",
+      status,
       delayMinutes,
       terminal: leg?.terminal ?? null,
       gate: leg?.gate ?? null,
@@ -133,6 +141,7 @@ async function liveFlight(flightNumber: string, direction: FlightDirection, date
       airportIata: leg?.iata ?? null,
       scheduledAt: leg?.scheduled ?? null,
       estimatedAt: leg?.estimated ?? null,
+      actualAt: legActual,
       airline: row.airline?.name ?? fn.slice(0, 2) ?? null,
       source: "live",
     };

@@ -323,6 +323,9 @@ export function AirportBookingForm() {
               {flight.delayMinutes > 0 && (
                 <span className="font-bold text-red-600">+{flight.delayMinutes} Min{flight.estimatedAt ? ` (erwartet ${flightLocalTimeOnly(flight.estimatedAt)})` : ""}</span>
               )}
+              {flight.actualAt && (
+                <span className="font-bold text-green-700">{direction === "ARRIVAL" ? "gelandet" : "gestartet"} {flightLocalTimeOnly(flight.actualAt)}</span>
+              )}
               {flight.terminal && <span>Terminal <span className="font-bold text-ink-900">{flight.terminal}</span></span>}
               {flight.gate && <span>Gate <span className="font-bold text-ink-900">{flight.gate}</span></span>}
             </div>

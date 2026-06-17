@@ -72,12 +72,19 @@ export async function POST(req: Request) {
     mock = r.mock;
   }
 
-  // devCode nur im Mock-Modus offenlegen (kein echter Versand).
+  // devCode NUR außerhalb der Produktion offenlegen. In Produktion ohne echten
+  // SMS/E-Mail-Versand (mock) darf der Code NICHT zurückgegeben werden – sonst
+  // wäre die Verifizierung trivial umgehbar (Sicherheits-Theater). Läuft die App
+  // produktiv ohne Anbieter, sollte REQUIRE_PHONE_VERIFICATION=0 gesetzt werden.
+  const exposeDev = mock && process.env.NODE_ENV !== "production";
+  if (mock && process.env.NODE_ENV === "production") {
+    console.warn(`[verify] ${channel}-Versand im Mock-Modus in PRODUKTION – kein Anbieter (Twilio/Resend) konfiguriert. Verifizierung schützt nicht.`);
+  }
   return NextResponse.json({
     ok: true,
     channel,
     expiresAt: expiresAt.toISOString(),
     mock,
-    ...(mock ? { devCode: code } : {}),
+    ...(exposeDev ? { devCode: code } : {}),
   });
 }
