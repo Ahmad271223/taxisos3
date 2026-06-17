@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { Brand } from "@/components/Brand";
+import { SiteMenu } from "@/components/SiteMenu";
 
 const HERO_IMAGE =
   "https://images.unsplash.com/photo-1630717285906-29364ffacea0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzJ8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjB5ZWxsb3clMjB0YXhpJTIwY2l0eSUyMHN0cmVldHxlbnwwfHx8fDE3ODEyNzE4NDd8MA&ixlib=rb-4.1.0&q=85";
@@ -23,29 +24,7 @@ export default function PlatformLanding() {
       <div className="relative">
         <header className="mx-auto flex max-w-6xl items-center justify-between px-5 py-5">
           <Brand subtitle="Schnell ein Taxi bestellen" />
-          <nav className="flex items-center gap-2 text-sm font-semibold">
-            <Link
-              href="/admin/login"
-              data-testid="nav-admin-login"
-              className="rounded-xl px-3.5 py-2 text-ink-700 transition hover:bg-ink-100"
-            >
-              Firmen-Login
-            </Link>
-            <Link
-              href="/fahrer/login"
-              data-testid="nav-driver-login"
-              className="rounded-xl px-3.5 py-2 text-ink-700 transition hover:bg-ink-100"
-            >
-              Fahrer-Login
-            </Link>
-            <Link
-              href="/registrieren"
-              data-testid="nav-register"
-              className="rounded-xl bg-ink-900 px-3.5 py-2 font-bold text-white transition hover:bg-ink-800"
-            >
-              Firma registrieren
-            </Link>
-          </nav>
+          <SiteMenu />
         </header>
 
         {/* Hero */}
