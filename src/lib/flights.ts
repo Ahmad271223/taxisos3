@@ -74,20 +74,44 @@ function mockFlight(flightNumber: string, direction: FlightDirection): FlightInf
   };
 }
 
+// Eine AviationStack-Abfrage für einen Parameter (flight_iata bzw. flight_icao).
+// Liefert die Trefferzeilen, [] (kein Treffer) oder null (harter Fehler/Key/Limit).
+async function fetchFlightRows(key: string, param: "flight_iata" | "flight_icao", value: string): Promise<any[] | null> {
+  const url = `http://api.aviationstack.com/v1/flights?access_key=${key}&${param}=${encodeURIComponent(value)}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    console.warn(`[flights] AviationStack HTTP ${res.status} (${param}=${value}) – Fallback auf Demo-Daten.`);
+    return null;
+  }
+  const data = (await res.json()) as { data?: any[]; error?: { code?: string; message?: string } };
+  // AviationStack liefert Fehler oft mit HTTP 200 im Body (z. B. ungültiger Key,
+  // Monatslimit erreicht, Feature gesperrt). Das ist die häufigste Render-Ursache.
+  if (data.error) {
+    console.warn(`[flights] AviationStack-Fehler: ${data.error.code ?? "?"} – ${data.error.message ?? ""} (Fallback auf Demo-Daten).`);
+    return null;
+  }
+  return data.data ?? [];
+}
+
 // AviationStack-Abfrage (best effort). Bei Fehler -> Mock (damit der Flow nie bricht).
 async function liveFlight(flightNumber: string, direction: FlightDirection, dateISO?: string): Promise<FlightInfo | null> {
-  const key = process.env.AVIATIONSTACK_KEY;
+  const key = (process.env.AVIATIONSTACK_KEY ?? "").trim();
   if (!key) return null;
   const fn = normalizeFlightNumber(flightNumber);
   try {
-    const url = `http://api.aviationstack.com/v1/flights?access_key=${key}&flight_iata=${encodeURIComponent(fn)}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data = (await res.json()) as { data?: any[] };
-    const rows = data.data ?? [];
+    // Erst als IATA-Nummer (z. B. LH400, XQ511) abfragen. Kein Treffer ->
+    // als ICAO-Nummer nachfragen (z. B. DLH400, SXS511, wie auf dem Flugbrett).
+    let rows = await fetchFlightRows(key, "flight_iata", fn);
+    if (rows !== null && rows.length === 0) {
+      rows = await fetchFlightRows(key, "flight_icao", fn);
+    }
+    if (rows === null) return null; // harter Fehler (Key/Limit) -> Demo
     // Optional auf Datum filtern, sonst ersten aktiven Treffer nehmen.
     const row = (dateISO ? rows.find((r) => r.flight_date === dateISO.slice(0, 10)) : rows[0]) ?? rows[0];
-    if (!row) return null;
+    if (!row) {
+      console.warn(`[flights] Kein Treffer für ${fn} (Datum ${dateISO?.slice(0, 10) ?? "egal"}) – Fallback auf Demo-Daten.`);
+      return null;
+    }
     const leg = direction === "ARRIVAL" ? row.arrival : row.departure;
     const delayMinutes = Number(leg?.delay ?? 0) || 0;
     const status = (row.flight_status ?? "").toUpperCase();
@@ -106,7 +130,8 @@ async function liveFlight(flightNumber: string, direction: FlightDirection, date
       airline: row.airline?.name ?? fn.slice(0, 2) ?? null,
       source: "live",
     };
-  } catch {
+  } catch (e) {
+    console.warn(`[flights] AviationStack-Ausnahme: ${(e as Error).message} – Fallback auf Demo-Daten.`);
     return null;
   }
 }

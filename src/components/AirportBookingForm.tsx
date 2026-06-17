@@ -34,6 +34,7 @@ export function AirportBookingForm() {
   const [flightDate, setFlightDate] = useState("");
   const [flightTime, setFlightTime] = useState("");
   const [flight, setFlight] = useState<any | null>(null);
+  const [flightLive, setFlightLive] = useState(false); // ist ein Live-Anbieter (Key) konfiguriert?
   const [flightBusy, setFlightBusy] = useState(false);
   const [flightError, setFlightError] = useState<string | null>(null);
 
@@ -128,6 +129,7 @@ export function AirportBookingForm() {
       if (!res.ok) setFlightError(d.error ?? "Flug nicht gefunden.");
       else {
         setFlight(d.flight);
+        setFlightLive(!!d.live);
         // Datum + Uhrzeit automatisch aus der geplanten Flughafenzeit übernehmen
         // (Wandzeit am Flughafen – direkt aus dem ISO-String, ohne Zeitzonen-Shift).
         const iso: string | null = d.flight?.scheduledAt ?? null;
@@ -327,7 +329,11 @@ export function AirportBookingForm() {
               </p>
             )}
             {flight.source === "mock" && (
-              <p className="mt-1 text-[11px] font-semibold text-amber-700" data-testid="flight-demo">⚠ Demo-Daten – Live-Fluganbieter nicht konfiguriert (AVIATIONSTACK_KEY).</p>
+              <p className="mt-1 text-[11px] font-semibold text-amber-700" data-testid="flight-demo">
+                {flightLive
+                  ? "⚠ Demo-Daten – Live-Abruf fehlgeschlagen (Flug heute nicht gefunden, Key ungültig oder Monatslimit erreicht)."
+                  : "⚠ Demo-Daten – Live-Fluganbieter nicht konfiguriert (AVIATIONSTACK_KEY fehlt)."}
+              </p>
             )}
           </div>
         )}
