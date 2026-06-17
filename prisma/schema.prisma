@@ -171,6 +171,14 @@ model Driver {
   pScheinUntil      String?  // Personenbeförderungsschein gültig bis (ISO "YYYY-MM-DD")
   wheelchairTrained Boolean @default(false) // Rollstuhlhilfe geschult
   qualifications    String?  // Sonderqualifikationen (Freitext)
+
+  // Fahrer-/Fahrzeug-Dokumente mit Ablaufdatum (ISO "YYYY-MM-DD"). Leer = nicht
+  // hinterlegt. Für Compliance-Prüfung + Ablaufwarnung (siehe lib/driverDocs).
+  licenseUntil      String?  // Führerschein gültig bis
+  concessionUntil   String?  // Taxikonzession gültig bis
+  insuranceUntil    String?  // Kfz-Versicherung gültig bis
+  tuevUntil         String?  // TÜV/HU gültig bis
+
   active       Boolean  @default(true)
 
   bookings     Booking[]

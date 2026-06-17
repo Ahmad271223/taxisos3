@@ -21,6 +21,10 @@ const schema = z.object({
   pScheinUntil: z.string().max(20).optional().nullable(),
   wheelchairTrained: z.boolean().optional(),
   qualifications: z.string().max(300).optional().nullable(),
+  licenseUntil: z.string().max(20).optional().nullable(),
+  concessionUntil: z.string().max(20).optional().nullable(),
+  insuranceUntil: z.string().max(20).optional().nullable(),
+  tuevUntil: z.string().max(20).optional().nullable(),
   active: z.boolean().optional(),
 });
 

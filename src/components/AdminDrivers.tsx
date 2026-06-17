@@ -78,6 +78,10 @@ function NewDriverCard({ onCreated }: { onCreated: (d: any) => void }) {
     pScheinUntil: "",
     wheelchairTrained: false,
     qualifications: "",
+    licenseUntil: "",
+    concessionUntil: "",
+    insuranceUntil: "",
+    tuevUntil: "",
   });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -101,7 +105,7 @@ function NewDriverCard({ onCreated }: { onCreated: (d: any) => void }) {
       return;
     }
     onCreated(data.driver);
-    setForm({ name: "", username: "", password: "", phone: "", vehicleModel: "", vehiclePlate: "", vehicleColor: "", vehicleSeats: 4, vehicleClass: "STANDARD", medicalAllowed: false, hasRamp: false, hasStretcher: false, pScheinUntil: "", wheelchairTrained: false, qualifications: "" });
+    setForm({ name: "", username: "", password: "", phone: "", vehicleModel: "", vehiclePlate: "", vehicleColor: "", vehicleSeats: 4, vehicleClass: "STANDARD", medicalAllowed: false, hasRamp: false, hasStretcher: false, pScheinUntil: "", wheelchairTrained: false, qualifications: "", licenseUntil: "", concessionUntil: "", insuranceUntil: "", tuevUntil: "" });
     setOpen(false);
   }
 
@@ -154,6 +158,10 @@ function DriverCard({ driver, onDeleted }: { driver: any; onDeleted: (id: string
     pScheinUntil: driver.pScheinUntil ?? "",
     wheelchairTrained: driver.wheelchairTrained ?? false,
     qualifications: driver.qualifications ?? "",
+    licenseUntil: driver.licenseUntil ?? "",
+    concessionUntil: driver.concessionUntil ?? "",
+    insuranceUntil: driver.insuranceUntil ?? "",
+    tuevUntil: driver.tuevUntil ?? "",
   });
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -214,7 +222,7 @@ function DriverCard({ driver, onDeleted }: { driver: any; onDeleted: (id: string
           {driver.status}
         </span>
       </div>
-      <div className="mb-3 flex flex-wrap gap-2"><PScheinChip driver={driver} /></div>
+      <div className="mb-3 flex flex-wrap gap-2"><DocAlertChip driver={driver} /></div>
       <div className="grid gap-3">
         <Field testid={`driver-${driver.username}-name`} label="Name" value={form.name} onChange={(v) => set("name", v)} />
         <Field testid={`driver-${driver.username}-phone`} label="Telefon" value={form.phone} onChange={(v) => set("phone", v)} />
@@ -300,11 +308,19 @@ function MedicalToggles({ form, set, prefix }: { form: any; set: (k: string, v: 
         </div>
       )}
       <div className="grid gap-2 rounded-xl border-2 border-ink-200 bg-white p-3">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-ink-400">Qualifikationen</p>
-        <label className="grid gap-1 text-xs font-semibold text-ink-600">
-          P-Schein gültig bis
-          <input className="field" type="date" data-testid={`${prefix}-pschein`} value={form.pScheinUntil ?? ""} onChange={(e) => set("pScheinUntil", e.target.value)} />
-        </label>
+        <p className="text-[11px] font-bold uppercase tracking-wide text-ink-400">Dokumente &amp; Nachweise (gültig bis)</p>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="grid gap-1 text-xs font-semibold text-ink-600">Führerschein
+            <input className="field" type="date" data-testid={`${prefix}-license`} value={form.licenseUntil ?? ""} onChange={(e) => set("licenseUntil", e.target.value)} /></label>
+          <label className="grid gap-1 text-xs font-semibold text-ink-600">P-Schein
+            <input className="field" type="date" data-testid={`${prefix}-pschein`} value={form.pScheinUntil ?? ""} onChange={(e) => set("pScheinUntil", e.target.value)} /></label>
+          <label className="grid gap-1 text-xs font-semibold text-ink-600">Taxikonzession
+            <input className="field" type="date" data-testid={`${prefix}-concession`} value={form.concessionUntil ?? ""} onChange={(e) => set("concessionUntil", e.target.value)} /></label>
+          <label className="grid gap-1 text-xs font-semibold text-ink-600">Versicherung
+            <input className="field" type="date" data-testid={`${prefix}-insurance`} value={form.insuranceUntil ?? ""} onChange={(e) => set("insuranceUntil", e.target.value)} /></label>
+          <label className="grid gap-1 text-xs font-semibold text-ink-600">TÜV/HU
+            <input className="field" type="date" data-testid={`${prefix}-tuev`} value={form.tuevUntil ?? ""} onChange={(e) => set("tuevUntil", e.target.value)} /></label>
+        </div>
         <CheckToggle testid={`${prefix}-wheelchair-trained`} label="♿ Rollstuhlhilfe geschult" checked={!!form.wheelchairTrained} onChange={(v) => set("wheelchairTrained", v)} />
         <input className="field" data-testid={`${prefix}-quals`} placeholder="Sonderqualifikationen (optional)" value={form.qualifications ?? ""} onChange={(e) => set("qualifications", e.target.value)} />
       </div>
@@ -312,16 +328,23 @@ function MedicalToggles({ form, set, prefix }: { form: any; set: (k: string, v: 
   );
 }
 
-function PScheinChip({ driver }: { driver: any }) {
-  if (!driver.pScheinUntil) {
-    return <span className="inline-flex items-center gap-1 rounded-full bg-ink-100 px-2 py-0.5 text-[10px] font-bold text-ink-500">P-Schein: fehlt</span>;
+// Compliance-Chip: aggregiert alle Fahrer-/Fahrzeug-Dokumente (Führerschein,
+// P-Schein, Konzession, Versicherung, TÜV) mit Ablaufwarnung.
+function DocAlertChip({ driver }: { driver: any }) {
+  const a = driver.docAlert ?? { worst: "VALID", expired: 0, expiring: 0 };
+  const docs: any[] = driver.docs ?? [];
+  if (a.expired > 0) {
+    const names = docs.filter((d) => d.status === "EXPIRED").map((d) => d.label).join(", ");
+    return <span title={names} className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">🔴 {a.expired} Dok. abgelaufen: {names}</span>;
   }
-  const s = driver.pSchein?.status;
-  const cfg =
-    s === "EXPIRED" ? { dot: "🔴", cls: "bg-red-100 text-red-700", txt: "P-Schein abgelaufen" }
-    : s === "EXPIRING" ? { dot: "🟡", cls: "bg-amber-100 text-amber-800", txt: `P-Schein: ${driver.pSchein.days} T.` }
-    : { dot: "🟢", cls: "bg-green-100 text-green-800", txt: "P-Schein gültig" };
-  return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${cfg.cls}`}>{cfg.dot} {cfg.txt}</span>;
+  if (a.expiring > 0) {
+    const names = docs.filter((d) => d.status === "EXPIRING").map((d) => `${d.label} (${d.days} T.)`).join(", ");
+    return <span title={names} className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">🟡 Bald fällig: {names}</span>;
+  }
+  if (!docs.some((d) => d.date)) {
+    return <span className="inline-flex items-center gap-1 rounded-full bg-ink-100 px-2 py-0.5 text-[10px] font-bold text-ink-500">Dokumente: keine hinterlegt</span>;
+  }
+  return <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-800">🟢 Dokumente gültig</span>;
 }
 
 function Field({ label, value, onChange, type = "text", testid }: { label: string; value: string; onChange: (v: string) => void; type?: string; testid?: string }) {

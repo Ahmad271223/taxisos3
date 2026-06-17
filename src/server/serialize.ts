@@ -5,6 +5,7 @@ import { DRIVER_STATUS_LABEL } from "../lib/status";
 import { parseStops } from "../lib/stops";
 import { vehicleClass as vehicleClassInfo } from "../lib/vehicleClasses";
 import { medicalLabel, mobilityLabel, equipmentLabels, documentValidity } from "../lib/medical";
+import { driverDocs, driverDocAlert } from "../lib/driverDocs";
 import { meetGreetLabel } from "../lib/airportExtras";
 import { resolveAirportPickup } from "../lib/airportZones";
 
@@ -54,6 +55,13 @@ export function driverAdmin(driver: any) {
     pSchein: documentValidity(driver.pScheinUntil),
     wheelchairTrained: driver.wheelchairTrained ?? false,
     qualifications: driver.qualifications ?? null,
+    // Compliance-Dokumente mit Ablaufdatum + Status/Warnung.
+    licenseUntil: driver.licenseUntil ?? null,
+    concessionUntil: driver.concessionUntil ?? null,
+    insuranceUntil: driver.insuranceUntil ?? null,
+    tuevUntil: driver.tuevUntil ?? null,
+    docs: driverDocs(driver),
+    docAlert: driverDocAlert(driver),
     lastSeenAt: iso(driver.lastSeenAt),
   };
 }

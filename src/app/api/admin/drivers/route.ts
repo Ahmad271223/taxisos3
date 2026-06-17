@@ -34,6 +34,10 @@ const createSchema = z.object({
   pScheinUntil: z.string().max(20).optional().nullable(),
   wheelchairTrained: z.boolean().optional(),
   qualifications: z.string().max(300).optional().nullable(),
+  licenseUntil: z.string().max(20).optional().nullable(),
+  concessionUntil: z.string().max(20).optional().nullable(),
+  insuranceUntil: z.string().max(20).optional().nullable(),
+  tuevUntil: z.string().max(20).optional().nullable(),
 });
 
 export async function POST(req: Request) {
@@ -74,6 +78,10 @@ export async function POST(req: Request) {
       pScheinUntil: d.pScheinUntil ?? null,
       wheelchairTrained: d.wheelchairTrained ?? false,
       qualifications: d.qualifications ?? null,
+      licenseUntil: d.licenseUntil ?? null,
+      concessionUntil: d.concessionUntil ?? null,
+      insuranceUntil: d.insuranceUntil ?? null,
+      tuevUntil: d.tuevUntil ?? null,
       status: "OFFLINE",
     },
   });
