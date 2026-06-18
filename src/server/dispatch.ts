@@ -911,11 +911,39 @@ export class Dispatcher {
     }
     const b = await prisma.booking.findUnique({ where: { id: bookingId } });
     if (!b) return;
-    // Karten-Autorisierung wieder freigeben (Phase 2g).
+
+    // Storno-Gebühr (nur bei Kunden-Storno): fällig, wenn bereits ein Fahrer
+    // zugewiesen/unterwegs ist ODER bei Vorbestellung zu kurz vor der Abholung.
+    let fee = 0;
+    let platformFeeRate: number | null = null;
+    let platformFee: number | null = null;
+    let companyNet: number | null = null;
+    if (actorType === "CUSTOMER" && b.companyId) {
+      const pr = await prisma.pricing.findUnique({ where: { companyId: b.companyId } });
+      const cf = Math.max(0, pr?.cancelFee ?? 0);
+      const freeMin = pr?.freeCancelMinutes ?? 0;
+      const assigned = ["FAHRER_GEFUNDEN", "FAHRER_UNTERWEGS", "FAHRER_ANGEKOMMEN", "FAHRT_LAEUFT", "RESERVIERT_FAHRER"].includes(b.trackingStatus);
+      const tooLate = b.isScheduled && b.scheduledAt ? b.scheduledAt.getTime() - Date.now() < freeMin * 60_000 : false;
+      if (cf > 0 && (assigned || tooLate)) {
+        fee = cf;
+        const company = await prisma.company.findUnique({ where: { id: b.companyId }, select: { cityTier: true } });
+        const c = computeCommission(fee, company?.cityTier);
+        platformFeeRate = c.rate;
+        platformFee = c.platformFee;
+        companyNet = c.companyNet;
+      }
+    }
+
+    // Karte: Storno-Gebühr abbuchen, sonst Autorisierung freigeben (Phase 2g).
     let paymentStatus = b.paymentStatus;
     if (b.paymentMethod === "CARD" && b.paymentStatus === "AUTORISIERT") {
-      const v = await voidPayment(b.paymentRef);
-      paymentStatus = v.status; // STORNIERT | FEHLGESCHLAGEN
+      if (fee > 0) {
+        const cap = await capturePayment(b.paymentRef, Math.min(fee, b.priceAuthorized ?? fee));
+        paymentStatus = cap.status;
+      } else {
+        const v = await voidPayment(b.paymentRef);
+        paymentStatus = v.status; // STORNIERT | FEHLGESCHLAGEN
+      }
     }
     await prisma.booking.update({
       where: { id: bookingId },
@@ -924,7 +952,11 @@ export class Dispatcher {
         trackingStatus: "STORNIERT",
         cancelledAt: new Date(),
         cancelledBy: actorType,
-        cancelReason: opts.reason ?? null,
+        cancelReason: fee > 0 ? "LATE_CANCEL" : opts.reason ?? null,
+        fare: fee || null,
+        platformFeeRate,
+        platformFee,
+        companyNet,
         paymentStatus,
       },
     });

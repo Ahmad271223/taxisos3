@@ -110,6 +110,10 @@ model Pricing {
   perStopFee     Float    @default(0)
   // No-Show-Gebühr (EUR): berechnet, wenn der Gast nach Ankunft nicht erscheint. 0 = keine.
   noShowFee      Float    @default(0)
+  // Storno-Regeln: Gebühr (EUR) bei Storno nach Fahrer-Zuweisung bzw. zu kurz vor
+  // der geplanten Abholung; kostenlos bis freeCancelMinutes vorher. 0 = immer kostenlos.
+  cancelFee         Float @default(0)
+  freeCancelMinutes Int   @default(0)
 
   updatedAt      DateTime @updatedAt
 }

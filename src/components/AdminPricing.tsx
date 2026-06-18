@@ -26,6 +26,8 @@ const FIELDS: { key: string; label: string; suffix: string; step?: string }[] = 
   { key: "fixedBufferPct", label: "Dynamischer Festpreis-Buffer (0 = aus)", suffix: "%", step: "1" },
   { key: "perStopFee", label: "Aufschlag je Zwischenstopp", suffix: "€ / Stopp", step: "0.50" },
   { key: "noShowFee", label: "No-Show-Gebühr (Gast nicht erschienen)", suffix: "€", step: "1" },
+  { key: "cancelFee", label: "Storno-Gebühr (nach Fahrer-Zuweisung)", suffix: "€", step: "1" },
+  { key: "freeCancelMinutes", label: "Kostenlos stornieren bis … vor Abholung", suffix: "Min", step: "5" },
 ];
 
 export function AdminPricing() {
@@ -65,6 +67,8 @@ export function AdminPricing() {
       fixedBufferPct: Number(form.fixedBufferPct ?? 0),
       perStopFee: Number(form.perStopFee ?? 0),
       noShowFee: Number(form.noShowFee ?? 0),
+      cancelFee: Number(form.cancelFee ?? 0),
+      freeCancelMinutes: Number(form.freeCancelMinutes ?? 0),
     };
     const res = await fetch("/api/admin/pricing", {
       method: "PUT",

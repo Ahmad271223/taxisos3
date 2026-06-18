@@ -28,6 +28,9 @@ const schema = z.object({
   perStopFee: z.number().min(0).max(1000).optional(),
   // No-Show-Gebühr (€): wenn der Gast nach Ankunft nicht erscheint.
   noShowFee: z.number().min(0).max(1000).optional(),
+  // Storno-Regeln.
+  cancelFee: z.number().min(0).max(1000).optional(),
+  freeCancelMinutes: z.number().int().min(0).max(1440).optional(),
 });
 
 export async function PUT(req: Request) {

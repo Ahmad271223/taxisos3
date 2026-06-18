@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Pricing" ADD COLUMN     "cancelFee" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "freeCancelMinutes" INTEGER NOT NULL DEFAULT 0;
