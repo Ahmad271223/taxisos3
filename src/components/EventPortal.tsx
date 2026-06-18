@@ -199,6 +199,8 @@ function EventDetail({ event, onChanged }: { event: any; onChanged: () => void }
     setBooking(false); setBd({ address: "" }); loadR();
   }
   const liveCount = (sts: string[]) => rides.filter((r) => sts.includes(r.trackingStatus)).length;
+  const [billing, setBilling] = useState<any | null>(null);
+  useEffect(() => { fetch(`/api/events/billing?eventId=${event.id}`).then((r) => (r.ok ? r.json() : null)).then(setBilling).catch(() => {}); }, [event.id, rides.length]);
 
   return (
     <div className="mt-3 grid gap-4 border-t border-ink-200 pt-3">
@@ -281,6 +283,18 @@ function EventDetail({ event, onChanged }: { event: any; onChanged: () => void }
                 </a>
               ))}
             </div>
+          </div>
+        )}
+        {billing && (billing.lines?.length ?? 0) > 0 && (
+          <div className="mt-3 border-t border-ink-100 pt-2" data-testid="event-billing">
+            <div className="mb-1 flex items-center justify-between">
+              <p className="eyebrow text-ink-400">Abrechnung nach Abholpunkt</p>
+              <a href={`/api/events/billing?eventId=${event.id}&format=csv`} className="text-xs font-bold text-brand-700 hover:underline">CSV</a>
+            </div>
+            {(billing.byPoint ?? []).map((b: any) => (
+              <div key={b.point} className="flex justify-between text-xs"><span className="text-ink-600">{b.point} ({b.count})</span><span className="font-bold text-ink-900">{Number(b.amount).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}</span></div>
+            ))}
+            <div className="mt-1 flex justify-between border-t border-ink-100 pt-1 text-sm font-bold text-ink-900"><span>Gesamt</span><span>{Number(billing.total).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}</span></div>
           </div>
         )}
       </div>
