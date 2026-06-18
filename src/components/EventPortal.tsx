@@ -5,6 +5,7 @@ import { Brand } from "@/components/Brand";
 import { AddressInput } from "@/components/AddressInput";
 import type { GeocodeResult } from "@/lib/geo";
 import { SupportCard } from "@/components/SupportCard";
+import { PortalUsersCard } from "@/components/PortalUsersCard";
 
 interface Host { id: string; name: string; email: string }
 
@@ -70,6 +71,7 @@ function Dashboard({ host, onLogout }: { host: Host; onLogout: () => void }) {
         <PromoListCard promos={promos} onChanged={load} />
         <ZonesCard />
         <CorporateCard />
+        <PortalUsersCard />
         <SupportCard />
       </div>
     </main>

@@ -11,6 +11,7 @@ export interface SessionPayload {
   companyId: string; // Mandant
   companySlug?: string;
   phone?: string; // nur Kundenkonto
+  portalRole?: string; // Sub-Nutzer-Rolle im B2B-Portal (Hotel/Event); fehlt = Inhaber
 }
 
 // Rollen-getrennte Cookies, damit Admin UND Fahrer gleichzeitig im selben

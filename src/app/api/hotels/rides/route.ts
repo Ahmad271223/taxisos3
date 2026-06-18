@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
+import { portalCan } from "@/lib/portalRoles";
 import { estimatePriceViaWith } from "@/lib/geo";
 import { pricingForSlug, classFactorForSlug, applyClassFactor } from "@/lib/pricing";
 import { getPlatformRate, approxFare } from "@/lib/platformRate";
@@ -44,6 +45,8 @@ export async function GET() {
 export async function POST(req: Request) {
   const session = requireRole("HOTEL");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  // Rollen-Gating: z. B. Buchhaltung darf keine Fahrten buchen.
+  if (!portalCan(session.portalRole, "book")) return NextResponse.json({ error: "Ihre Rolle darf keine Fahrten buchen." }, { status: 403 });
   const hotel = await prisma.hotel.findUnique({ where: { id: session.sub } });
   if (!hotel) return NextResponse.json({ error: "Hotel nicht gefunden" }, { status: 401 });
 

@@ -18,13 +18,29 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: "E-Mail und Passwort erforderlich." }, { status: 400 });
   if (!authConfigured()) return NextResponse.json({ error: "Server nicht vollständig konfiguriert (AUTH_SECRET)." }, { status: 500 });
 
-  const hotel = await prisma.hotel.findUnique({ where: { email: parsed.data.email.toLowerCase() } });
-  if (!hotel || !hotel.active || !(await verifyPassword(parsed.data.password, hotel.passwordHash))) {
+  const email = parsed.data.email.toLowerCase();
+  const hotel = await prisma.hotel.findUnique({ where: { email } });
+  let parentId: string | null = null;
+  let displayName = "";
+  let portalRole: string | undefined;
+  if (hotel && hotel.active && (await verifyPassword(parsed.data.password, hotel.passwordHash))) {
+    parentId = hotel.id;
+    displayName = hotel.name;
+  } else {
+    // Sub-Nutzer (Rezeption/Buchhaltung ...) – Session läuft auf das Hotel (Parent).
+    const pu = await prisma.portalUser.findUnique({ where: { email } });
+    if (pu && pu.active && pu.parentType === "HOTEL" && (await verifyPassword(parsed.data.password, pu.passwordHash))) {
+      parentId = pu.parentId;
+      displayName = pu.name;
+      portalRole = pu.role;
+    }
+  }
+  if (!parentId) {
     return NextResponse.json({ error: "E-Mail oder Passwort falsch." }, { status: 401 });
   }
 
-  const token = signSession({ sub: hotel.id, role: "HOTEL", name: hotel.name, username: hotel.email, companyId: hotel.id });
-  const res = NextResponse.json({ ok: true, id: hotel.id, name: hotel.name });
+  const token = signSession({ sub: parentId, role: "HOTEL", name: displayName, username: email, companyId: parentId, portalRole });
+  const res = NextResponse.json({ ok: true, id: parentId, name: displayName });
   res.cookies.set(HOTEL_COOKIE, token, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 7 * 24 * 3600 });
   return res;
 }

@@ -782,6 +782,24 @@ model SupportTicket {
   @@index([status])
 }
 
+// Sub-Nutzer eines B2B-Portals (Hotel/Event) mit eigener Rolle/Rechten. Die
+// Login-Session behält sub = Parent-ID (alle bestehenden APIs bleiben unverändert
+// gescoped); zusätzlich trägt sie die portalRole für das Rechte-Gating.
+model PortalUser {
+  id           String   @id @default(cuid())
+  parentType   String   // HOTEL | EVENT
+  parentId     String
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   // ADMIN | RECEPTION | ACCOUNTING | CONCIERGE | NIGHT | MANAGER
+  active       Boolean  @default(true)
+
+  createdAt    DateTime @default(now())
+
+  @@index([parentType, parentId])
+}
+
 // ---------------------------------------------------------------------------
 // Digitaler Fahrtnachweis: Unterschrift des Fahrgasts (PNG) + Zeitstempel + GPS,
 // fest an die Fahrt gekoppelt. Dient als Nachweis (z. B. für Krankenkassen).

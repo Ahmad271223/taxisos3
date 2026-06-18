@@ -8,6 +8,8 @@ import type { GeocodeResult } from "@/lib/geo";
 import { VEHICLE_CLASSES } from "@/lib/vehicleClasses";
 import { formatEuro } from "@/lib/format";
 import { SupportCard } from "@/components/SupportCard";
+import { PortalUsersCard } from "@/components/PortalUsersCard";
+import { portalCan } from "@/lib/portalRoles";
 
 interface Hotel { id: string; name: string; email: string }
 interface Addr { address: string; lat?: number; lng?: number }
@@ -67,9 +69,16 @@ function AuthScreen({ onAuthed }: { onAuthed: (h: Hotel) => void }) {
 function Dashboard({ hotel, onLogout }: { hotel: Hotel; onLogout: () => void }) {
   const [rides, setRides] = useState<any[]>([]);
   const [guests, setGuests] = useState<any[]>([]);
+  const [role, setRole] = useState<string>("OWNER");
   const loadRides = useCallback(() => fetch("/api/hotels/rides").then((r) => r.json()).then((d) => setRides(d.rides ?? [])).catch(() => {}), []);
   const loadGuests = useCallback(() => fetch("/api/hotels/guests").then((r) => r.json()).then((d) => setGuests(d.guests ?? [])).catch(() => {}), []);
-  useEffect(() => { loadRides(); loadGuests(); const iv = setInterval(loadRides, 8000); return () => clearInterval(iv); }, [loadRides, loadGuests]);
+  useEffect(() => {
+    loadRides(); loadGuests();
+    fetch("/api/hotels/me").then((r) => (r.ok ? r.json() : null)).then((d) => d?.portalRole && setRole(d.portalRole)).catch(() => {});
+    const iv = setInterval(loadRides, 8000); return () => clearInterval(iv);
+  }, [loadRides, loadGuests]);
+  const canBook = portalCan(role, "book");
+  const canSettings = portalCan(role, "settings");
 
   return (
     <main className="min-h-screen bg-ink-50">
@@ -82,10 +91,11 @@ function Dashboard({ hotel, onLogout }: { hotel: Hotel; onLogout: () => void }) 
       <div className="mx-auto grid max-w-3xl gap-4 px-5 py-6">
         <OverviewCard rides={rides} />
         <CalendarCard rides={rides} />
-        <NewGuestRideCard onCreated={loadRides} guests={guests} />
-        <GuestBookCard guests={guests} onChanged={loadGuests} />
+        {canBook && <NewGuestRideCard onCreated={loadRides} guests={guests} />}
+        {canBook && <GuestBookCard guests={guests} onChanged={loadGuests} />}
         <RidesCard rides={rides} />
-        <FleetWhitelistCard />
+        <PortalUsersCard />
+        {canSettings && <FleetWhitelistCard />}
         <ChargeRoomCard />
         <SupportCard />
       </div>

@@ -12,5 +12,5 @@ export async function GET() {
     select: { id: true, name: true, email: true, phone: true, address: true },
   });
   if (!hotel) return NextResponse.json({ hotel: null }, { status: 401 });
-  return NextResponse.json({ hotel });
+  return NextResponse.json({ hotel, portalRole: session.portalRole ?? "OWNER" });
 }

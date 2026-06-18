@@ -9,5 +9,5 @@ export async function GET() {
   if (!session) return NextResponse.json({ host: null }, { status: 401 });
   const host = await prisma.eventHost.findUnique({ where: { id: session.sub }, select: { id: true, name: true, email: true } });
   if (!host) return NextResponse.json({ host: null }, { status: 401 });
-  return NextResponse.json({ host });
+  return NextResponse.json({ host, portalRole: session.portalRole ?? "OWNER" });
 }
