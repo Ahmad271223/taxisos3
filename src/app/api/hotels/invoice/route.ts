@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
+import { hotelStatementPdf } from "@/lib/hotelStatementPdf";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,32 @@ export async function GET(req: Request) {
   }));
   const total = { count: lines.length, fare: r2(lines.reduce((s, l) => s + l.fare, 0)) };
 
+  // Aufschlüsselung nach Kostenstelle: Abrechnungsmodus (Zimmer/Firmenkonto) + Zimmer.
+  const groupSum = (key: (l: typeof lines[number]) => string) => {
+    const map = new Map<string, { count: number; fare: number }>();
+    for (const l of lines) {
+      const k = key(l) || "—";
+      const cur = map.get(k) ?? { count: 0, fare: 0 };
+      map.set(k, { count: cur.count + 1, fare: r2(cur.fare + l.fare) });
+    }
+    return Array.from(map.entries()).map(([k, v]) => ({ key: k, ...v })).sort((a, b) => b.fare - a.fare);
+  };
+  const byMode = groupSum((l) => l.mode);
+  const byRoom = groupSum((l) => l.room);
+
+  if (format === "pdf") {
+    const hotel = await prisma.hotel.findUnique({ where: { id: session.sub }, select: { name: true } });
+    const pdf = await hotelStatementPdf({ hotelName: hotel?.name ?? "Hotel", periodLabel, lines, total: total.fare });
+    return new NextResponse(Buffer.from(pdf), {
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="Hotel_Abrechnung_${monthKey}.pdf"`,
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store",
+      },
+    });
+  }
+
   if (format === "csv") {
     const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const header = ["Datum", "Gast", "Zimmer", "Abrechnung", "Strecke", "Fahrpreis (EUR)"].join(";");
@@ -62,5 +89,5 @@ export async function GET(req: Request) {
     });
   }
 
-  return NextResponse.json({ monthKey, periodLabel, lines, total });
+  return NextResponse.json({ monthKey, periodLabel, lines, total, byMode, byRoom });
 }

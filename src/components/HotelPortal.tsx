@@ -198,6 +198,15 @@ function CalendarCard({ rides }: { rides: any[] }) {
   );
 }
 
+// Schnellbuchungs-Vorlagen: setzen Fahrzeug/VIP/Zahlart mit einem Klick.
+const BOOKING_TEMPLATES: { label: string; patch: Record<string, any> }[] = [
+  { label: "🚕 Standard", patch: { vehicleClass: "STANDARD", isVip: false, hotelPayment: "ROOM" } },
+  { label: "⭐ VIP", patch: { isVip: true, hotelPayment: "ROOM" } },
+  { label: "👥 Großraum", patch: { vehicleClass: "VAN", isVip: false, hotelPayment: "ROOM" } },
+  { label: "🚐 Shuttle", patch: { vehicleClass: "SHUTTLE", isVip: false, hotelPayment: "ROOM" } },
+  { label: "💳 Gast zahlt", patch: { hotelPayment: "DIRECT" } },
+];
+
 function NewGuestRideCard({ onCreated, guests }: { onCreated: () => void; guests: any[] }) {
   const empty = { guestName: "", guestPhone: "", roomNumber: "", hotelPayment: "ROOM", vehicleClass: "STANDARD", scheduledAt: "", isVip: false };
   const [form, setForm] = useState(empty);
@@ -244,6 +253,11 @@ function NewGuestRideCard({ onCreated, guests }: { onCreated: () => void; guests
           {guests.map((g) => <option key={g.id} value={g.id}>{g.name}{g.roomNumber ? ` · Zi. ${g.roomNumber}` : ""}{g.isVip ? " · VIP" : ""}</option>)}
         </select>
       )}
+      <div className="mb-2 flex flex-wrap gap-1.5" data-testid="hotel-templates">
+        {BOOKING_TEMPLATES.map((t) => (
+          <button key={t.label} type="button" onClick={() => setForm((f) => ({ ...f, ...t.patch }))} className="rounded-full bg-ink-100 px-3 py-1 text-xs font-bold text-ink-700 transition hover:bg-brand-200">{t.label}</button>
+        ))}
+      </div>
       <div className="grid gap-2 sm:grid-cols-2">
         <input className="field" data-testid="hotel-guest" placeholder="Gastname *" value={form.guestName} onChange={(e) => set("guestName", e.target.value)} />
         <input className="field" data-testid="hotel-guest-phone" placeholder="Gast-Handy (für SMS)" value={form.guestPhone} onChange={(e) => set("guestPhone", e.target.value)} />
@@ -409,6 +423,7 @@ function ChargeRoomCard() {
         <h2 className="font-display text-lg font-extrabold text-ink-900">Charge-to-Room Abrechnung</h2>
         <div className="flex items-center gap-2">
           <input className="field max-w-[160px]" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+          <a href={`/api/hotels/invoice?month=${month}&format=pdf`} target="_blank" rel="noopener noreferrer" data-testid="hotel-invoice-pdf" className="shrink-0 rounded-xl bg-brand-500 px-3 py-2.5 text-sm font-extrabold text-ink-900 hover:bg-brand-400">PDF</a>
           <a href={`/api/hotels/invoice?month=${month}&format=csv`} className="shrink-0 rounded-xl bg-ink-900 px-3 py-2.5 text-sm font-extrabold text-white hover:bg-ink-800">CSV</a>
         </div>
       </div>
@@ -427,6 +442,22 @@ function ChargeRoomCard() {
             <div className="mt-3 flex items-center justify-between border-t border-ink-200 pt-3 text-sm">
               <span className="font-bold text-ink-900">Gesamt · {data.periodLabel}</span>
               <span className="font-display text-lg font-extrabold text-ink-900">{formatEuro(data.total.fare)}</span>
+            </div>
+          )}
+          {data.total?.count > 0 && (
+            <div className="mt-3 grid gap-3 sm:grid-cols-2" data-testid="hotel-invoice-breakdown">
+              <div>
+                <p className="eyebrow mb-1 text-ink-400">Nach Abrechnung</p>
+                {(data.byMode ?? []).map((b: any) => (
+                  <div key={b.key} className="flex justify-between text-xs"><span className="text-ink-600">{b.key} ({b.count})</span><span className="font-bold text-ink-900">{formatEuro(b.fare)}</span></div>
+                ))}
+              </div>
+              <div>
+                <p className="eyebrow mb-1 text-ink-400">Nach Zimmer/Kostenstelle</p>
+                {(data.byRoom ?? []).map((b: any) => (
+                  <div key={b.key} className="flex justify-between text-xs"><span className="text-ink-600">{b.key} ({b.count})</span><span className="font-bold text-ink-900">{formatEuro(b.fare)}</span></div>
+                ))}
+              </div>
             </div>
           )}
         </>
