@@ -103,24 +103,42 @@ function Dashboard({ hotel, onLogout }: { hotel: Hotel; onLogout: () => void }) 
   );
 }
 
-// Übersicht: Kennzahlen aus den Fahrten + Schnellbuttons.
+// Übersicht: Kennzahlen aus den Fahrten + offene Rechnung + häufige Ziele + Schnellbuttons.
 function OverviewCard({ rides }: { rides: any[] }) {
+  const [openInvoice, setOpenInvoice] = useState<number | null>(null);
+  useEffect(() => {
+    const m = new Date();
+    fetch(`/api/hotels/invoice?month=${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, "0")}`)
+      .then((r) => (r.ok ? r.json() : null)).then((d) => d?.total && setOpenInvoice(d.total.fare)).catch(() => {});
+  }, [rides.length]);
   const today = new Date().toDateString();
   const isToday = (r: any) => r.createdAt && new Date(r.createdAt).toDateString() === today;
   const open = (s: string) => !["BEENDET", "STORNIERT"].includes(s);
   const todayCount = rides.filter(isToday).length;
   const upcoming = rides.filter((r) => r.trackingStatus === "GEPLANT").length;
   const enRoute = rides.filter((r) => ["FAHRER_UNTERWEGS", "FAHRER_ANGEKOMMEN", "FAHRT_LAEUFT"].includes(r.trackingStatus)).length;
-  const openCount = rides.filter((r) => open(r.trackingStatus)).length;
+  // "Verspätet/Problem": kein Fahrer gefunden oder Vorbestellung überfällig & noch geplant.
+  const delayed = rides.filter((r) => r.trackingStatus === "KEIN_FAHRER" || (r.trackingStatus === "GEPLANT" && r.scheduledAt && new Date(r.scheduledAt).getTime() < Date.now())).length;
+  // Häufige Ziele (Top 3).
+  const destCount = new Map<string, number>();
+  for (const r of rides) { if (r.destAddress) destCount.set(r.destAddress, (destCount.get(r.destAddress) ?? 0) + 1); }
+  const topDest = Array.from(destCount.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3);
   return (
     <div className="card p-6" data-testid="hotel-overview">
       <h2 className="mb-3 font-display text-lg font-extrabold text-ink-900">Übersicht</h2>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Stat label="Fahrten heute" value={todayCount} testid="ov-today" />
         <Stat label="Kommende Abholungen" value={upcoming} testid="ov-upcoming" />
         <Stat label="Fahrer unterwegs" value={enRoute} testid="ov-enroute" />
-        <Stat label="Offene Fahrten" value={openCount} testid="ov-open" />
+        <Stat label="Verspätet / kein Fahrer" value={delayed} testid="ov-delayed" />
+        <Stat label="Offene Rechnung (Monat)" value={openInvoice != null ? formatEuro(openInvoice) : "–"} testid="ov-invoice" />
+        <Stat label="Häufigstes Ziel" value={topDest[0]?.[1] ?? 0} testid="ov-topdest" />
       </div>
+      {topDest.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5" data-testid="ov-frequent">
+          {topDest.map(([d, n]) => <span key={d} className="rounded-full bg-ink-50 px-2.5 py-1 text-xs text-ink-600">📍 {d.length > 28 ? d.slice(0, 28) + "…" : d} <span className="font-bold text-ink-900">×{n}</span></span>)}
+        </div>
+      )}
       <div className="mt-4 grid gap-2 sm:grid-cols-3">
         <a href="#hotel-book" className="rounded-xl bg-brand-500 px-3 py-2.5 text-center text-sm font-extrabold text-ink-900 hover:bg-brand-400">🚕 Gast-Taxi</a>
         <Link href="/buchen/flughafen" className="rounded-xl border-2 border-ink-200 bg-white px-3 py-2.5 text-center text-sm font-extrabold text-ink-900 hover:border-ink-900">✈️ Flughafentransfer</Link>
@@ -208,10 +226,14 @@ const BOOKING_TEMPLATES: { label: string; patch: Record<string, any> }[] = [
 ];
 
 function NewGuestRideCard({ onCreated, guests }: { onCreated: () => void; guests: any[] }) {
-  const empty = { guestName: "", guestPhone: "", roomNumber: "", hotelPayment: "ROOM", vehicleClass: "STANDARD", scheduledAt: "", isVip: false };
-  const [form, setForm] = useState(empty);
+  const empty = { guestName: "", guestPhone: "", roomNumber: "", hotelPayment: "ROOM", vehicleClass: "STANDARD", scheduledAt: "", isVip: false, passengers: 1, luggage: false };
+  const [form, setForm] = useState<any>(empty);
   const [pickup, setPickup] = useState<Addr>({ address: "" });
   const [dest, setDest] = useState<Addr>({ address: "" });
+  // Abholort automatisch mit dem Standard-Abholort des Hotels vorbefüllen.
+  useEffect(() => {
+    fetch("/api/hotels/settings").then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.defaultPickup?.lat != null) setPickup({ address: d.defaultPickup.address, lat: d.defaultPickup.lat, lng: d.defaultPickup.lng }); }).catch(() => {});
+  }, []);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }));
@@ -231,6 +253,7 @@ function NewGuestRideCard({ onCreated, guests }: { onCreated: () => void; guests
       body: JSON.stringify({
         guestName: form.guestName, guestPhone: form.guestPhone || null, roomNumber: form.roomNumber || null,
         hotelPayment: form.hotelPayment, vehicleClass: form.vehicleClass, isVip: form.isVip,
+        passengers: Number(form.passengers) || 1, luggage: !!form.luggage,
         pickup: { address: pickup.address, lat: pickup.lat, lng: pickup.lng },
         dest: { address: dest.address, lat: dest.lat, lng: dest.lng },
         scheduledAt: form.scheduledAt ? new Date(form.scheduledAt).toISOString() : null,
@@ -275,6 +298,10 @@ function NewGuestRideCard({ onCreated, guests }: { onCreated: () => void; guests
           <select className="field disabled:opacity-50" disabled={form.isVip} value={form.isVip ? "VIP" : form.vehicleClass} onChange={(e) => set("vehicleClass", e.target.value)}>
             {VEHICLE_CLASSES.map((c) => <option key={c.key} value={c.key}>{c.icon} {c.label}</option>)}
           </select>
+          <div className="grid grid-cols-2 gap-2 sm:col-span-2">
+            <label className="grid gap-1 text-xs text-ink-500">Personen<input className="field" type="number" min="1" max="8" data-testid="hotel-passengers" value={form.passengers} onChange={(e) => set("passengers", e.target.value)} /></label>
+            <label className="flex items-center gap-2 self-end rounded-xl border-2 border-ink-200 bg-white px-3 py-2 text-sm font-semibold text-ink-700"><input type="checkbox" className="h-5 w-5 accent-brand-500" data-testid="hotel-luggage" checked={form.luggage} onChange={(e) => set("luggage", e.target.checked)} />🧳 Gepäck</label>
+          </div>
           <input className="field" type="datetime-local" value={form.scheduledAt} onChange={(e) => set("scheduledAt", e.target.value)} />
         </div>
         <label className="flex items-center gap-2 rounded-xl border-2 border-ink-200 bg-white px-3 py-2 text-sm font-semibold text-ink-700">
@@ -383,19 +410,24 @@ function RidesCard({ rides }: { rides: any[] }) {
 function FleetWhitelistCard() {
   const [companies, setCompanies] = useState<any[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pickup, setPickup] = useState<Addr>({ address: "" });
   const [saved, setSaved] = useState(false);
   useEffect(() => {
     fetch("/api/hotels/companies").then((r) => r.json()).then((d) => setCompanies(d.companies ?? [])).catch(() => {});
-    fetch("/api/hotels/settings").then((r) => r.json()).then((d) => setSelected(new Set(d.preferredCompanyIds ?? []))).catch(() => {});
+    fetch("/api/hotels/settings").then((r) => r.json()).then((d) => { setSelected(new Set(d.preferredCompanyIds ?? [])); if (d.defaultPickup) setPickup(d.defaultPickup); }).catch(() => {});
   }, []);
   const toggle = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   async function save() {
-    await fetch("/api/hotels/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preferredCompanyIds: Array.from(selected) }) });
+    await fetch("/api/hotels/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preferredCompanyIds: Array.from(selected), defaultPickup: pickup.lat != null ? { address: pickup.address, lat: pickup.lat, lng: pickup.lng } : null }) });
     setSaved(true); setTimeout(() => setSaved(false), 2000);
   }
   return (
     <div className="card p-6" data-testid="hotel-fleet">
-      <h2 className="mb-1 font-display text-lg font-extrabold text-ink-900">Bevorzugte Flotte</h2>
+      <h2 className="mb-1 font-display text-lg font-extrabold text-ink-900">Einstellungen</h2>
+      <div className="mb-3 rounded-2xl border border-ink-100 p-3">
+        <AddressInput label="Standard-Abholort (Hoteladresse)" placeholder="Adresse des Hotels – wird in Buchungen automatisch vorbefüllt" value={pickup.address} onChange={(t) => setPickup({ address: t })} onSelect={(r: GeocodeResult) => setPickup({ address: r.label, lat: r.lat, lng: r.lng })} />
+      </div>
+      <p className="mb-2 text-sm font-bold text-ink-800">Bevorzugte Flotte</p>
       <p className="mb-3 text-xs text-ink-500">Markierte Firmen werden bei Hotel-Fahrten zuerst angefragt. Ist keine im Umkreis frei, wird automatisch der nächste verfügbare Wagen vermittelt (Open-Marketplace-Fallback).</p>
       <div className="grid gap-1.5">
         {companies.map((c) => (
@@ -406,7 +438,7 @@ function FleetWhitelistCard() {
         ))}
         {companies.length === 0 && <p className="text-sm text-ink-400">Keine Firmen verfügbar.</p>}
       </div>
-      {companies.length > 0 && <button onClick={save} data-testid="fleet-save" className="btn-primary mt-3">{saved ? "✓ Gespeichert" : "Whitelist speichern"}</button>}
+      <button onClick={save} data-testid="fleet-save" className="btn-primary mt-3">{saved ? "✓ Gespeichert" : "Einstellungen speichern"}</button>
     </div>
   );
 }

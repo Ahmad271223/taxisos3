@@ -19,9 +19,11 @@ const schema = z.object({
   guestPhone: z.string().max(40).optional().nullable(),
   roomNumber: z.string().max(20).optional().nullable(),
   hotelPayment: z.enum(["DIRECT", "ROOM", "CORPORATE"]).optional(),
-  pickup: point,
+  pickup: point.optional().nullable(), // leer -> automatisch Hotel-Standardabholort
   dest: point,
   vehicleClass: z.string().optional().nullable(),
+  passengers: z.number().int().min(1).max(8).optional(),
+  luggage: z.boolean().optional(),
   isVip: z.boolean().optional(),
   scheduledAt: z.string().datetime().optional().nullable(),
 });
@@ -60,11 +62,17 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: "Bitte Gast, Strecke und Daten angeben." }, { status: 400 });
   const d = parsed.data;
 
+  // Abholort: explizit gewählt, sonst automatisch der Standard-Abholort des Hotels.
+  const pickup = d.pickup ?? (hotel.defaultPickupAddress && hotel.defaultPickupLat != null && hotel.defaultPickupLng != null
+    ? { address: hotel.defaultPickupAddress, lat: hotel.defaultPickupLat, lng: hotel.defaultPickupLng }
+    : null);
+  if (!pickup) return NextResponse.json({ error: "Abholort fehlt – bitte Adresse wählen oder Standard-Abholort im Hotel hinterlegen." }, { status: 400 });
+
   // VIP-Layer: Luxusfahrzeug (VIP-Klasse) erzwingen.
   const isVip = d.isVip ?? false;
   const vehicleClass = isVip ? "VIP" : normalizeClass(d.vehicleClass ?? "STANDARD");
   const pricing = await pricingForSlug(undefined);
-  const est = await estimatePriceViaWith([{ lat: d.pickup.lat, lng: d.pickup.lng }, { lat: d.dest.lat, lng: d.dest.lng }], pricing);
+  const est = await estimatePriceViaWith([{ lat: pickup.lat, lng: pickup.lng }, { lat: d.dest.lat, lng: d.dest.lng }], pricing);
   const factor = await classFactorForSlug(undefined, vehicleClass);
   const rate = await getPlatformRate();
 
@@ -80,12 +88,14 @@ export async function POST(req: Request) {
       isVip,
       customerName: d.guestName,
       customerPhone: (d.guestPhone ?? hotel.phone ?? "").trim() || "—",
-      pickupAddress: d.pickup.address,
-      pickupLat: d.pickup.lat,
-      pickupLng: d.pickup.lng,
+      pickupAddress: pickup.address,
+      pickupLat: pickup.lat,
+      pickupLng: pickup.lng,
       destAddress: d.dest.address,
       destLat: d.dest.lat,
       destLng: d.dest.lng,
+      passengers: d.passengers ?? 1,
+      luggage: d.luggage ?? false,
       vehicleClass,
       isScheduled,
       scheduledAt,

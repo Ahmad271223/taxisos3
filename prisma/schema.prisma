@@ -791,6 +791,10 @@ model Hotel {
   active       Boolean  @default(true)
   // Smart Fleet Routing: bevorzugte Taxifirmen (CSV company-IDs). Leer = offen.
   preferredCompanyIds String @default("")
+  // Standard-Abholort (= Hoteladresse) für die automatische Vorbefüllung der Buchung.
+  defaultPickupAddress String?
+  defaultPickupLat     Float?
+  defaultPickupLng     Float?
 
   bookings     Booking[]
   guests       HotelGuest[]
