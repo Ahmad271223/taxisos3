@@ -6,6 +6,7 @@ import { AddressInput } from "@/components/AddressInput";
 import type { GeocodeResult } from "@/lib/geo";
 import { SupportCard } from "@/components/SupportCard";
 import { PortalUsersCard } from "@/components/PortalUsersCard";
+import { VEHICLE_CLASSES } from "@/lib/vehicleClasses";
 
 interface Host { id: string; name: string; email: string }
 
@@ -67,6 +68,7 @@ function Dashboard({ host, onLogout }: { host: Host; onLogout: () => void }) {
         </div>
       </header>
       <div className="mx-auto grid max-w-3xl gap-4 px-5 py-6">
+        <EventsCard />
         <NewPromoCard onCreated={load} />
         <PromoListCard promos={promos} onChanged={load} />
         <ZonesCard />
@@ -75,6 +77,165 @@ function Dashboard({ host, onLogout }: { host: Host; onLogout: () => void }) {
         <SupportCard />
       </div>
     </main>
+  );
+}
+
+// Veranstaltungen: Metadaten + Gästeliste + Shuttle-Zeiten.
+function EventsCard() {
+  const [events, setEvents] = useState<any[]>([]);
+  const [selId, setSelId] = useState<string | null>(null);
+  const empty = { name: "", contactName: "", contactPhone: "", eventDate: "", location: "", expectedGuests: "" };
+  const [form, setForm] = useState<any>(empty);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const set = (k: string, v: string) => setForm((f: any) => ({ ...f, [k]: v }));
+  const load = useCallback(() => fetch("/api/events/list").then((r) => r.json()).then((d) => setEvents(d.events ?? [])).catch(() => {}), []);
+  useEffect(() => { load(); }, [load]);
+
+  async function create() {
+    if (!form.name.trim()) return;
+    setBusy(true);
+    const res = await fetch("/api/events/list", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: form.name, contactName: form.contactName || null, contactPhone: form.contactPhone || null, eventDate: form.eventDate || null, location: form.location || null, expectedGuests: form.expectedGuests ? Number(form.expectedGuests) : null }),
+    });
+    setBusy(false);
+    if (res.ok) { const d = await res.json(); setForm(empty); setOpen(false); setSelId(d.event.id); load(); }
+  }
+  async function remove(ev: any) {
+    if (!window.confirm(`Event „${ev.name}" mit Gästeliste und Shuttles löschen?`)) return;
+    await fetch(`/api/events/list/${ev.id}`, { method: "DELETE" }).catch(() => {});
+    if (selId === ev.id) setSelId(null);
+    load();
+  }
+  const selected = events.find((e) => e.id === selId);
+
+  return (
+    <div className="card p-6" data-testid="event-events">
+      <div className="mb-1 flex items-center justify-between">
+        <h2 className="font-display text-lg font-extrabold text-ink-900">Veranstaltungen</h2>
+        <button onClick={() => setOpen((o) => !o)} className="text-sm font-bold text-brand-700 hover:underline">{open ? "Schließen" : "+ Neues Event"}</button>
+      </div>
+      <p className="mb-3 text-xs text-ink-500">Metadaten, Gästeliste und Shuttle-Zeiten je Veranstaltung (Hochzeit, Messe, Konferenz …).</p>
+      {open && (
+        <div className="mb-4 grid gap-2 rounded-2xl border border-ink-100 p-3 sm:grid-cols-2">
+          <input className="field sm:col-span-2" data-testid="event-name-field" placeholder="Eventname *" value={form.name} onChange={(e) => set("name", e.target.value)} />
+          <input className="field" placeholder="Ansprechpartner" value={form.contactName} onChange={(e) => set("contactName", e.target.value)} />
+          <input className="field" placeholder="Telefon" value={form.contactPhone} onChange={(e) => set("contactPhone", e.target.value)} />
+          <label className="grid gap-1 text-xs text-ink-500">Eventdatum<input className="field" type="date" value={form.eventDate} onChange={(e) => set("eventDate", e.target.value)} /></label>
+          <label className="grid gap-1 text-xs text-ink-500">Erwartete Gäste<input className="field" type="number" value={form.expectedGuests} onChange={(e) => set("expectedGuests", e.target.value)} /></label>
+          <input className="field sm:col-span-2" placeholder="Veranstaltungsort" value={form.location} onChange={(e) => set("location", e.target.value)} />
+          <button onClick={create} disabled={busy || !form.name.trim()} data-testid="event-create" className="btn-primary sm:col-span-2 disabled:opacity-60">{busy ? "…" : "Event anlegen"}</button>
+        </div>
+      )}
+      <div className="grid gap-2">
+        {events.map((ev) => (
+          <div key={ev.id} className={`rounded-xl border px-3 py-2 ${selId === ev.id ? "border-brand-400 bg-brand-50" : "border-ink-100 bg-ink-50"}`} data-testid={`event-${ev.id}`}>
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <button onClick={() => setSelId(selId === ev.id ? null : ev.id)} className="min-w-0 text-left">
+                <span className="font-bold text-ink-900">{ev.name}</span>
+                <span className="block text-xs text-ink-500">{[ev.eventDate, ev.location, ev.expectedGuests != null && `${ev.expectedGuests} Gäste`].filter(Boolean).join(" · ")}</span>
+                <span className="block text-[11px] text-ink-400">{ev._count?.guests ?? 0} Gäste · {ev._count?.shuttles ?? 0} Shuttles</span>
+              </button>
+              <button onClick={() => remove(ev)} className="shrink-0 text-xs font-bold text-red-600 hover:underline">Löschen</button>
+            </div>
+            {selId === ev.id && <EventDetail event={ev} onChanged={load} />}
+          </div>
+        ))}
+        {events.length === 0 && <p className="text-sm text-ink-400">Noch keine Veranstaltungen.</p>}
+      </div>
+    </div>
+  );
+}
+
+function EventDetail({ event, onChanged }: { event: any; onChanged: () => void }) {
+  const [guests, setGuests] = useState<any[]>([]);
+  const [shuttles, setShuttles] = useState<any[]>([]);
+  const loadG = useCallback(() => fetch(`/api/events/guests?eventId=${event.id}`).then((r) => r.json()).then((d) => setGuests(d.guests ?? [])).catch(() => {}), [event.id]);
+  const loadS = useCallback(() => fetch(`/api/events/shuttles?eventId=${event.id}`).then((r) => r.json()).then((d) => setShuttles(d.shuttles ?? [])).catch(() => {}), [event.id]);
+  useEffect(() => { loadG(); loadS(); }, [loadG, loadS]);
+
+  const [g, setG] = useState<any>({ name: "", phone: "", groupName: "", hotel: "", destAddress: "", isVip: false, requirements: "" });
+  const setGf = (k: string, v: any) => setG((f: any) => ({ ...f, [k]: v }));
+  async function addGuest() {
+    if (!g.name.trim()) return;
+    await fetch("/api/events/guests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ eventId: event.id, ...g, phone: g.phone || null, groupName: g.groupName || null, hotel: g.hotel || null, destAddress: g.destAddress || null, requirements: g.requirements || null }) }).catch(() => {});
+    setG({ name: "", phone: "", groupName: "", hotel: "", destAddress: "", isVip: false, requirements: "" }); loadG(); onChanged();
+  }
+  async function delGuest(id: string) { await fetch(`/api/events/guests/${id}`, { method: "DELETE" }).catch(() => {}); loadG(); onChanged(); }
+
+  const [s, setS] = useState<any>({ label: "", fromAddress: "", toAddress: "", time: "", vehicleClass: "", seats: "" });
+  const [series, setSeries] = useState({ start: "", end: "", interval: "30" });
+  const setSf = (k: string, v: any) => setS((f: any) => ({ ...f, [k]: v }));
+  async function postShuttle(time: string) {
+    return fetch("/api/events/shuttles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ eventId: event.id, label: s.label, fromAddress: s.fromAddress || null, toAddress: s.toAddress || null, time, vehicleClass: s.vehicleClass || null, seats: s.seats ? Number(s.seats) : null }) }).catch(() => {});
+  }
+  async function addShuttle() {
+    if (!s.label.trim() || !/^\d{2}:\d{2}$/.test(s.time)) return;
+    await postShuttle(s.time); setS({ ...s, time: "" }); loadS(); onChanged();
+  }
+  async function addSeries() {
+    if (!s.label.trim() || !/^\d{2}:\d{2}$/.test(series.start) || !/^\d{2}:\d{2}$/.test(series.end)) return;
+    const iv = Math.max(5, Number(series.interval) || 30);
+    const toMin = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+    const fmt = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+    for (let m = toMin(series.start); m <= toMin(series.end); m += iv) await postShuttle(fmt(m));
+    loadS(); onChanged();
+  }
+  async function delShuttle(id: string) { await fetch(`/api/events/shuttles/${id}`, { method: "DELETE" }).catch(() => {}); loadS(); onChanged(); }
+
+  return (
+    <div className="mt-3 grid gap-4 border-t border-ink-200 pt-3">
+      {/* Gästeliste */}
+      <div>
+        <p className="eyebrow mb-2 text-ink-400">Gästeliste ({guests.length})</p>
+        <div className="grid gap-1.5 sm:grid-cols-2">
+          <input className="field" data-testid="guest-name-field" placeholder="Name *" value={g.name} onChange={(e) => setGf("name", e.target.value)} />
+          <input className="field" placeholder="Telefon" value={g.phone} onChange={(e) => setGf("phone", e.target.value)} />
+          <input className="field" placeholder="Gruppe" value={g.groupName} onChange={(e) => setGf("groupName", e.target.value)} />
+          <input className="field" placeholder="Hotel" value={g.hotel} onChange={(e) => setGf("hotel", e.target.value)} />
+          <input className="field" placeholder="Ziel" value={g.destAddress} onChange={(e) => setGf("destAddress", e.target.value)} />
+          <label className="flex items-center gap-2 rounded-xl border-2 border-ink-200 bg-white px-3 text-sm font-semibold text-ink-700"><input type="checkbox" className="h-5 w-5 accent-brand-500" checked={g.isVip} onChange={(e) => setGf("isVip", e.target.checked)} />⭐ VIP</label>
+          <input className="field sm:col-span-2" placeholder="Besondere Anforderungen" value={g.requirements} onChange={(e) => setGf("requirements", e.target.value)} />
+          <button onClick={addGuest} disabled={!g.name.trim()} data-testid="guest-add" className="btn-primary sm:col-span-2 disabled:opacity-60">Gast hinzufügen</button>
+        </div>
+        <div className="mt-2 grid gap-1">
+          {guests.map((x) => (
+            <div key={x.id} className="flex items-center justify-between gap-2 rounded-lg bg-white px-2 py-1 text-xs">
+              <span className="min-w-0 truncate"><span className="font-bold text-ink-900">{x.name}</span>{x.isVip && " ⭐"} {[x.groupName, x.hotel, x.destAddress && `→ ${x.destAddress}`].filter(Boolean).join(" · ")}</span>
+              <button onClick={() => delGuest(x.id)} className="shrink-0 font-bold text-red-600">×</button>
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* Shuttle-Zeiten */}
+      <div>
+        <p className="eyebrow mb-2 text-ink-400">Shuttle-Zeiten ({shuttles.length})</p>
+        <input className="field mb-1.5" data-testid="shuttle-label" placeholder="Bezeichnung, z. B. Hotel A → Messe *" value={s.label} onChange={(e) => setSf("label", e.target.value)} />
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+          <input className="field" placeholder="Von" value={s.fromAddress} onChange={(e) => setSf("fromAddress", e.target.value)} />
+          <input className="field" placeholder="Nach" value={s.toAddress} onChange={(e) => setSf("toAddress", e.target.value)} />
+          <select className="field" value={s.vehicleClass} onChange={(e) => setSf("vehicleClass", e.target.value)}><option value="">Fahrzeug …</option>{VEHICLE_CLASSES.map((c) => <option key={c.key} value={c.key}>{c.icon} {c.label}</option>)}</select>
+          <input className="field" type="number" placeholder="Plätze" value={s.seats} onChange={(e) => setSf("seats", e.target.value)} />
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-end gap-2">
+          <label className="grid gap-0.5 text-[11px] text-ink-500">Einzel-Zeit<input className="field" type="time" data-testid="shuttle-time" value={s.time} onChange={(e) => setSf("time", e.target.value)} /></label>
+          <button onClick={addShuttle} data-testid="shuttle-add" className="btn-dark text-sm">+ Slot</button>
+          <span className="text-ink-300">|</span>
+          <label className="grid gap-0.5 text-[11px] text-ink-500">Serie von<input className="field" type="time" value={series.start} onChange={(e) => setSeries((x) => ({ ...x, start: e.target.value }))} /></label>
+          <label className="grid gap-0.5 text-[11px] text-ink-500">bis<input className="field" type="time" value={series.end} onChange={(e) => setSeries((x) => ({ ...x, end: e.target.value }))} /></label>
+          <label className="grid gap-0.5 text-[11px] text-ink-500">alle (Min)<input className="field w-20" type="number" value={series.interval} onChange={(e) => setSeries((x) => ({ ...x, interval: e.target.value }))} /></label>
+          <button onClick={addSeries} data-testid="shuttle-series" className="btn-ghost text-sm">+ Serie</button>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {shuttles.map((x) => (
+            <span key={x.id} className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs font-bold text-ink-800 ring-1 ring-ink-200">
+              {x.time} {x.label}<button onClick={() => delShuttle(x.id)} className="text-red-600">×</button>
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

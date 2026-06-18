@@ -650,9 +650,69 @@ model EventHost {
   promos          PromoCode[]
   zones           EventZone[]
   corporateCodes  CorporateCode[]
+  events          Event[]
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// Konkrete Veranstaltung (Hochzeit/Messe/Konferenz ...) eines Veranstalters:
+// Metadaten + Gästeliste + Shuttle-Zeiten.
+model Event {
+  id             String   @id @default(cuid())
+  eventHostId    String
+  eventHost      EventHost @relation(fields: [eventHostId], references: [id], onDelete: Cascade)
+
+  name           String
+  contactName    String?
+  contactPhone   String?
+  eventDate      String?  // ISO "YYYY-MM-DD"
+  location       String?
+  expectedGuests Int?
+  notes          String?
+  active         Boolean  @default(true)
+
+  guests         EventGuest[]
+  shuttles       ShuttleSlot[]
+
+  createdAt      DateTime @default(now())
+
+  @@index([eventHostId])
+}
+
+model EventGuest {
+  id           String   @id @default(cuid())
+  eventId      String
+  event        Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  name         String
+  phone        String?
+  groupName    String?  // Gruppe/Reisegruppe
+  hotel        String?
+  destAddress  String?  // Zieladresse
+  isVip        Boolean  @default(false)
+  requirements String?  // besondere Anforderungen
+
+  createdAt    DateTime @default(now())
+
+  @@index([eventId])
+}
+
+model ShuttleSlot {
+  id           String   @id @default(cuid())
+  eventId      String
+  event        Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  label        String   // z. B. "Hotel A -> Messe"
+  fromAddress  String?
+  toAddress    String?
+  time         String   // "HH:MM"
+  vehicleClass String?  // optional Fahrzeugtyp
+  seats        Int?     // Plätze/erwartete Personen
+
+  createdAt    DateTime @default(now())
+
+  @@index([eventId])
 }
 
 // QR-Firmenmobilität: ein Mobilitäts-Code, den die Firma als QR ausgibt. Gäste/
