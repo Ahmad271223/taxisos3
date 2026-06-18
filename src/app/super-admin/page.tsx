@@ -120,6 +120,9 @@ export default function SuperAdminPage() {
           </div>
         </div>
 
+        {/* Support-/Beschwerde-Tickets */}
+        <SupportTicketsCard />
+
         {/* Preis-Leitplanken + Kassentarif (DTA) */}
         <PlatformConfigCard />
 
@@ -132,6 +135,50 @@ export default function SuperAdminPage() {
         <Link href="/admin/bewertungen" className="btn-primary w-fit">Alle Bewertungen ansehen</Link>
       </div>
     </main>
+  );
+}
+
+const TICKET_CAT: Record<string, string> = {
+  DRIVER_NO_SHOW: "Fahrer nicht gekommen", GUEST_NOT_FOUND: "Gast nicht gefunden", WRONG_VEHICLE: "Falsches Fahrzeug",
+  WRONG_INVOICE: "Rechnung falsch", BAD_BEHAVIOR: "Verhalten", OTHER: "Sonstiges",
+};
+const TICKET_STATUS = ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"];
+const TICKET_STATUS_LABEL: Record<string, string> = { OPEN: "Offen", IN_PROGRESS: "In Bearbeitung", RESOLVED: "Gelöst", CLOSED: "Geschlossen" };
+
+function SupportTicketsCard() {
+  const [tickets, setTickets] = useState<any[]>([]);
+  const [openCount, setOpenCount] = useState(0);
+  const load = () => fetch("/api/super/tickets").then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) { setTickets(d.tickets ?? []); setOpenCount(d.openCount ?? 0); } }).catch(() => {});
+  useEffect(() => { load(); }, []);
+
+  async function update(id: string, patch: any) {
+    await fetch(`/api/super/tickets/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }).catch(() => {});
+    load();
+  }
+  return (
+    <div className="card p-6" data-testid="super-tickets">
+      <h2 className="font-display text-xl font-extrabold text-ink-900">Support &amp; Beschwerden {openCount > 0 && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-extrabold text-amber-800">{openCount} offen</span>}</h2>
+      <div className="mt-4 grid gap-2">
+        {tickets.map((t) => (
+          <div key={t.id} className="rounded-xl border border-ink-100 p-3 text-sm" data-testid={`super-ticket-${t.id}`}>
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-0">
+                <span className="font-bold text-ink-900">{t.subject}</span>
+                <span className="block text-xs text-ink-500">{t.reporterName} ({t.reporterType}) · {TICKET_CAT[t.category] ?? t.category}{t.bookingId ? ` · #${String(t.bookingId).slice(-8)}` : ""}</span>
+              </span>
+              <select className="field max-w-[170px] shrink-0 text-xs" value={t.status} onChange={(e) => update(t.id, { status: e.target.value })} data-testid={`ticket-status-${t.id}`}>
+                {TICKET_STATUS.map((s) => <option key={s} value={s}>{TICKET_STATUS_LABEL[s]}</option>)}
+              </select>
+            </div>
+            <p className="mt-1 text-xs text-ink-600">{t.message}</p>
+            <div className="mt-2 flex gap-2">
+              <input className="field flex-1 text-xs" placeholder="Antwort/Notiz an den Partner …" defaultValue={t.adminNote ?? ""} onBlur={(e) => { if (e.target.value !== (t.adminNote ?? "")) update(t.id, { adminNote: e.target.value || null }); }} data-testid={`ticket-note-${t.id}`} />
+            </div>
+          </div>
+        ))}
+        {tickets.length === 0 && <p className="text-sm text-ink-400">Keine Tickets.</p>}
+      </div>
+    </div>
   );
 }
 

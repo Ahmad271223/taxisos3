@@ -7,6 +7,7 @@ import { AddressInput } from "@/components/AddressInput";
 import type { GeocodeResult } from "@/lib/geo";
 import { VEHICLE_CLASSES } from "@/lib/vehicleClasses";
 import { formatEuro } from "@/lib/format";
+import { SupportCard } from "@/components/SupportCard";
 
 interface Hotel { id: string; name: string; email: string }
 interface Addr { address: string; lat?: number; lng?: number }
@@ -85,6 +86,7 @@ function Dashboard({ hotel, onLogout }: { hotel: Hotel; onLogout: () => void }) 
         <RidesCard rides={rides} />
         <FleetWhitelistCard />
         <ChargeRoomCard />
+        <SupportCard />
       </div>
     </main>
   );
