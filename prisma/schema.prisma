@@ -416,6 +416,14 @@ model Booking {
   // Reservierte Folgefahrt (Bolt-Style "near completion")
   isReserved     Boolean  @default(false)
 
+  // Dispositions-Modus:
+  //  AUTO  -> normale Radius-Disposition: freie Fahrer erhalten ein Angebot.
+  //  ADMIN -> Krankenfahrt/Vorbestellung wird NICHT an Fahrer ausgespielt,
+  //           sondern landet im Zuweisungs-Pool aller Taxi-Zentralen; ein
+  //           Admin weist sie einem eigenen Fahrer zu. Schnellaufträge der
+  //           Einrichtung laufen dagegen als AUTO an freie Fahrer.
+  dispatchMode   String   @default("AUTO")
+
   // Erinnerungen (24h/2h/30min vor der Fahrt): bereits gesendete Offsets als CSV
   // ("24h,2h,30m"), damit jede Erinnerung genau einmal verschickt wird.
   remindersSent  String   @default("")

@@ -80,14 +80,18 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   }
 
   // Zeitpunkt geändert -> Vorbestellung/Sofort neu einstufen (nur solange offen).
+  // ADMIN-Pool-Fahrten bleiben immer GEPLANT (Zuweisung durch eine Zentrale) und
+  // werden nie automatisch an Fahrer ausgespielt – nur AUTO-Fahrten dispatchen.
   let becameImmediate = false;
   if (d.scheduledAt !== undefined && b.status === "OFFEN") {
     const scheduledAt = d.scheduledAt ? new Date(d.scheduledAt) : null;
     const isScheduled = !!scheduledAt && scheduledAt.getTime() > Date.now() + 60_000;
     data.scheduledAt = scheduledAt;
     data.isScheduled = isScheduled;
-    if (!isScheduled && b.trackingStatus === "GEPLANT") { data.trackingStatus = "SUCHE"; becameImmediate = true; }
-    if (isScheduled && b.trackingStatus !== "GEPLANT") data.trackingStatus = "GEPLANT";
+    if (b.dispatchMode === "AUTO") {
+      if (!isScheduled && b.trackingStatus === "GEPLANT") { data.trackingStatus = "SUCHE"; becameImmediate = true; }
+      if (isScheduled && b.trackingStatus !== "GEPLANT") data.trackingStatus = "GEPLANT";
+    }
   }
 
   const updated = await prisma.booking.update({ where: { id: b.id }, data, include: { driver: true } });

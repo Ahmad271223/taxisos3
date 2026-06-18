@@ -182,6 +182,7 @@ function NewRideCard({ patients, onCreated }: { patients: any[]; onCreated: () =
   const [requiresRamp, setRequiresRamp] = useState(false);
   const [requiresStretcher, setRequiresStretcher] = useState(false);
   const [when, setWhen] = useState("");
+  const [quickOrder, setQuickOrder] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -197,14 +198,15 @@ function NewRideCard({ patients, onCreated }: { patients: any[]; onCreated: () =
         patientName: patientId ? null : patientName,
         pickup, dest, medicalType, vehicleClass,
         requiresRamp, requiresStretcher,
-        scheduledAt: when ? new Date(when).toISOString() : null,
+        quickOrder,
+        scheduledAt: quickOrder ? null : when ? new Date(when).toISOString() : null,
       }),
     });
     const d = await res.json();
     setBusy(false);
     if (!res.ok) { setError(d.error ?? "Fahrt konnte nicht angelegt werden."); return; }
-    setMsg("Fahrt angelegt und disponiert.");
-    setPickup({ address: "" }); setDest({ address: "" }); setPatientName(""); setPatientId("");
+    setMsg(quickOrder ? "⚡ Schnellauftrag angelegt – wird an freie Fahrer disponiert." : "Vorbestellung angelegt – wartet auf Zuweisung durch eine Taxi-Zentrale.");
+    setPickup({ address: "" }); setDest({ address: "" }); setPatientName(""); setPatientId(""); setWhen("");
     onCreated();
   }
 
@@ -241,10 +243,21 @@ function NewRideCard({ patients, onCreated }: { patients: any[]; onCreated: () =
             <input type="checkbox" className="h-4 w-4 accent-brand-500" data-testid="ride-stretcher" checked={requiresStretcher} onChange={(e) => setRequiresStretcher(e.target.checked)} /> 🛏️ Tragestuhl
           </label>
         </div>
-        <label className="grid gap-1">
-          <span className="label-sm">Zeitpunkt (leer = sofort)</span>
-          <input className="field-sm" type="datetime-local" data-testid="ride-when" value={when} onChange={(e) => setWhen(e.target.value)} />
+        <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${quickOrder ? "border-brand-400 bg-brand-50 text-ink-900" : "border-ink-200 bg-white text-ink-700"}`}>
+          <input type="checkbox" className="h-4 w-4 accent-brand-500" data-testid="ride-quick" checked={quickOrder} onChange={(e) => setQuickOrder(e.target.checked)} />
+          <span>⚡ Schnellauftrag (sofort) – geht direkt an einen freien Fahrer</span>
         </label>
+        {!quickOrder && (
+          <label className="grid gap-1">
+            <span className="label-sm">Zeitpunkt (leer = sofort/asap)</span>
+            <input className="field-sm" type="datetime-local" data-testid="ride-when" value={when} onChange={(e) => setWhen(e.target.value)} />
+          </label>
+        )}
+        <p className="text-[11px] text-ink-400">
+          {quickOrder
+            ? "Sofort-Disposition: der nächste freie Taxifahrer nimmt die Fahrt an."
+            : "Vorbestellung: erscheint im Zuweisungs-Pool der Taxi-Zentralen. Eine Zentrale weist die Fahrt einem Fahrer zu."}
+        </p>
         {error && <p className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700" data-testid="ride-error">{error}</p>}
         {msg && <p className="rounded-lg bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700" data-testid="ride-msg">{msg}</p>}
         <button onClick={submit} disabled={!ready || busy} data-testid="ride-submit" className="rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-extrabold text-ink-900 transition hover:bg-brand-400 disabled:opacity-60">

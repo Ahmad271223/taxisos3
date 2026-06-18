@@ -79,7 +79,9 @@ async function driverState(driverId: string) {
     orderBy: { scheduledAt: "asc" },
   });
   const openScheduled = await prisma.booking.findMany({
-    where: { isScheduled: true, driverId: null, status: "OFFEN" },
+    // ADMIN-Pool-Fahrten (Krankenfahrten/Vorbestellungen der Einrichtungen)
+    // erscheinen NICHT bei den Fahrern – sie werden von einer Zentrale zugewiesen.
+    where: { isScheduled: true, driverId: null, status: "OFFEN", dispatchMode: "AUTO" },
     orderBy: { scheduledAt: "asc" },
   });
   return {

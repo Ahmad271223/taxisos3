@@ -320,6 +320,9 @@ export function AdminDashboard() {
             </div>
           </div>
 
+          {/* Krankenfahrten-Zuweisungs-Pool (Einrichtungen) */}
+          <MedicalPoolCard drivers={driverList} />
+
           <div className="grid gap-5 lg:grid-cols-3">
             {/* Live-Karte */}
             <div className="card h-[520px] overflow-hidden p-0 lg:col-span-2" data-testid="live-map">
@@ -413,6 +416,109 @@ export function AdminDashboard() {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Zuweisungs-Pool: offene Krankenfahrten/Vorbestellungen der Einrichtungen,
+// die (firmenübergreifend) zugewiesen werden müssen. Erste Zentrale, die einen
+// Fahrer zuweist, bekommt die Fahrt.
+function MedicalPoolCard({ drivers }: { drivers: any[] }) {
+  const [pool, setPool] = useState<any[]>([]);
+  const [pick, setPick] = useState<Record<string, string>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = () =>
+    fetch("/api/admin/medical/pool")
+      .then((r) => (r.ok ? r.json() : { pool: [] }))
+      .then((d) => setPool(d.pool ?? []))
+      .catch(() => {});
+
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 12000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Freie Fahrer zuerst (sinnvollste Zuweisung), dann der Rest.
+  const sortedDrivers = useMemo(() => {
+    const order: Record<string, number> = { FREI: 0, PAUSE: 1, BESETZT: 2, OFFLINE: 3 };
+    return [...drivers].sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9));
+  }, [drivers]);
+
+  async function assign(bookingId: string) {
+    const driverId = pick[bookingId];
+    if (!driverId) return;
+    setBusyId(bookingId);
+    setErr(null);
+    try {
+      const res = await fetch("/api/admin/medical/pool", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookingId, driverId }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) setErr(d.error ?? "Zuweisung fehlgeschlagen.");
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="card p-0" data-testid="medical-pool">
+      <div className="flex items-center justify-between border-b border-ink-100 px-5 py-3">
+        <h2 className="flex items-center gap-2 font-display font-bold">
+          🏥 Krankenfahrten zuweisen
+          {pool.length > 0 && <span className="rounded-full bg-brand-500 px-2 py-0.5 text-xs font-extrabold text-ink-900">{pool.length}</span>}
+        </h2>
+        <button onClick={load} className="text-xs font-bold text-ink-500 hover:text-ink-900">Aktualisieren</button>
+      </div>
+      {err && <p className="px-5 py-2 text-sm font-semibold text-red-600" data-testid="pool-error">{err}</p>}
+      <div className="max-h-[420px] overflow-auto">
+        {pool.length === 0 && <p className="px-5 py-6 text-sm text-ink-400">Keine offenen Krankenfahrten zur Zuweisung.</p>}
+        {pool.map((b) => (
+          <div key={b.id} data-testid={`pool-ride-${b.id}`} className="border-b border-ink-50 px-5 py-3 last:border-0">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="font-bold text-ink-900">
+                  {b.patientName} <span className="font-normal text-ink-400">· {b.institution}</span>
+                </p>
+                <p className="text-sm text-ink-600">{b.pickupAddress} → {b.destAddress}</p>
+                <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-500">
+                  <span className="rounded bg-ink-100 px-1.5 py-0.5 font-semibold">{b.medicalLabel ?? "Fahrt"}</span>
+                  <span className="rounded bg-ink-100 px-1.5 py-0.5 font-semibold">{b.vehicleClassIcon} {b.vehicleClassLabel}</span>
+                  {b.requiresRamp && <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">🦽 Rampe</span>}
+                  {b.requiresStretcher && <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">🛏️ Tragestuhl</span>}
+                  <span className="font-semibold text-ink-700">{b.scheduledAt ? formatDateTime(b.scheduledAt) : "sofort"}</span>
+                </p>
+              </div>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <select
+                data-testid={`pool-driver-${b.id}`}
+                className="field-sm max-w-[220px]"
+                value={pick[b.id] ?? ""}
+                onChange={(e) => setPick((p) => ({ ...p, [b.id]: e.target.value }))}
+              >
+                <option value="">Fahrer wählen …</option>
+                {sortedDrivers.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name} · {DRIVER_STATUS_LABEL[d.status] ?? d.status}</option>
+                ))}
+              </select>
+              <button
+                data-testid={`pool-assign-${b.id}`}
+                disabled={!pick[b.id] || busyId === b.id}
+                onClick={() => assign(b.id)}
+                className="rounded-xl bg-ink-900 px-4 py-2 text-sm font-extrabold text-white transition hover:bg-ink-700 disabled:opacity-40"
+              >
+                {busyId === b.id ? "Weist zu …" : "Zuweisen"}
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

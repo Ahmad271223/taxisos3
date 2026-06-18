@@ -902,6 +902,38 @@ export class Dispatcher {
     return { ok: true };
   }
 
+  // Eine Zentrale (Admin) weist eine Pool-Krankenfahrt (dispatchMode ADMIN)
+  // einem ihrer Fahrer zu. Erster Zugriff gewinnt (atomar). Sofort-Fahrten
+  // werden direkt zum aktuellen Auftrag des Fahrers; Vorbestellungen bleiben
+  // GEPLANT und werden vom Sweep zur Fahrtzeit live geschaltet.
+  async assignFromPool(bookingId: string, driverId: string, companyId: string): Promise<{ ok: boolean; reason?: string }> {
+    // Atomarer Claim: nur wenn noch im Pool (ADMIN, offen, ohne Fahrer).
+    const claim = await prisma.booking.updateMany({
+      where: { id: bookingId, dispatchMode: "ADMIN", status: "OFFEN", driverId: null },
+      data: { driverId, companyId, status: "ZUGEWIESEN", assignedAt: new Date() },
+    });
+    if (claim.count === 0) return { ok: false, reason: "Fahrt ist nicht mehr im Pool (bereits vergeben?)." };
+
+    const b = await prisma.booking.findUnique({ where: { id: bookingId } });
+    if (!b) return { ok: false, reason: "Fahrt nicht gefunden." };
+
+    const immediate = !(b.isScheduled && b.scheduledAt && b.scheduledAt.getTime() > Date.now() + SCHEDULED_LEAD_MS);
+    if (immediate) {
+      // Direkt der aktuelle Auftrag des Fahrers.
+      await prisma.booking.update({ where: { id: bookingId }, data: { trackingStatus: "FAHRER_UNTERWEGS", isReserved: false } });
+      this.driverActiveBooking.set(driverId, bookingId);
+      this.driverActiveBookingDest.set(driverId, { lat: b.destLat, lng: b.destLng });
+      await this.setStatusInternal(driverId, "BESETZT");
+    } else {
+      // Reservierte Vorbestellung: erscheint unter „Meine geplanten Fahrten",
+      // der Sweep schaltet sie zur Fahrtzeit live.
+      await prisma.booking.update({ where: { id: bookingId }, data: { trackingStatus: "GEPLANT", isReserved: true } });
+    }
+    await this.emitBooking(bookingId);
+    await this.refreshDriver?.(driverId);
+    return { ok: true };
+  }
+
   // -- Stornierung ---------------------------------------------------------
   async cancelBooking(bookingId: string, opts: { actorType?: "CUSTOMER" | "ADMIN" | "SYSTEM"; reason?: string } = {}): Promise<void> {
     const actorType = opts.actorType ?? "ADMIN";
@@ -1092,8 +1124,10 @@ export class Dispatcher {
     const dueAt = new Date(Date.now() + SCHEDULED_LEAD_MS);
 
     // 1) Unzugewiesene, faellige Vorbestellungen -> Fahrersuche starten.
+    //    NUR AUTO-Fahrten: ADMIN-Pool-Fahrten (Krankenfahrten) werden von einer
+    //    Zentrale zugewiesen und niemals automatisch an Fahrer ausgespielt.
     const due = await prisma.booking.findMany({
-      where: { isScheduled: true, status: "OFFEN", scheduledAt: { lte: dueAt } },
+      where: { isScheduled: true, status: "OFFEN", scheduledAt: { lte: dueAt }, dispatchMode: "AUTO" },
     });
     for (const b of due) {
       await prisma.booking.update({ where: { id: b.id }, data: { trackingStatus: "SUCHE" } });

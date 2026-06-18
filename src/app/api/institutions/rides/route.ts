@@ -24,6 +24,9 @@ const schema = z.object({
   vehicleClass: z.string().optional().nullable(),
   medicalType: z.string().optional().nullable(),
   scheduledAt: z.string().datetime().optional().nullable(),
+  // Schnellauftrag: sofort an freie Fahrer (AUTO-Disposition). Ohne -> Pool,
+  // den die Taxi-Zentralen einem Fahrer zuweisen (ADMIN-Disposition).
+  quickOrder: z.boolean().optional(),
   ...medicalDetailsSchema,
 });
 
@@ -85,8 +88,15 @@ export async function POST(req: Request) {
   const factor = await classFactorForSlug(undefined, vehicleClass);
   const rate = await getPlatformRate();
 
-  const scheduledAt = d.scheduledAt ? new Date(d.scheduledAt) : null;
+  // Schnellauftrag (sofort) -> AUTO an freie Fahrer; sonst Pool für die
+  // Taxi-Zentralen (ADMIN). Ein Schnellauftrag ist immer „jetzt".
+  const quickOrder = d.quickOrder === true;
+  const dispatchMode = quickOrder ? "AUTO" : "ADMIN";
+  const scheduledAt = quickOrder ? null : d.scheduledAt ? new Date(d.scheduledAt) : null;
   const isScheduled = !!scheduledAt && scheduledAt.getTime() > Date.now() + 60_000;
+  // AUTO+sofort -> SUCHE (Fahrersuche). Sonst (ADMIN-Pool oder Vorbestellung)
+  // wartet die Fahrt als GEPLANT auf die Zuweisung durch eine Zentrale.
+  const trackingStatus = quickOrder ? "SUCHE" : "GEPLANT";
 
   const booking = await prisma.booking.create({
     data: {
@@ -114,6 +124,7 @@ export async function POST(req: Request) {
       requiresStretcher: details.requiresStretcher,
       isScheduled,
       scheduledAt,
+      dispatchMode,
       distanceMeters: est.distanceMeters,
       durationSeconds: est.durationSeconds,
       priceMin: applyClassFactor(est.priceMin, factor),
@@ -121,13 +132,15 @@ export async function POST(req: Request) {
       priceApprox: applyClassFactor(approxFare(rate, est.distanceMeters, est.durationSeconds), factor),
       tariff: est.tariff,
       status: "OFFEN",
-      trackingStatus: isScheduled ? "GEPLANT" : "SUCHE",
+      trackingStatus,
       paymentMethod: "CASH",
     },
     include: { driver: true },
   });
 
-  if (!isScheduled) getDispatcher()?.dispatchBooking(booking.id).catch(() => {});
+  // Nur Schnellaufträge (AUTO, sofort) gehen direkt an freie Fahrer. Pool-Fahrten
+  // (ADMIN) warten auf die Zuweisung durch eine Taxi-Zentrale.
+  if (dispatchMode === "AUTO" && !isScheduled) getDispatcher()?.dispatchBooking(booking.id).catch(() => {});
   await logAccess({ actorType: "INSTITUTION", actorId: inst.id, action: "CREATE", entity: "BOOKING", entityId: booking.id, detail: patientName });
 
   return NextResponse.json({ id: booking.id, ride: bookingDTO(booking) }, { status: 201 });
