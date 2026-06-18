@@ -25,6 +25,10 @@ const schema = z.object({
   passengers: z.number().int().min(1).max(8).optional(),
   luggage: z.boolean().optional(),
   isVip: z.boolean().optional(),
+  // VIP-Transfer-Details (diskrete Abholung, Fahrer mit Namensschild, Hinweise).
+  discreet: z.boolean().optional(),
+  nameSign: z.string().max(80).optional().nullable(),
+  notes: z.string().max(500).optional().nullable(),
   scheduledAt: z.string().datetime().optional().nullable(),
 });
 
@@ -71,6 +75,17 @@ export async function POST(req: Request) {
   // VIP-Layer: Luxusfahrzeug (VIP-Klasse) erzwingen.
   const isVip = d.isVip ?? false;
   const vehicleClass = isVip ? "VIP" : normalizeClass(d.vehicleClass ?? "STANDARD");
+
+  // VIP-Transfer-Details als strukturierte Fahrer-Hinweise zusammenfassen.
+  const nameSign = (d.nameSign ?? "").trim();
+  const noteParts = [
+    d.discreet ? "Diskrete Abholung" : null,
+    nameSign ? `Namensschild: „${nameSign}"` : null,
+    (d.notes ?? "").trim() || null,
+  ].filter(Boolean) as string[];
+  const notes = noteParts.length ? noteParts.join(" · ") : null;
+  // „Fahrer mit Schild" = Premium-Empfang (ohne automatischen Aufschlag).
+  const meetGreet = nameSign ? "PREMIUM" : null;
   const pricing = await pricingForSlug(undefined);
   const est = await estimatePriceViaWith([{ lat: pickup.lat, lng: pickup.lng }, { lat: d.dest.lat, lng: d.dest.lng }], pricing);
   const factor = await classFactorForSlug(undefined, vehicleClass);
@@ -97,6 +112,8 @@ export async function POST(req: Request) {
       passengers: d.passengers ?? 1,
       luggage: d.luggage ?? false,
       vehicleClass,
+      notes,
+      meetGreet,
       isScheduled,
       scheduledAt,
       distanceMeters: est.distanceMeters,

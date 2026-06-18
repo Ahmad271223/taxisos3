@@ -281,7 +281,9 @@ model Booking {
   hotelId        String?
   hotel          Hotel? @relation(fields: [hotelId], references: [id], onDelete: SetNull)
   roomNumber     String?
-  hotelPayment   String?   // DIRECT | ROOM | CORPORATE
+  hotelPayment   String?   // DIRECT | ROOM | CORPORATE | VOUCHER
+  // Charge-to-Room-Abrechnung beglichen? Leer = offen.
+  hotelSettledAt DateTime?
   // Hotel-Flotten-Whitelist (CSV bevorzugter Firmen-IDs) + VIP-Layer.
   preferredCompanyIds String @default("")
   isVip          Boolean @default(false)
@@ -1032,4 +1034,20 @@ model CancellationLog {
   createdAt  DateTime @default(now())
 
   @@index([bookingId])
+}
+
+// ---------------------------------------------------------------------------
+// Web-Push: Fahrer-Geräte für Push-Benachrichtigungen (neue Fahrtangebote).
+// Eine Subscription pro Browser/Gerät; ein Fahrer kann mehrere haben.
+// ---------------------------------------------------------------------------
+model PushSubscription {
+  id        String   @id @default(cuid())
+  driverId  String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([driverId])
 }

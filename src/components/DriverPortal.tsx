@@ -12,6 +12,16 @@ import type { GeocodeResult } from "@/lib/geo";
 
 const FALLBACK = { lat: 52.375892, lng: 9.732010 }; // Hannover
 
+// VAPID-Key (base64url) -> Uint8Array für pushManager.subscribe.
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
 export function DriverPortal() {
   const router = useRouter();
   const [authState, setAuthState] = useState<"checking" | "ok" | "denied">("checking");
@@ -27,6 +37,10 @@ export function DriverPortal() {
   const [sharing, setSharing] = useState(false);
   const [emergencyAlert, setEmergencyAlert] = useState(false);
   const watchIdRef = useRef<number | null>(null);
+  const wakeLockRef = useRef<any>(null);
+  const sharingRef = useRef(false); // aktueller GPS-Zustand für Event-Handler
+  // Push-Benachrichtigungen (neue Fahrtanfragen auch im Hintergrund)
+  const [pushState, setPushState] = useState<"unsupported" | "off" | "on" | "denied" | "busy">("off");
   // Zieländerung / Zwischenstopp (Phase 2f)
   const [destEdit, setDestEdit] = useState(false);
   const [destMode, setDestMode] = useState<"dest" | "stop">("dest");
@@ -95,15 +109,33 @@ export function DriverPortal() {
     };
   }, [authState, loadSummary]);
 
-  // GPS: Live-Standort nur teilen, wenn der Fahrer es aktiv eingeschaltet hat.
-  function startSharing() {
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      alert("Standortdienste werden vom Browser nicht unterstützt.");
-      return;
+  // Wake Lock: Bildschirm wach halten, damit der GPS-Watch nicht eingefroren
+  // wird, wenn das Display dunkel würde (Browser drosseln inaktive Tabs).
+  async function acquireWakeLock() {
+    try {
+      const anyNav = navigator as any;
+      if (anyNav?.wakeLock?.request && !wakeLockRef.current) {
+        wakeLockRef.current = await anyNav.wakeLock.request("screen");
+        wakeLockRef.current.addEventListener?.("release", () => { wakeLockRef.current = null; });
+      }
+    } catch { /* Wake Lock optional */ }
+  }
+  function releaseWakeLock() {
+    try { wakeLockRef.current?.release?.(); } catch {}
+    wakeLockRef.current = null;
+  }
+
+  // Geolocation-Watch (neu) starten. Wird beim Einschalten und – falls der
+  // Browser den Watch im Hintergrund beendet hat – beim Zurückkehren erneut
+  // aufgesetzt. Läuft weiter bis der Fahrer GPS selbst ausschaltet.
+  function beginWatch() {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    if (watchIdRef.current != null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
     }
-    if (watchIdRef.current != null) return;
     const socket = getSocket("driver");
-    const id = navigator.geolocation.watchPosition(
+    watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         setGpsOk(true);
         socket.emit("driver:location", { lat: pos.coords.latitude, lng: pos.coords.longitude });
@@ -114,18 +146,31 @@ export function DriverPortal() {
           stopSharing();
         }
       },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
     );
-    watchIdRef.current = id;
+  }
+
+  // GPS: Live-Standort nur teilen, wenn der Fahrer es aktiv eingeschaltet hat.
+  function startSharing() {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      alert("Standortdienste werden vom Browser nicht unterstützt.");
+      return;
+    }
+    if (watchIdRef.current != null) return;
+    beginWatch();
+    sharingRef.current = true;
     setSharing(true);
+    acquireWakeLock();
   }
   function stopSharing() {
     if (watchIdRef.current != null && typeof navigator !== "undefined") {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
+    sharingRef.current = false;
     setSharing(false);
     setGpsOk(false);
+    releaseWakeLock();
     // Bei Stopp Fahrer offline, damit kein Auftrag mehr ankommt.
     if (status === "FREI") {
       getSocket("driver").emit("driver:status", { status: "PAUSE" });
@@ -133,6 +178,84 @@ export function DriverPortal() {
     }
   }
   useEffect(() => () => stopSharing(), []); // cleanup on unmount
+
+  // Hintergrund-Robustheit: Wenn die App wieder sichtbar wird, Wake Lock erneut
+  // anfordern und – falls der Browser den GPS-Watch pausiert hat – neu starten.
+  // So bleibt die Übertragung aktiv, bis der Fahrer GPS selbst ausschaltet.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (sharingRef.current) {
+        acquireWakeLock();
+        beginWatch();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
+  // Service Worker registrieren + bestehenden Push-Status ermitteln.
+  useEffect(() => {
+    if (authState !== "ok") return;
+    const supported = typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+    if (!supported) { setPushState("unsupported"); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const reg = await navigator.serviceWorker.register("/sw.js");
+        const sub = await reg.pushManager.getSubscription();
+        if (cancelled) return;
+        if (Notification.permission === "denied") setPushState("denied");
+        else setPushState(sub ? "on" : "off");
+      } catch {
+        if (!cancelled) setPushState("off");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [authState]);
+
+  async function enablePush() {
+    setPushState("busy");
+    try {
+      const keyRes = await fetch("/api/push/key").then((r) => r.json()).catch(() => null);
+      if (!keyRes?.enabled || !keyRes?.publicKey) {
+        alert("Push ist auf diesem Server nicht konfiguriert (VAPID-Keys fehlen).");
+        setPushState("off");
+        return;
+      }
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") { setPushState(perm === "denied" ? "denied" : "off"); return; }
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(keyRes.publicKey) as BufferSource,
+      });
+      const res = await fetch("/api/push/subscribe", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subscription: sub.toJSON() }),
+      });
+      setPushState(res.ok ? "on" : "off");
+    } catch {
+      setPushState("off");
+    }
+  }
+
+  async function disablePush() {
+    setPushState("busy");
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await fetch("/api/push/subscribe", {
+          method: "DELETE", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ endpoint: sub.endpoint }),
+        }).catch(() => {});
+        await sub.unsubscribe().catch(() => {});
+      }
+    } finally {
+      setPushState("off");
+    }
+  }
 
   // Countdown fuer Angebot
   useEffect(() => {
@@ -250,6 +373,37 @@ export function DriverPortal() {
             />
           </button>
         </div>
+
+        {sharing && (
+          <p className="-mt-2 px-1 text-xs text-ink-400" data-testid="gps-background-hint">
+            📍 GPS bleibt an und wird übertragen, bis Sie es selbst ausschalten. Für Hintergrund-Betrieb die App geöffnet lassen (Bildschirm bleibt dank Wake-Lock aktiv) – bei komplett geschlossener App pausiert das Handy die Standortübertragung.
+          </p>
+        )}
+
+        {/* Push-Benachrichtigungen: neue Fahrtanfragen auch im Hintergrund */}
+        {pushState !== "unsupported" && (
+          <div className={`card flex items-center justify-between p-5 ${pushState === "on" ? "border-2 border-brand-400" : ""}`} data-testid="push-card">
+            <div className="min-w-0 pr-3">
+              <p className="font-display text-lg font-extrabold">🔔 Benachrichtigungen</p>
+              <p className="text-sm text-ink-500">
+                {pushState === "on" ? "Aktiv – Sie werden bei neuen Fahrtanfragen benachrichtigt (auch im Hintergrund)."
+                  : pushState === "denied" ? "Im Browser blockiert. Bitte in den Einstellungen erlauben."
+                  : "Push aktivieren, um Fahrtanfragen auch bei geschlossenem Tab zu erhalten."}
+              </p>
+            </div>
+            <button
+              type="button"
+              data-testid="push-toggle"
+              disabled={pushState === "busy" || pushState === "denied"}
+              onClick={() => (pushState === "on" ? disablePush() : enablePush())}
+              className={`relative h-9 w-16 shrink-0 rounded-full transition disabled:opacity-50 ${pushState === "on" ? "bg-brand-500" : "bg-ink-200"}`}
+              aria-pressed={pushState === "on"}
+              aria-label="Push-Benachrichtigungen umschalten"
+            >
+              <span className={`absolute top-1 h-7 w-7 rounded-full bg-white shadow transition ${pushState === "on" ? "left-8" : "left-1"}`} />
+            </button>
+          </div>
+        )}
 
         {/* Status */}
         <div className="card p-5" data-testid="driver-status-card">
@@ -523,6 +677,12 @@ export function DriverPortal() {
 function TripInfo({ b, showCustomer }: { b: any; showCustomer?: boolean }) {
   return (
     <div className="grid gap-1 text-sm">
+      {(b.isVip || b.meetGreet === "PREMIUM") && (
+        <div className="mb-1 flex flex-wrap gap-1.5">
+          {b.isVip && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-extrabold uppercase text-amber-700">⭐ VIP-Transfer</span>}
+          {b.meetGreet === "PREMIUM" && <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-extrabold uppercase text-indigo-700">🪧 Namensschild</span>}
+        </div>
+      )}
       {showCustomer && (
         <div className="flex justify-between">
           <span className="text-ink-500">Kunde</span>

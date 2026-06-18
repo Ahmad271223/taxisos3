@@ -60,6 +60,14 @@ services:
         sync: false
       - key: RESEND_API_KEY
         sync: false
+      # Web-Push (Fahrer-Benachrichtigung). Mit `node scripts/gen-vapid.mjs`
+      # erzeugen und im Dashboard setzen. Leer = Push deaktiviert.
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
       - key: SUPER_ADMIN_EMAIL
         sync: false
       - key: SUPER_ADMIN_PASSWORD

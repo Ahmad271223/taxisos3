@@ -29,6 +29,7 @@ import { settleCorporateComplete, releaseCorporate } from "./corporateSettle";
 import { fixedPriceFor } from "../lib/fixedPrice";
 import { getPlatformConfig } from "../lib/platformConfig";
 import { insuranceFare, riskBufferFare, stopSurcharge, applyFloor } from "../lib/fareAdjust";
+import { notifyDriverOffer } from "../lib/webpush";
 import { bookingDTO, driverAdmin } from "./serialize";
 
 const PHASE_DURATION_MS = 15_000;
@@ -454,6 +455,9 @@ export class Dispatcher {
       });
       this.io.to(`driver:${c.d.id}`).emit("driver:offer", dto);
       this.onOffer?.(bookingId, c.d.id);
+      // Web-Push: benachrichtigt das Fahrer-Gerät auch, wenn die App im
+      // Hintergrund/Tab inaktiv ist (No-Op ohne VAPID-Keys).
+      notifyDriverOffer(c.d.id, dto).catch(() => {});
     }
 
     await this.emitBooking(bookingId);

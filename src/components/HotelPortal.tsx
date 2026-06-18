@@ -226,7 +226,7 @@ const BOOKING_TEMPLATES: { label: string; patch: Record<string, any> }[] = [
 ];
 
 function NewGuestRideCard({ onCreated, guests }: { onCreated: () => void; guests: any[] }) {
-  const empty = { guestName: "", guestPhone: "", roomNumber: "", hotelPayment: "ROOM", vehicleClass: "STANDARD", scheduledAt: "", isVip: false, passengers: 1, luggage: false };
+  const empty = { guestName: "", guestPhone: "", roomNumber: "", hotelPayment: "ROOM", vehicleClass: "STANDARD", scheduledAt: "", isVip: false, passengers: 1, luggage: false, discreet: false, nameSign: "", notes: "" };
   const [form, setForm] = useState<any>(empty);
   const [pickup, setPickup] = useState<Addr>({ address: "" });
   const [dest, setDest] = useState<Addr>({ address: "" });
@@ -253,6 +253,9 @@ function NewGuestRideCard({ onCreated, guests }: { onCreated: () => void; guests
       body: JSON.stringify({
         guestName: form.guestName, guestPhone: form.guestPhone || null, roomNumber: form.roomNumber || null,
         hotelPayment: form.hotelPayment, vehicleClass: form.vehicleClass, isVip: form.isVip,
+        discreet: form.isVip ? !!form.discreet : false,
+        nameSign: form.isVip && form.nameSign.trim() ? form.nameSign.trim() : null,
+        notes: form.notes.trim() || null,
         passengers: Number(form.passengers) || 1, luggage: !!form.luggage,
         pickup: { address: pickup.address, lat: pickup.lat, lng: pickup.lng },
         dest: { address: dest.address, lat: dest.lat, lng: dest.lng },
@@ -309,6 +312,17 @@ function NewGuestRideCard({ onCreated, guests }: { onCreated: () => void; guests
           <input type="checkbox" className="h-5 w-5 accent-brand-500" data-testid="hotel-vip" checked={form.isVip} onChange={(e) => set("isVip", e.target.checked)} />
           <span>⭐ VIP-Fahrt (Luxusklasse, priorisiert)</span>
         </label>
+        {form.isVip && (
+          <div className="grid gap-2 rounded-xl border-2 border-brand-200 bg-brand-50/40 p-3" data-testid="hotel-vip-panel">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-brand-700">⭐ VIP-Transfer</p>
+            <label className="flex items-center gap-2 text-sm font-semibold text-ink-700">
+              <input type="checkbox" className="h-5 w-5 accent-brand-500" data-testid="hotel-vip-discreet" checked={form.discreet} onChange={(e) => set("discreet", e.target.checked)} />
+              <span>🕶️ Diskrete Abholung (unauffällig, ohne Aufsehen)</span>
+            </label>
+            <input className="field" data-testid="hotel-vip-sign" placeholder="🪧 Fahrer mit Namensschild – Name auf dem Schild" value={form.nameSign} onChange={(e) => set("nameSign", e.target.value)} />
+            <textarea className="field min-h-[60px]" data-testid="hotel-vip-notes" placeholder="Besondere Hinweise für den Fahrer (z. B. Gepäckhilfe, Getränk, Route) …" value={form.notes} onChange={(e) => set("notes", e.target.value)} />
+          </div>
+        )}
       </div>
       {msg && <p className="mt-2 text-sm font-semibold text-ink-700" data-testid="hotel-ride-msg">{msg}</p>}
       <button onClick={book} disabled={!ok} data-testid="hotel-book" className="btn-primary mt-3 disabled:opacity-60">{busy ? "Bucht …" : "Fahrt buchen"}</button>
@@ -448,7 +462,19 @@ function ChargeRoomCard() {
   const now = new Date();
   const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
   const [data, setData] = useState<any | null>(null);
-  useEffect(() => { fetch(`/api/hotels/invoice?month=${month}`).then((r) => (r.ok ? r.json() : null)).then(setData).catch(() => {}); }, [month]);
+  const [busy, setBusy] = useState(false);
+  const load = () => fetch(`/api/hotels/invoice?month=${month}`).then((r) => (r.ok ? r.json() : null)).then(setData).catch(() => {});
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [month]);
+
+  const setSettled = async (settled: boolean) => {
+    setBusy(true);
+    try {
+      await fetch(`/api/hotels/invoice`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ month, settled }) });
+      await load();
+    } finally { setBusy(false); }
+  };
+  const open = data?.settlement?.open ?? 0;
+  const paid = data?.settlement?.paid ?? 0;
 
   return (
     <div className="card p-6" data-testid="hotel-invoice">
@@ -466,15 +492,31 @@ function ChargeRoomCard() {
             {(data.lines ?? []).map((l: any) => (
               <div key={l.id} className="flex items-center justify-between gap-3 rounded-lg bg-ink-50 px-3 py-1.5 text-sm">
                 <span className="min-w-0 truncate"><span className="font-bold text-ink-900">{l.guest}</span>{l.room ? ` · Zi. ${l.room}` : ""} <span className="text-ink-400">({l.mode})</span></span>
-                <span className="shrink-0 font-bold text-ink-900">{formatEuro(l.fare)}</span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold uppercase ${l.settled ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{l.settled ? "bezahlt" : "offen"}</span>
+                  <span className="font-bold text-ink-900">{formatEuro(l.fare)}</span>
+                </span>
               </div>
             ))}
             {(data.lines ?? []).length === 0 && <p className="text-sm text-ink-400">Keine aufs Zimmer/Firmenkonto gebuchten Fahrten in {data.periodLabel}.</p>}
           </div>
           {data.total?.count > 0 && (
-            <div className="mt-3 flex items-center justify-between border-t border-ink-200 pt-3 text-sm">
-              <span className="font-bold text-ink-900">Gesamt · {data.periodLabel}</span>
-              <span className="font-display text-lg font-extrabold text-ink-900">{formatEuro(data.total.fare)}</span>
+            <div className="mt-3 border-t border-ink-200 pt-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-bold text-ink-900">Gesamt · {data.periodLabel}</span>
+                <span className="font-display text-lg font-extrabold text-ink-900">{formatEuro(data.total.fare)}</span>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2" data-testid="hotel-invoice-settlement">
+                <div className="flex items-center gap-4 text-xs">
+                  <span>Offen: <span className="font-extrabold text-amber-600">{formatEuro(open)}</span></span>
+                  <span>Bezahlt: <span className="font-extrabold text-emerald-600">{formatEuro(paid)}</span></span>
+                </div>
+                {open > 0 ? (
+                  <button type="button" disabled={busy} onClick={() => setSettled(true)} data-testid="hotel-invoice-mark-paid" className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-extrabold text-white hover:bg-emerald-500 disabled:opacity-50">{busy ? "…" : "Als bezahlt markieren"}</button>
+                ) : (
+                  <button type="button" disabled={busy} onClick={() => setSettled(false)} className="rounded-xl bg-ink-100 px-3 py-2 text-xs font-bold text-ink-600 hover:bg-ink-200 disabled:opacity-50">Auf „offen" zurücksetzen</button>
+                )}
+              </div>
             </div>
           )}
           {data.total?.count > 0 && (

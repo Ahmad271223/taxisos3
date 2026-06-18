@@ -33,7 +33,7 @@ export async function GET(req: Request) {
       completedAt: { gte: start, lt: end },
     },
     orderBy: { completedAt: "asc" },
-    select: { id: true, completedAt: true, customerName: true, roomNumber: true, hotelPayment: true, pickupAddress: true, destAddress: true, fare: true },
+    select: { id: true, completedAt: true, customerName: true, roomNumber: true, hotelPayment: true, pickupAddress: true, destAddress: true, fare: true, hotelSettledAt: true },
   });
 
   const lines = rides.map((b) => ({
@@ -44,8 +44,13 @@ export async function GET(req: Request) {
     mode: b.hotelPayment === "CORPORATE" ? "Firmenkonto" : "Zimmer",
     route: `${b.pickupAddress} → ${b.destAddress}`,
     fare: r2(b.fare ?? 0),
+    settled: !!b.hotelSettledAt,
   }));
   const total = { count: lines.length, fare: r2(lines.reduce((s, l) => s + l.fare, 0)) };
+  // Offen (noch nicht beglichen) vs. bezahlt.
+  const openFare = r2(lines.filter((l) => !l.settled).reduce((s, l) => s + l.fare, 0));
+  const paidFare = r2(lines.filter((l) => l.settled).reduce((s, l) => s + l.fare, 0));
+  const settlement = { open: openFare, paid: paidFare };
 
   // Aufschlüsselung nach Kostenstelle: Abrechnungsmodus (Zimmer/Firmenkonto) + Zimmer.
   const groupSum = (key: (l: typeof lines[number]) => string) => {
@@ -89,5 +94,33 @@ export async function GET(req: Request) {
     });
   }
 
-  return NextResponse.json({ monthKey, periodLabel, lines, total, byMode, byRoom });
+  return NextResponse.json({ monthKey, periodLabel, lines, total, settlement, byMode, byRoom });
+}
+
+// Charge-to-Room-Abrechnung eines Monats als beglichen markieren (oder zurücksetzen).
+// Body: { month: "YYYY-MM", settled: boolean }
+export async function PATCH(req: Request) {
+  const session = requireRole("HOTEL");
+  if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+
+  const body = await req.json().catch(() => ({}));
+  const monthParam = typeof body?.month === "string" ? body.month : "";
+  if (!/^\d{4}-\d{2}$/.test(monthParam)) {
+    return NextResponse.json({ error: "Ungültiger Monat" }, { status: 400 });
+  }
+  const settled = body?.settled !== false; // default: als bezahlt markieren
+  const [y, m] = monthParam.split("-").map((n) => parseInt(n, 10));
+  const start = new Date(y, m - 1, 1);
+  const end = new Date(y, m, 1);
+
+  const res = await prisma.booking.updateMany({
+    where: {
+      hotelId: session.sub,
+      hotelPayment: { in: ["ROOM", "CORPORATE"] },
+      status: "ABGESCHLOSSEN",
+      completedAt: { gte: start, lt: end },
+    },
+    data: { hotelSettledAt: settled ? new Date() : null },
+  });
+  return NextResponse.json({ ok: true, month: monthParam, settled, count: res.count });
 }
