@@ -184,6 +184,22 @@ function EventDetail({ event, onChanged }: { event: any; onChanged: () => void }
   }
   async function delShuttle(id: string) { await fetch(`/api/events/shuttles/${id}`, { method: "DELETE" }).catch(() => {}); loadS(); onChanged(); }
 
+  // Sammelbuchung (N Taxis) + Live-Dispo der Event-Fahrten.
+  const [rides, setRides] = useState<any[]>([]);
+  const loadR = useCallback(() => fetch(`/api/events/rides?eventId=${event.id}`).then((r) => r.json()).then((d) => setRides(d.rides ?? [])).catch(() => {}), [event.id]);
+  useEffect(() => { loadR(); const iv = setInterval(loadR, 8000); return () => clearInterval(iv); }, [loadR]);
+  const [bk, setBk] = useState<any>({ vehicleClass: "STANDARD", count: "5", pickupPoint: "", scheduledAt: "" });
+  const [bp, setBp] = useState<{ address: string; lat?: number; lng?: number }>({ address: "" });
+  const [bd, setBd] = useState<{ address: string; lat?: number; lng?: number }>({ address: "" });
+  const [booking, setBooking] = useState(false);
+  async function bookGroup() {
+    if (bp.lat == null || bd.lat == null) return;
+    setBooking(true);
+    await fetch("/api/events/book", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ eventId: event.id, pickup: { address: bp.address, lat: bp.lat, lng: bp.lng }, dest: { address: bd.address, lat: bd.lat, lng: bd.lng }, pickupPoint: bk.pickupPoint || null, vehicleClass: bk.vehicleClass, count: Number(bk.count) || 1, scheduledAt: bk.scheduledAt ? new Date(bk.scheduledAt).toISOString() : null }) }).catch(() => {});
+    setBooking(false); setBd({ address: "" }); loadR();
+  }
+  const liveCount = (sts: string[]) => rides.filter((r) => sts.includes(r.trackingStatus)).length;
+
   return (
     <div className="mt-3 grid gap-4 border-t border-ink-200 pt-3">
       {/* Gästeliste */}
@@ -234,6 +250,39 @@ function EventDetail({ event, onChanged }: { event: any; onChanged: () => void }
             </span>
           ))}
         </div>
+      </div>
+      {/* Sammelbuchung + Live-Dispo */}
+      <div>
+        <p className="eyebrow mb-2 text-ink-400">Sammelbuchung &amp; Live-Dispo</p>
+        <input className="field mb-1.5" placeholder="Abholpunkt-Bezeichnung (z. B. Eingang Nord)" value={bk.pickupPoint} onChange={(e) => setBk({ ...bk, pickupPoint: e.target.value })} />
+        <div className="grid gap-1.5 sm:grid-cols-2">
+          <AddressInput label="Abholung" placeholder="Treffpunkt" value={bp.address} onChange={(t) => setBp({ address: t })} onSelect={(r: GeocodeResult) => setBp({ address: r.label, lat: r.lat, lng: r.lng })} />
+          <AddressInput label="Ziel" placeholder="Ziel" value={bd.address} onChange={(t) => setBd({ address: t })} onSelect={(r: GeocodeResult) => setBd({ address: r.label, lat: r.lat, lng: r.lng })} />
+        </div>
+        <div className="mt-1.5 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+          <select className="field" value={bk.vehicleClass} onChange={(e) => setBk({ ...bk, vehicleClass: e.target.value })}>{VEHICLE_CLASSES.map((c) => <option key={c.key} value={c.key}>{c.icon} {c.label}</option>)}</select>
+          <label className="grid gap-0.5 text-[11px] text-ink-500">Anzahl Taxis<input className="field" type="number" min="1" max="30" data-testid="event-book-count" value={bk.count} onChange={(e) => setBk({ ...bk, count: e.target.value })} /></label>
+          <label className="grid gap-0.5 text-[11px] text-ink-500">Uhrzeit (optional)<input className="field" type="datetime-local" value={bk.scheduledAt} onChange={(e) => setBk({ ...bk, scheduledAt: e.target.value })} /></label>
+          <button onClick={bookGroup} disabled={booking || bp.lat == null || bd.lat == null} data-testid="event-book" className="btn-primary self-end disabled:opacity-60">{booking ? "…" : "Buchen"}</button>
+        </div>
+        {rides.length > 0 && (
+          <div className="mt-3" data-testid="event-dispo">
+            <div className="mb-2 flex flex-wrap gap-1.5 text-[11px] font-bold">
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">Suche {liveCount(["SUCHE", "GEPLANT", "KEIN_FAHRER"])}</span>
+              <span className="rounded-full bg-brand-100 px-2 py-0.5 text-ink-900">Unterwegs {liveCount(["FAHRER_UNTERWEGS", "RESERVIERT_FAHRER", "FAHRER_GEFUNDEN"])}</span>
+              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-blue-800">Vor Ort {liveCount(["FAHRER_ANGEKOMMEN", "FAHRT_LAEUFT"])}</span>
+              <span className="rounded-full bg-green-100 px-2 py-0.5 text-green-800">Fertig {liveCount(["BEENDET"])}</span>
+            </div>
+            <div className="grid gap-1">
+              {rides.map((r) => (
+                <a key={r.id} href={`/verfolgen/${r.trackingRef ?? r.id}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between gap-2 rounded-lg bg-white px-2 py-1 text-xs ring-1 ring-ink-100 hover:bg-ink-50">
+                  <span className="min-w-0 truncate">{r.pickupPoint ? `${r.pickupPoint} · ` : ""}{r.customerName}</span>
+                  <span className="shrink-0 font-bold text-ink-700">{r.driver?.vehiclePlate ?? "—"} · {r.trackingStatus}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

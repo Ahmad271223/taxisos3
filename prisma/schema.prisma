@@ -390,6 +390,10 @@ model Booking {
   // (true) oder per Meter-Tarif berechnet (false)?
   priceIsFixed   Boolean @default(false)
 
+  // Event-Zuordnung (Sammelbuchung/Live-Dispo): Fahrt gehört zu einer Veranstaltung.
+  eventId        String?
+  pickupPoint    String?  // Bezeichnung des Abholpunkts (z. B. "Eingang Nord")
+
   // QR-Firmenmobilität: per QR-Code eingelöstes Firmenkonto übernimmt die Fahrt.
   corporateCode  String?  // eingelöster Mobilitäts-Code
   corporatePayer String?  // Name der zahlenden Firma (für Fahrer/Beleg)
