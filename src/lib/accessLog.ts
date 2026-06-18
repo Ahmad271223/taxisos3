@@ -4,7 +4,7 @@
 
 import { prisma } from "@/lib/prisma";
 
-export type AccessAction = "VIEW" | "DOWNLOAD" | "APPROVE" | "REJECT" | "CREATE" | "EXPORT";
+export type AccessAction = "VIEW" | "DOWNLOAD" | "APPROVE" | "REJECT" | "CREATE" | "UPDATE" | "CANCEL" | "EXPORT";
 export type AccessEntity = "MEDICAL_DOCUMENT" | "BOOKING" | "PATIENT" | "RECURRING";
 
 export async function logAccess(e: {

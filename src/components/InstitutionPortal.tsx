@@ -108,15 +108,15 @@ function Dashboard({ inst }: { inst: Inst }) {
   useEffect(() => { loadPatients(); loadRides(); }, []);
 
   return (
-    <div className="mx-auto grid max-w-4xl gap-5 px-5 py-6">
+    <div className="mx-auto grid max-w-3xl gap-3 px-4 py-4">
       <div>
-        <h1 className="font-display text-2xl font-extrabold tracking-tight text-ink-900" data-testid="inst-dashboard">{inst.name}</h1>
-        <p className="text-sm text-ink-500">Krankenfahrten-Portal · {inst.type}</p>
+        <h1 className="font-display text-xl font-extrabold tracking-tight text-ink-900" data-testid="inst-dashboard">{inst.name}</h1>
+        <p className="text-xs text-ink-500">Krankenfahrten-Portal · {inst.type}</p>
       </div>
 
       <NewRideCard patients={patients} onCreated={loadRides} />
       <PatientsCard patients={patients} onCreated={loadPatients} />
-      <RidesCard rides={rides} />
+      <RidesCard rides={rides} patients={patients} onChanged={loadRides} />
       <InvoiceCard />
     </div>
   );
@@ -134,11 +134,11 @@ function InvoiceCard() {
   const euro = (n: number) => (n ?? 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" });
 
   return (
-    <div className="card p-6" data-testid="inst-invoice">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-display text-lg font-extrabold text-ink-900">Abrechnung</h2>
+    <div className="card p-4" data-testid="inst-invoice">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-display text-base font-extrabold text-ink-900">Abrechnung</h2>
         <div className="flex items-center gap-2">
-          <input className="field max-w-[160px]" type="month" data-testid="invoice-month" value={month} onChange={(e) => setMonth(e.target.value)} />
+          <input className="field-sm max-w-[150px]" type="month" data-testid="invoice-month" value={month} onChange={(e) => setMonth(e.target.value)} />
           <a
             href={`/api/institutions/invoice/pdf?month=${month}`}
             target="_blank"
@@ -209,50 +209,45 @@ function NewRideCard({ patients, onCreated }: { patients: any[]; onCreated: () =
   }
 
   return (
-    <div className="card p-6">
-      <h2 className="mb-3 font-display text-lg font-extrabold text-ink-900">Neue Krankenfahrt</h2>
-      <div className="grid gap-3">
-        <div>
-          <label className="label">Patient</label>
+    <div className="card p-4">
+      <h2 className="mb-2 font-display text-base font-extrabold text-ink-900">Neue Krankenfahrt</h2>
+      <div className="grid gap-2">
+        <div className="grid gap-2 sm:grid-cols-2">
           {patients.length > 0 ? (
-            <select className="field" data-testid="ride-patient" value={patientId} onChange={(e) => setPatientId(e.target.value)}>
-              <option value="">— Neuer Patient (Name eingeben) —</option>
+            <select className="field-sm" data-testid="ride-patient" value={patientId} onChange={(e) => setPatientId(e.target.value)}>
+              <option value="">— Neuer Patient —</option>
               {patients.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
-          ) : null}
-          {!patientId && <input className="field mt-2" data-testid="ride-patient-name" placeholder="Patientenname" value={patientName} onChange={(e) => setPatientName(e.target.value)} />}
+          ) : <div className="hidden sm:block" />}
+          {!patientId
+            ? <input className="field-sm" data-testid="ride-patient-name" placeholder="Patientenname" value={patientName} onChange={(e) => setPatientName(e.target.value)} />
+            : <div className="hidden sm:block" />}
         </div>
-        <AddressInput label="Abholung" placeholder="Abholadresse" value={pickup.address} onChange={(t) => setPickup({ address: t })} onSelect={(r: GeocodeResult) => setPickup({ address: r.label, lat: r.lat, lng: r.lng })} required />
-        <AddressInput label="Ziel" placeholder="z. B. Dialysezentrum" value={dest.address} onChange={(t) => setDest({ address: t })} onSelect={(r: GeocodeResult) => setDest({ address: r.label, lat: r.lat, lng: r.lng })} required />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="label">Art</label>
-            <select className="field" data-testid="ride-type" value={medicalType} onChange={(e) => setMedicalType(e.target.value)}>
-              {MEDICAL_TYPES.map((m) => <option key={m.key} value={m.key}>{m.icon} {m.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">Fahrzeug</label>
-            <select className="field" data-testid="ride-vclass" value={vehicleClass} onChange={(e) => setVehicleClass(e.target.value)}>
-              {VEHICLE_CLASSES.map((c) => <option key={c.key} value={c.key}>{c.icon} {c.label}</option>)}
-            </select>
-          </div>
+        <AddressInput compact label="Abholung" placeholder="Abholadresse" value={pickup.address} onChange={(t) => setPickup({ address: t })} onSelect={(r: GeocodeResult) => setPickup({ address: r.label, lat: r.lat, lng: r.lng })} required />
+        <AddressInput compact label="Ziel" placeholder="z. B. Dialysezentrum" value={dest.address} onChange={(t) => setDest({ address: t })} onSelect={(r: GeocodeResult) => setDest({ address: r.label, lat: r.lat, lng: r.lng })} required />
+        <div className="grid gap-2 sm:grid-cols-2">
+          <select className="field-sm" data-testid="ride-type" value={medicalType} onChange={(e) => setMedicalType(e.target.value)}>
+            {MEDICAL_TYPES.map((m) => <option key={m.key} value={m.key}>{m.icon} {m.label}</option>)}
+          </select>
+          <select className="field-sm" data-testid="ride-vclass" value={vehicleClass} onChange={(e) => setVehicleClass(e.target.value)}>
+            {VEHICLE_CLASSES.map((c) => <option key={c.key} value={c.key}>{c.icon} {c.label}</option>)}
+          </select>
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
-          <label className="flex items-center gap-2 rounded-xl border-2 border-ink-200 bg-white px-3 py-2 text-sm font-semibold text-ink-700">
-            <input type="checkbox" className="h-5 w-5 accent-brand-500" data-testid="ride-ramp" checked={requiresRamp} onChange={(e) => setRequiresRamp(e.target.checked)} /> 🦽 Rollstuhlrampe nötig
+          <label className="flex items-center gap-2 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-700">
+            <input type="checkbox" className="h-4 w-4 accent-brand-500" data-testid="ride-ramp" checked={requiresRamp} onChange={(e) => setRequiresRamp(e.target.checked)} /> 🦽 Rollstuhlrampe
           </label>
-          <label className="flex items-center gap-2 rounded-xl border-2 border-ink-200 bg-white px-3 py-2 text-sm font-semibold text-ink-700">
-            <input type="checkbox" className="h-5 w-5 accent-brand-500" data-testid="ride-stretcher" checked={requiresStretcher} onChange={(e) => setRequiresStretcher(e.target.checked)} /> 🛏️ Tragestuhl nötig
+          <label className="flex items-center gap-2 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-700">
+            <input type="checkbox" className="h-4 w-4 accent-brand-500" data-testid="ride-stretcher" checked={requiresStretcher} onChange={(e) => setRequiresStretcher(e.target.checked)} /> 🛏️ Tragestuhl
           </label>
         </div>
-        <div>
-          <label className="label">Zeitpunkt (leer = sofort)</label>
-          <input className="field" type="datetime-local" data-testid="ride-when" value={when} onChange={(e) => setWhen(e.target.value)} />
-        </div>
-        {error && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-700" data-testid="ride-error">{error}</p>}
-        {msg && <p className="rounded-xl bg-green-50 px-3 py-2 text-sm font-semibold text-green-700" data-testid="ride-msg">{msg}</p>}
-        <button onClick={submit} disabled={!ready || busy} data-testid="ride-submit" className="btn-primary disabled:opacity-60">
+        <label className="grid gap-1">
+          <span className="label-sm">Zeitpunkt (leer = sofort)</span>
+          <input className="field-sm" type="datetime-local" data-testid="ride-when" value={when} onChange={(e) => setWhen(e.target.value)} />
+        </label>
+        {error && <p className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700" data-testid="ride-error">{error}</p>}
+        {msg && <p className="rounded-lg bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700" data-testid="ride-msg">{msg}</p>}
+        <button onClick={submit} disabled={!ready || busy} data-testid="ride-submit" className="rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-extrabold text-ink-900 transition hover:bg-brand-400 disabled:opacity-60">
           {busy ? "Wird angelegt …" : "Fahrt anlegen"}
         </button>
       </div>
@@ -287,39 +282,39 @@ function PatientsCard({ patients, onCreated }: { patients: any[]; onCreated: () 
     : patients;
 
   return (
-    <div className="card p-6">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-display text-lg font-extrabold text-ink-900">Stammpatienten ({patients.length})</h2>
+    <div className="card p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="font-display text-base font-extrabold text-ink-900">Stammpatienten ({patients.length})</h2>
         <button onClick={() => setOpen((o) => !o)} data-testid="patient-toggle" className="text-sm font-bold text-ink-600 hover:text-ink-900">{open ? "Schließen" : "+ Patient"}</button>
       </div>
 
       {open && (
-        <div className="mb-4 grid gap-2 sm:grid-cols-2">
-          <input className="field" data-testid="patient-name" placeholder="Name *" value={form.name} onChange={(e) => set("name", e.target.value)} />
-          <input className="field" type="date" data-testid="patient-birth" value={form.birthDate} onChange={(e) => set("birthDate", e.target.value)} />
-          <select className="field" value={form.gender} onChange={(e) => set("gender", e.target.value)}>
+        <div className="mb-3 grid gap-2 sm:grid-cols-2">
+          <input className="field-sm" data-testid="patient-name" placeholder="Name *" value={form.name} onChange={(e) => set("name", e.target.value)} />
+          <input className="field-sm" type="date" data-testid="patient-birth" value={form.birthDate} onChange={(e) => set("birthDate", e.target.value)} />
+          <select className="field-sm" value={form.gender} onChange={(e) => set("gender", e.target.value)}>
             <option value="">Geschlecht …</option><option value="M">männlich</option><option value="F">weiblich</option><option value="D">divers</option>
           </select>
-          <input className="field" placeholder="Telefon" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
-          <input className="field" placeholder="E-Mail" value={form.email} onChange={(e) => set("email", e.target.value)} />
-          <input className="field" placeholder="Anschrift" value={form.address} onChange={(e) => set("address", e.target.value)} />
-          <select className="field" data-testid="patient-mobility" value={form.mobility} onChange={(e) => set("mobility", e.target.value)}>
+          <input className="field-sm" placeholder="Telefon" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
+          <input className="field-sm" placeholder="E-Mail" value={form.email} onChange={(e) => set("email", e.target.value)} />
+          <input className="field-sm" placeholder="Anschrift" value={form.address} onChange={(e) => set("address", e.target.value)} />
+          <select className="field-sm" data-testid="patient-mobility" value={form.mobility} onChange={(e) => set("mobility", e.target.value)}>
             <option value="">Mobilität …</option>
             {MOBILITY_OPTIONS.map((m) => <option key={m.key} value={m.key}>{m.icon} {m.label}</option>)}
           </select>
-          <select className="field" value={form.payerType} onChange={(e) => set("payerType", e.target.value)}>
+          <select className="field-sm" value={form.payerType} onChange={(e) => set("payerType", e.target.value)}>
             <option value="">Kostenträger …</option><option value="SELF">Privatzahler</option><option value="INSURANCE">Krankenkasse</option>
           </select>
-          <input className="field" placeholder="Krankenkasse" value={form.insuranceName} onChange={(e) => set("insuranceName", e.target.value)} />
-          <input className="field" placeholder="Versicherungsnummer" value={form.insuranceNumber} onChange={(e) => set("insuranceNumber", e.target.value)} />
-          <input className="field" placeholder="Kostenträger-Nr. (IK)" value={form.kostentraegerNummer} onChange={(e) => set("kostentraegerNummer", e.target.value)} />
-          <label className="grid gap-1 text-xs text-ink-500">Befreiungsausweis gültig bis<input className="field" type="date" value={form.befreiungUntil} onChange={(e) => set("befreiungUntil", e.target.value)} /></label>
-          <button onClick={add} disabled={busy || !form.name.trim()} data-testid="patient-save" className="btn-primary sm:col-span-2 disabled:opacity-60">{busy ? "Speichern …" : "Patient speichern"}</button>
+          <input className="field-sm" placeholder="Krankenkasse" value={form.insuranceName} onChange={(e) => set("insuranceName", e.target.value)} />
+          <input className="field-sm" placeholder="Versicherungsnummer" value={form.insuranceNumber} onChange={(e) => set("insuranceNumber", e.target.value)} />
+          <input className="field-sm" placeholder="Kostenträger-Nr. (IK)" value={form.kostentraegerNummer} onChange={(e) => set("kostentraegerNummer", e.target.value)} />
+          <label className="grid gap-0.5 text-[11px] text-ink-500">Befreiungsausweis gültig bis<input className="field-sm" type="date" value={form.befreiungUntil} onChange={(e) => set("befreiungUntil", e.target.value)} /></label>
+          <button onClick={add} disabled={busy || !form.name.trim()} data-testid="patient-save" className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-extrabold text-ink-900 hover:bg-brand-400 sm:col-span-2 disabled:opacity-60">{busy ? "Speichern …" : "Patient speichern"}</button>
         </div>
       )}
 
       {patients.length > 3 && (
-        <input className="field mb-3" data-testid="patient-search" placeholder="Suche: Name, Telefon, Kasse, Vers.-Nr." value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="field-sm mb-3" data-testid="patient-search" placeholder="Suche: Name, Telefon, Kasse, Vers.-Nr." value={q} onChange={(e) => setQ(e.target.value)} />
       )}
 
       <div className="grid gap-2">
@@ -396,21 +391,111 @@ function PatientAkte({ id }: { id: string }) {
   );
 }
 
-function RidesCard({ rides }: { rides: any[] }) {
+// Eine Fahrt ist nachträglich änderbar/stornierbar, solange sie noch nicht
+// gestartet wurde (kein Fahrer unterwegs/angekommen/laufend/abgeschlossen).
+const EDITABLE_STATUS = new Set(["OFFEN", "ZUGEWIESEN", "SUCHE", "GEPLANT", "RESERVIERT_FAHRER"]);
+function isEditable(r: any): boolean {
+  if (["ABGESCHLOSSEN", "STORNIERT"].includes(r.status)) return false;
+  return EDITABLE_STATUS.has(r.status) || EDITABLE_STATUS.has(r.trackingStatus);
+}
+
+function RidesCard({ rides, patients, onChanged }: { rides: any[]; patients: any[]; onChanged: () => void }) {
+  const [editId, setEditId] = useState<string | null>(null);
   return (
-    <div className="card p-6">
-      <h2 className="mb-3 font-display text-lg font-extrabold text-ink-900">Fahrten ({rides.length})</h2>
-      <div className="grid gap-2">
+    <div className="card p-4">
+      <h2 className="mb-2 font-display text-base font-extrabold text-ink-900">Fahrten ({rides.length})</h2>
+      <div className="grid gap-1.5">
         {rides.map((r) => (
-          <Link key={r.id} href={`/verfolgen/${r.trackingRef ?? r.id}`} className="flex items-center justify-between rounded-xl bg-ink-50 px-3 py-2.5 text-sm transition hover:bg-ink-100" data-testid={`inst-ride-${r.id}`}>
-            <span className="min-w-0">
-              <span className="block truncate font-bold text-ink-900">{r.patientName ?? r.customerName} · {r.medicalLabel ?? "Fahrt"}</span>
-              <span className="block truncate text-ink-500">{r.pickupAddress} → {r.destAddress}</span>
-            </span>
-            <span className="ml-2 shrink-0 rounded-full bg-ink-900 px-2 py-0.5 text-[10px] font-extrabold text-brand-500">{r.trackingStatus}</span>
-          </Link>
+          <div key={r.id} data-testid={`inst-ride-${r.id}`}>
+            <div className="flex items-center justify-between gap-2 rounded-xl bg-ink-50 px-3 py-2 text-sm">
+              <Link href={`/verfolgen/${r.trackingRef ?? r.id}`} className="min-w-0 flex-1 transition hover:opacity-70">
+                <span className="block truncate font-bold text-ink-900">
+                  {r.patientName ?? r.customerName} · {r.medicalLabel ?? "Fahrt"}
+                  {r.scheduledAt ? <span className="ml-1 font-normal text-ink-500">· {new Date(r.scheduledAt).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span> : null}
+                </span>
+                <span className="block truncate text-xs text-ink-500">{r.pickupAddress} → {r.destAddress}</span>
+              </Link>
+              <span className="flex shrink-0 items-center gap-1.5">
+                <span className="rounded-full bg-ink-900 px-2 py-0.5 text-[10px] font-extrabold text-brand-500">{r.trackingStatus}</span>
+                {isEditable(r) && (
+                  <button onClick={() => setEditId((id) => (id === r.id ? null : r.id))} data-testid={`ride-edit-${r.id}`} className="rounded-lg border border-ink-200 px-2 py-1 text-[11px] font-bold text-ink-700 hover:border-ink-900">
+                    {editId === r.id ? "Schließen" : "Ändern"}
+                  </button>
+                )}
+              </span>
+            </div>
+            {editId === r.id && <EditRideRow ride={r} onDone={() => { setEditId(null); onChanged(); }} />}
+          </div>
         ))}
         {rides.length === 0 && <p className="text-sm text-ink-400">Noch keine Fahrten.</p>}
+      </div>
+    </div>
+  );
+}
+
+function EditRideRow({ ride, onDone }: { ride: any; onDone: () => void }) {
+  const toLocal = (iso: string | null) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const [pickup, setPickup] = useState<Addr>({ address: ride.pickupAddress, lat: ride.pickupLat, lng: ride.pickupLng });
+  const [dest, setDest] = useState<Addr>({ address: ride.destAddress, lat: ride.destLat, lng: ride.destLng });
+  const [medicalType, setMedicalType] = useState(ride.medicalType ?? "DIALYSE");
+  const [vehicleClass, setVehicleClass] = useState(ride.vehicleClass ?? "WHEELCHAIR");
+  const [requiresRamp, setRequiresRamp] = useState(!!ride.requiresRamp);
+  const [requiresStretcher, setRequiresStretcher] = useState(!!ride.requiresStretcher);
+  const [when, setWhen] = useState(toLocal(ride.scheduledAt));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    setBusy(true); setError(null);
+    const res = await fetch(`/api/institutions/rides/${ride.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pickup: pickup.lat != null ? pickup : undefined,
+        dest: dest.lat != null ? dest : undefined,
+        medicalType, vehicleClass, requiresRamp, requiresStretcher,
+        scheduledAt: when ? new Date(when).toISOString() : null,
+      }),
+    });
+    const d = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) { setError(d.error ?? "Änderung fehlgeschlagen."); return; }
+    onDone();
+  }
+  async function cancelRide() {
+    if (!window.confirm("Diese Fahrt stornieren?")) return;
+    setBusy(true); setError(null);
+    const res = await fetch(`/api/institutions/rides/${ride.id}`, { method: "DELETE" });
+    setBusy(false);
+    if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d.error ?? "Stornierung fehlgeschlagen."); return; }
+    onDone();
+  }
+
+  return (
+    <div className="mt-1 grid gap-2 rounded-xl border border-ink-200 bg-white p-3" data-testid={`ride-edit-form-${ride.id}`}>
+      <AddressInput compact label="Abholung" placeholder="Abholadresse" value={pickup.address} onChange={(t) => setPickup({ address: t })} onSelect={(r: GeocodeResult) => setPickup({ address: r.label, lat: r.lat, lng: r.lng })} />
+      <AddressInput compact label="Ziel" placeholder="Zieladresse" value={dest.address} onChange={(t) => setDest({ address: t })} onSelect={(r: GeocodeResult) => setDest({ address: r.label, lat: r.lat, lng: r.lng })} />
+      <div className="grid gap-2 sm:grid-cols-2">
+        <select className="field-sm" value={medicalType} onChange={(e) => setMedicalType(e.target.value)}>
+          {MEDICAL_TYPES.map((m) => <option key={m.key} value={m.key}>{m.icon} {m.label}</option>)}
+        </select>
+        <select className="field-sm" value={vehicleClass} onChange={(e) => setVehicleClass(e.target.value)}>
+          {VEHICLE_CLASSES.map((c) => <option key={c.key} value={c.key}>{c.icon} {c.label}</option>)}
+        </select>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="flex items-center gap-2 rounded-lg border border-ink-200 px-3 py-1.5 text-xs font-semibold text-ink-700"><input type="checkbox" className="h-4 w-4 accent-brand-500" checked={requiresRamp} onChange={(e) => setRequiresRamp(e.target.checked)} /> 🦽 Rollstuhlrampe</label>
+        <label className="flex items-center gap-2 rounded-lg border border-ink-200 px-3 py-1.5 text-xs font-semibold text-ink-700"><input type="checkbox" className="h-4 w-4 accent-brand-500" checked={requiresStretcher} onChange={(e) => setRequiresStretcher(e.target.checked)} /> 🛏️ Tragestuhl</label>
+      </div>
+      <label className="grid gap-1"><span className="label-sm">Zeitpunkt (leer = sofort)</span><input className="field-sm" type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} /></label>
+      {error && <p className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700">{error}</p>}
+      <div className="flex items-center justify-between gap-2">
+        <button onClick={cancelRide} disabled={busy} data-testid={`ride-cancel-${ride.id}`} className="rounded-xl border border-red-200 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50">Stornieren</button>
+        <button onClick={save} disabled={busy} data-testid={`ride-save-${ride.id}`} className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-extrabold text-ink-900 hover:bg-brand-400 disabled:opacity-60">{busy ? "Speichert …" : "Änderung speichern"}</button>
       </div>
     </div>
   );

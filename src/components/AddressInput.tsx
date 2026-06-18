@@ -11,9 +11,10 @@ interface Props {
   onSelect: (result: GeocodeResult) => void;
   required?: boolean;
   hideLabel?: boolean;
+  compact?: boolean;
 }
 
-export function AddressInput({ label, placeholder, value, onChange, onSelect, required, hideLabel }: Props) {
+export function AddressInput({ label, placeholder, value, onChange, onSelect, required, hideLabel, compact }: Props) {
   const [results, setResults] = useState<GeocodeResult[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -62,9 +63,9 @@ export function AddressInput({ label, placeholder, value, onChange, onSelect, re
 
   return (
     <div className="relative" ref={boxRef}>
-      <label className={hideLabel ? "sr-only" : "label"}>{label}</label>
+      <label className={hideLabel ? "sr-only" : compact ? "label-sm" : "label"}>{label}</label>
       <input
-        className="field"
+        className={compact ? "field-sm" : "field"}
         data-testid={`address-input-${label.toLowerCase().includes("abhol") ? "pickup" : "dest"}`}
         placeholder={placeholder}
         value={value}
@@ -79,7 +80,7 @@ export function AddressInput({ label, placeholder, value, onChange, onSelect, re
           onChange(e.target.value);
         }}
       />
-      {loading && <span className="absolute right-3 top-9 text-xs text-ink-400">…</span>}
+      {loading && <span className={`absolute right-3 text-xs text-ink-400 ${compact ? "top-7" : "top-9"}`}>…</span>}
       {open && results.length > 0 && (
         <ul className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-ink-200 bg-white shadow-lg">
           {results.map((r, i) => (
