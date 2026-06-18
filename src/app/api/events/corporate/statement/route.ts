@@ -46,6 +46,22 @@ export async function GET(req: Request) {
   }
   total = Math.round(total * 100) / 100;
 
+  if (new URL(req.url).searchParams.get("format") === "csv") {
+    const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const header = ["Datum", "Fahrgast", "Fahrt", "Code", "Betrag (EUR)"].join(";");
+    const rows = lines.map((l) =>
+      [l.date.toLocaleDateString("de-DE"), l.guest, l.route, l.code, l.amount.toFixed(2).replace(".", ",")].map(esc).join(";"),
+    );
+    const csv = "﻿" + [header, ...rows].join("\r\n");
+    return new NextResponse(csv, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="Firmenmobilitaet_${monthKey}.csv"`,
+        "Cache-Control": "private, no-store",
+      },
+    });
+  }
+
   const pdf = await corporateStatementPdf({ company: host?.name ?? "Firma", periodLabel, lines, total });
   return new NextResponse(Buffer.from(pdf), {
     headers: {

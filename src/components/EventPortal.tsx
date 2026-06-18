@@ -516,7 +516,8 @@ function CorporateCard() {
         <p className="mb-2 text-xs text-ink-500">Alle über eure QR-Codes übernommenen Fahrten eines Monats als PDF.</p>
         <div className="flex items-center gap-2">
           <input className="field" type="month" data-testid="corp-stmt-month" value={month} onChange={(e) => setMonth(e.target.value)} />
-          <a href={`/api/events/corporate/statement?month=${month}`} target="_blank" rel="noopener noreferrer" data-testid="corp-stmt-download" className="btn-ghost shrink-0 text-sm">PDF herunterladen</a>
+          <a href={`/api/events/corporate/statement?month=${month}`} target="_blank" rel="noopener noreferrer" data-testid="corp-stmt-download" className="btn-ghost shrink-0 text-sm">PDF</a>
+          <a href={`/api/events/corporate/statement?month=${month}&format=csv`} data-testid="corp-stmt-csv" className="btn-ghost shrink-0 text-sm">CSV</a>
         </div>
       </div>
     </div>

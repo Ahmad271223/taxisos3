@@ -289,6 +289,7 @@ function NewGuestRideCard({ onCreated, guests }: { onCreated: () => void; guests
           <option value="DIRECT">Gast zahlt selbst</option>
           <option value="ROOM">Auf Zimmer (Charge to Room)</option>
           <option value="CORPORATE">Firmenkonto</option>
+          <option value="VOUCHER">Voucher / Gutschein</option>
         </select>
       </div>
       <div className="mt-2 grid gap-2">

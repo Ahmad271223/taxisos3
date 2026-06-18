@@ -18,7 +18,7 @@ const schema = z.object({
   guestName: z.string().min(1).max(120),
   guestPhone: z.string().max(40).optional().nullable(),
   roomNumber: z.string().max(20).optional().nullable(),
-  hotelPayment: z.enum(["DIRECT", "ROOM", "CORPORATE"]).optional(),
+  hotelPayment: z.enum(["DIRECT", "ROOM", "CORPORATE", "VOUCHER"]).optional(),
   pickup: point.optional().nullable(), // leer -> automatisch Hotel-Standardabholort
   dest: point,
   vehicleClass: z.string().optional().nullable(),
