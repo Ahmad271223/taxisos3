@@ -81,6 +81,7 @@ function Dashboard({ hotel, onLogout }: { hotel: Hotel; onLogout: () => void }) 
       </header>
       <div className="mx-auto grid max-w-3xl gap-4 px-5 py-6">
         <OverviewCard rides={rides} />
+        <CalendarCard rides={rides} />
         <NewGuestRideCard onCreated={loadRides} guests={guests} />
         <GuestBookCard guests={guests} onChanged={loadGuests} />
         <RidesCard rides={rides} />
@@ -124,6 +125,65 @@ function Stat({ label, value, testid }: { label: string; value: any; testid?: st
     <div className="rounded-xl bg-ink-50 p-3 text-center" data-testid={testid}>
       <p className="font-display text-2xl font-extrabold text-ink-900">{value}</p>
       <p className="mt-0.5 text-[11px] font-semibold text-ink-500">{label}</p>
+    </div>
+  );
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  GEPLANT: "Geplant", SUCHE: "Fahrer wird gesucht", RESERVIERT_FAHRER: "Fahrer reserviert", FAHRER_GEFUNDEN: "Fahrer zugewiesen",
+  FAHRER_UNTERWEGS: "Fahrer unterwegs", FAHRER_ANGEKOMMEN: "Fahrer angekommen", FAHRT_LAEUFT: "Fahrt läuft", BEENDET: "Abgeschlossen",
+  STORNIERT: "Storniert", KEIN_FAHRER: "Kein Fahrer",
+};
+
+// Fahrtenkalender: Heute / Morgen / Woche / Monat, gruppiert nach Tag.
+function CalendarCard({ rides }: { rides: any[] }) {
+  const [tab, setTab] = useState<"today" | "tomorrow" | "week" | "month">("today");
+  const eff = (r: any) => new Date(r.scheduledAt ?? r.createdAt ?? Date.now());
+  const now = new Date();
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const today0 = startOfDay(now);
+  const inRange = (d: Date) => {
+    if (tab === "today") return startOfDay(d).getTime() === today0.getTime();
+    if (tab === "tomorrow") return startOfDay(d).getTime() === today0.getTime() + 86400000;
+    if (tab === "week") { const t = startOfDay(d).getTime(); return t >= today0.getTime() && t < today0.getTime() + 7 * 86400000; }
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  };
+  const filtered = rides.filter((r) => inRange(eff(r))).sort((a, b) => eff(a).getTime() - eff(b).getTime());
+  const byDay = new Map<string, any[]>();
+  for (const r of filtered) {
+    const k = eff(r).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" });
+    if (!byDay.has(k)) byDay.set(k, []);
+    byDay.get(k)!.push(r);
+  }
+  const tabs: [typeof tab, string][] = [["today", "Heute"], ["tomorrow", "Morgen"], ["week", "Woche"], ["month", "Monat"]];
+  return (
+    <div className="card p-6" data-testid="hotel-calendar">
+      <h2 className="mb-3 font-display text-lg font-extrabold text-ink-900">Fahrtenkalender</h2>
+      <div className="mb-3 grid grid-cols-4 gap-2">
+        {tabs.map(([k, label]) => (
+          <button key={k} onClick={() => setTab(k)} data-testid={`cal-${k}`} className={`rounded-xl px-2 py-2 text-sm font-bold ${tab === k ? "bg-ink-900 text-white" : "bg-ink-50 text-ink-700 hover:bg-ink-100"}`}>{label}</button>
+        ))}
+      </div>
+      {filtered.length === 0 && <p className="text-sm text-ink-400">Keine Fahrten in diesem Zeitraum.</p>}
+      <div className="grid gap-3">
+        {Array.from(byDay.entries()).map(([day, items]) => (
+          <div key={day}>
+            <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-ink-400">{day}</p>
+            <div className="grid gap-1.5">
+              {items.map((r) => (
+                <Link key={r.id} href={`/verfolgen/${r.trackingRef ?? r.id}`} className="flex items-center justify-between gap-3 rounded-xl bg-ink-50 px-3 py-2 text-sm transition hover:bg-ink-100">
+                  <span className="min-w-0">
+                    <span className="font-bold text-ink-900">{eff(r).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</span>
+                    <span className="ml-2 text-ink-700">{r.customerName}{r.roomNumber ? ` · Zi. ${r.roomNumber}` : ""}</span>
+                    <span className="block truncate text-xs text-ink-500">{r.pickupAddress} → {r.destAddress}</span>
+                  </span>
+                  <span className="shrink-0 text-[11px] font-bold text-ink-600">{STATUS_LABEL[r.trackingStatus] ?? r.trackingStatus}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
