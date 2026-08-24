@@ -415,6 +415,9 @@ export async function createStripeCustomer(
     });
     return { ok: true, customerId: c.id, mock: false };
   } catch (e: any) {
+    // Ohne diese Meldung sieht der Aufrufer nur "Zahlungskonto konnte nicht
+    // vorbereitet werden" und der eigentliche Grund geht verloren.
+    console.error("Stripe: Kunde anlegen fehlgeschlagen:", e?.code ?? e?.type ?? "", e?.message ?? e);
     return { ok: false, customerId: null, mock: false, error: e?.message ?? "stripe_error" };
   }
 }

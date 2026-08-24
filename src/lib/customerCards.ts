@@ -70,7 +70,10 @@ export async function ensureStripeCustomer(customerId: string): Promise<string |
     { email: c.email, name: c.name, phone: c.phone },
     { customerId: c.id },
   );
-  if (!created.ok || !created.customerId) return null;
+  if (!created.ok || !created.customerId) {
+    console.error(`Zahlungskonto fuer Kunde ${c.id} konnte nicht angelegt werden:`, created.error ?? "unbekannt");
+    return null;
+  }
   await prisma.customer.update({ where: { id: c.id }, data: { stripeCustomerId: created.customerId } });
   return created.customerId;
 }

@@ -76,7 +76,11 @@ export function DriverPortal() {
     if (authState !== "ok") return;
     const socket = getSocket("driver");
 
+    // Merker: ist ueberhaupt schon ein Stand angekommen?
+    let standErhalten = false;
+
     const onState = (s: any) => {
+      standErhalten = true;
       setStatus(s.status);
       if (s.name) setName(s.name);
       setActive(s.activeBooking);
@@ -106,7 +110,53 @@ export function DriverPortal() {
     socket.on("driver:emergency", onEmergency);
     socket.on("driver:confirmScheduled", onConfirmScheduled);
 
+    // Stand aktiv anfordern, statt nur auf den Push zu warten.
+    //
+    // Geht die Nachricht beim Verbindungsaufbau verloren (Socket.IO schaltet
+    // dabei von Polling auf WebSocket um), blieb das Dashboard sonst dauerhaft
+    // im Ladezustand – ohne Meldung. Deshalb: beim Verbinden anfordern, nach
+    // dem Zurueckkehren aus dem Hintergrund erneut, und notfalls wiederholen.
+    const anfordern = () => socket.emit("driver:sync", {});
+    const onConnect = () => {
+      standErhalten = false;
+      anfordern();
+    };
+    const onSichtbar = () => {
+      if (document.visibilityState === "visible") anfordern();
+    };
+
+    socket.on("connect", onConnect);
+    document.addEventListener("visibilitychange", onSichtbar);
+    if (socket.connected) anfordern();
+
+    // Sicherungsnetz gegen eine still gestorbene Verbindung.
+    //
+    // Beobachtet: der Socket gilt auf BEIDEN Seiten als verbunden, es fliessen
+    // aber keine Daten mehr. Nachfragen bringt dann nichts – die Anfrage kommt
+    // gar nicht erst an. Erst der Herzschlag von Socket.IO merkt es und baut
+    // neu auf; bis dahin ist der Fahrer blind und verpasst Auftraege.
+    //
+    // Deshalb: zweimal nachfragen, und wenn dann immer noch nichts da ist, die
+    // Verbindung selbst neu aufbauen, statt auf den Herzschlag zu warten.
+    let versuche = 0;
+    const nachfassen = setInterval(() => {
+      if (standErhalten) return;
+      versuche += 1;
+      if (versuche <= 2) {
+        anfordern();
+      } else if (versuche === 3) {
+        // Verbindung ist offenbar tot – neu aufbauen.
+        socket.disconnect();
+        socket.connect();
+      } else if (versuche > 6) {
+        clearInterval(nachfassen);
+      }
+    }, 2500);
+
     return () => {
+      clearInterval(nachfassen);
+      document.removeEventListener("visibilitychange", onSichtbar);
+      socket.off("connect", onConnect);
       socket.off("driver:state", onState);
       socket.off("driver:offer", onOffer);
       socket.off("driver:offerCancel", onOfferCancel);

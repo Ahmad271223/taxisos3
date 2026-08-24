@@ -112,6 +112,15 @@ Karte am Plattform-Kunden hängt und die Belastung als Destination-Charge
 - **30 Minuten vor einer Vorbestellung** wird der Fahrer rückgefragt
   („Fahrt weiterhin durchführen?"). Sagt er ab, sucht die Plattform Ersatz und
   informiert den Fahrgast per SMS.
+- **Stille Verbindungsabbrüche:** Ein Socket kann auf beiden Seiten als
+  verbunden gelten, ohne dass Daten fließen. Der Fahrer war dann bis zu 20 s
+  blind und verpasste Aufträge, ohne es zu merken. Gegenmaßnahmen: der
+  Herzschlag ist auf 10 s / 10 s verkürzt (`server.ts`), das Fahrer-Dashboard
+  fordert seinen Stand aktiv über `driver:sync` an und **baut die Verbindung
+  nach zwei erfolglosen Versuchen selbst neu auf**. Zusätzlich leitet der
+  Server die Rolle aus dem Cookie ab, falls die Rollenangabe im Handshake
+  fehlt (`auth={}` trat bei Wiederverbindungen auf – der Fahrer galt dann als
+  anonymer Gast und bekam nie Daten). Abgesichert durch `scripts/qa/driver_sync.js`.
 - **Live-Verfolgung:** ab Annahme sieht der Kunde den Wagen auf der Karte.
   Die **Ankunftszeit** wird laufend neu berechnet (echte Straßenroute,
   gedrosselt auf 20 s / 200 m) und über `booking:eta` gesendet.
@@ -212,6 +221,7 @@ node scripts/qa/cleanup.js      # Testdaten entfernen
 | `invoice_retired` | Provisionsrechnung ist stillgelegt |
 | `tracking_eta` | Fahrerposition und mitlaufende Ankunftszeit |
 | `live_ready` | Startsperre |
+| `driver_sync` | Fahrer-Dashboard bleibt nie ohne Auftragsstand |
 | `loadtest` / `loadtest_heavy` | Grundlast und hohe Last |
 | `subscription`, `plans_connect` | Abo, Tarifgrenzen, Auszahlungen |
 | `driver_confirm_replace` | Rückfrage 30 Min vorher, Ersatzfahrer |

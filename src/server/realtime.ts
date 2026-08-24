@@ -162,7 +162,22 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
     const cookieHeader = socket.handshake.headers.cookie;
     // Rolle dieser Verbindung kommt aus dem Handshake (admin/driver/Kunde),
     // gelesen wird das jeweils passende Cookie -> Admin & Fahrer parallel möglich.
-    const wantRole = (socket.handshake.auth as { role?: string } | undefined)?.role;
+    let wantRole = (socket.handshake.auth as { role?: string } | undefined)?.role;
+
+    // Die Rollenangabe aus dem Handshake kommt nicht immer an (beobachtet vor
+    // allem bei Wiederverbindungen, die direkt als WebSocket aufgebaut werden:
+    // auth={} obwohl das Cookie da ist). Ohne sie galt die Verbindung als
+    // anonymer Gast – der Fahrer bekam dann NIE seinen Auftragsstand, ohne
+    // Fehlermeldung und ohne dass Nachfragen geholfen haetten.
+    //
+    // Das Cookie allein reicht zur Bestimmung. Deshalb: fehlt die Angabe, aus
+    // den vorhandenen Cookies ableiten. Ist sie da, bleibt sie massgeblich –
+    // so kann ein Browser weiterhin gleichzeitig als Firma UND als Fahrer
+    // verbunden sein.
+    if (!wantRole) {
+      if (verifySession(parseCookie(cookieHeader, DRIVER_COOKIE))) wantRole = "driver";
+      else if (verifySession(parseCookie(cookieHeader, ADMIN_COOKIE))) wantRole = "admin";
+    }
     const adminSession =
       wantRole === "admin"
         ? verifySession(parseCookie(cookieHeader, ADMIN_COOKIE)) ?? verifySession(parseCookie(cookieHeader, SESSION_COOKIE))
@@ -171,6 +186,19 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
       wantRole === "driver"
         ? verifySession(parseCookie(cookieHeader, DRIVER_COOKIE)) ?? verifySession(parseCookie(cookieHeader, SESSION_COOKIE))
         : null;
+
+    // Verbindung will eine Rolle, hat aber keine gueltige Anmeldung.
+    // Frueher blieb ein solcher Socket wortlos verbunden – die Oberflaeche
+    // wartete dann endlos auf Daten, die nie kommen konnten.
+    if (wantRole === "driver" && !driverSession) {
+      console.warn(`Socket ohne gueltige Fahrer-Anmeldung (${socket.id})`);
+      socket.emit("auth:required", { role: "driver", error: "Bitte erneut anmelden." });
+    }
+    if (wantRole === "admin" && !adminSession) {
+      console.warn(`Socket ohne gueltige Admin-Anmeldung (${socket.id})`);
+      socket.emit("auth:required", { role: "admin", error: "Bitte erneut anmelden." });
+    }
+
 
     // ---- Administrator (Firma/Mandant) ----
     if (adminSession?.role === "ADMIN") {
@@ -194,7 +222,13 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
       socket.join(`driver:${driverId}`);
       socket.join("drivers");
       realDrivers.add(driverId);
-      await dispatcher.onDriverConnect(driverId);
+      // Wirft dies, wurden frueher gar keine Handler mehr registriert: der
+      // Socket war verbunden, aber vollstaendig stumm – auch auf Nachfragen.
+      try {
+        await dispatcher.onDriverConnect(driverId);
+      } catch (e: any) {
+        console.error(`onDriverConnect fehlgeschlagen (${driverId}):`, e?.message ?? e);
+      }
       // WICHTIG: Ein Fehler wurde hier frueher stillschweigend verschluckt –
       // der Fahrer bekam dann GAR NICHTS, sein Dashboard drehte sich endlos,
       // ohne Meldung und ohne Wiederholung. Deshalb jetzt: Fehler
@@ -205,6 +239,24 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
         console.error(`driver:state fehlgeschlagen (${driverId}):`, e?.message ?? e);
         socket.emit("driver:state", leererFahrerZustand());
       }
+
+      // Der Fahrer kann seinen Stand jederzeit selbst anfordern.
+      //
+      // Das ist die Absicherung gegen einen verlorenen Push: geht die
+      // Nachricht beim Verbindungsaufbau unter (z. B. waehrend Socket.IO von
+      // Polling auf WebSocket umschaltet), haette der Fahrer sonst ein ewig
+      // ladendes Dashboard – ohne Fehlermeldung und ohne Wiederholung.
+      socket.on("driver:sync", async (_p: unknown, ack?: (r: any) => void) => {
+        try {
+          const zustand = await driverState(driverId);
+          socket.emit("driver:state", zustand);
+          ack?.({ ok: true });
+        } catch (e: any) {
+          console.error(`driver:sync fehlgeschlagen (${driverId}):`, e?.message ?? e);
+          socket.emit("driver:state", leererFahrerZustand());
+          ack?.({ ok: false });
+        }
+      });
 
       socket.on("driver:location", (p: { lat: number; lng: number }) => {
         if (typeof p?.lat === "number" && typeof p?.lng === "number") {

@@ -35,6 +35,13 @@ async function main() {
     .filter(Boolean);
   const io = new IOServer(httpServer, {
     cors: { origin: allowedOrigins.length ? allowedOrigins : true, credentials: true },
+    // Herzschlag: mit den Standardwerten (25 s / 20 s) bleibt eine still
+    // gestorbene Verbindung bis zu 45 s unbemerkt. Fuer einen Fahrer heisst
+    // das: er ist so lange blind und verpasst Auftraege, ohne es zu merken.
+    // Kuerzer erkennt den Ausfall schneller, bleibt aber tolerant genug fuer
+    // Mobilfunk mit kurzen Aussetzern.
+    pingInterval: 10_000,
+    pingTimeout: 10_000,
   });
 
   // Dispatch-Engine initialisieren und global verfuegbar machen.
