@@ -9,6 +9,7 @@ import { normalizeTarget, phoneVerificationRequired, verifyVerifyToken } from "@
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { getSession } from "@/lib/session";
 import { getDispatcher } from "@/server/runtime";
+import { checkBookingPreconditions } from "@/lib/bookingGuard";
 import { groupDTO } from "@/server/serialize";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +32,8 @@ const schema = z.object({
   notes: z.string().max(500).optional().nullable(),
   scheduledAt: z.string().datetime().optional().nullable(),
   paymentMethod: z.enum(["CASH", "CARD"]).optional(),
+  // Gespeicherte Karte fuer alle Fahrten dieser Gruppe.
+  cardId: z.string().optional().nullable(),
   verificationToken: z.string().optional().nullable(),
 });
 
@@ -64,8 +67,8 @@ export async function POST(req: Request) {
   }
   const d = parsed.data;
 
-  // Zahlart (Phase 20): Bar oder Karte im Taxi (EC/Kredit am Terminal).
-  // Online-Vorautorisierung gibt es für Gruppen bewusst nicht.
+  // Zahlart: identisch zur Einzelfahrt – Bar oder Kartenzahlung mit
+  // gespeicherter Karte. Abgebucht wird jede Fahrt einzeln NACH ihrem Ende.
   const paymentMethod = d.paymentMethod === "CARD" ? "CARD" : "CASH";
 
   // Flotte normalisieren/validieren.
@@ -102,6 +105,20 @@ export async function POST(req: Request) {
       );
     }
   }
+
+  // Vorpruefung wie bei der Einzelfahrt: Kartenzahlung erfordert ein Konto
+  // mit hinterlegter, gueltiger Karte. Es wird nichts reserviert.
+  const guard = await checkBookingPreconditions({
+    paymentMethod: paymentMethod as any,
+    customerId,
+    phoneVerified: true, // oben bereits geprueft
+    requestedCardId: d.cardId,
+  });
+  if (!guard.ok) {
+    return NextResponse.json({ error: guard.error, code: guard.code }, { status: guard.status });
+  }
+  const groupCardId = guard.card?.id ?? null;
+  const groupPaymentStatus = paymentMethod === "CARD" ? "KARTE_HINTERLEGT" : "OFFEN";
 
   const totalPassengers = d.totalPassengers ?? fleet.totalSeats;
   const totalLuggage = d.totalLuggage ?? 0;
@@ -183,7 +200,8 @@ export async function POST(req: Request) {
         status: "OFFEN",
         trackingStatus: isScheduled ? "GEPLANT" : "SUCHE",
         paymentMethod,
-        paymentStatus: "OFFEN",
+        paymentStatus: groupPaymentStatus,
+        cardId: groupCardId,
       },
     });
     created.push(booking);

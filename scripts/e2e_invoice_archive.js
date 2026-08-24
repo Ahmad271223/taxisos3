@@ -2,6 +2,19 @@
 // (idempotent) -> Archiv/PDF -> als überfällig backdaten -> Mahnung -> Zahlung
 // erfassen (Zahlungsabgleich). Aufruf: node scripts/e2e_invoice_archive.js [baseUrl]
 /* eslint-disable no-console */
+
+// ---------------------------------------------------------------------------
+// STILLGELEGT: Die Provisions-Sammelrechnung rechnet nur die Provision pro
+// Fahrt ab – und die ist abgeschafft (Einnahmen laufen ueber das Monats-Abo).
+// Dieses Skript prueft also ein Modul, das es im Betrieb nicht mehr gibt.
+// Reaktivieren fuer eine Auswertung: INVOICE_MODULE=1 (auch am Server setzen).
+// Die Stilllegung selbst prueft scripts/qa/invoice_retired.js.
+// ---------------------------------------------------------------------------
+if (process.env.INVOICE_MODULE !== "1") {
+  console.log("UEBERSPRUNGEN – Provisions-Sammelrechnung ist stillgelegt.");
+  process.exit(0);
+}
+
 const BASE = process.argv[2] || "http://127.0.0.1:3000";
 const { io } = require("socket.io-client");
 const { PDFDocument } = require("pdf-lib");
@@ -9,7 +22,13 @@ const { PrismaClient } = require("@prisma/client");
 
 const HBF = { lat: 52.3759, lng: 9.732 };
 const KROEPCKE = { lat: 52.3719, lng: 9.7385 };
-const SUPER = { email: "super@taxios.app", password: "SuperAdmin2026!", role: "ADMIN" };
+// Zugangsdaten NICHT im Repository hinterlegen – sie landen sonst dauerhaft im
+// Git-Verlauf. Aus der Umgebung lesen (siehe .env).
+const SUPER = {
+  email: process.env.SUPER_ADMIN_EMAIL ?? "",
+  password: process.env.SUPER_ADMIN_PASSWORD ?? "",
+  role: "ADMIN",
+};
 
 let failures = 0;
 function check(name, cond, extra) {

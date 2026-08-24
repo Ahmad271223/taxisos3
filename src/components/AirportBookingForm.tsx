@@ -16,7 +16,9 @@ import type { MapMarker } from "@/components/Map";
 
 const Map = dynamic(() => import("@/components/Map"), { ssr: false });
 
-const BAGGAGE_BUFFER_MIN = 30;
+// Aus der Server-Bibliothek importieren, damit Vorschau und tatsaechlich
+// gespeicherte Abholzeit nie auseinanderlaufen.
+import { BAGGAGE_BUFFER_MIN } from "@/lib/flights";
 type Direction = "ARRIVAL" | "DEPARTURE";
 
 interface Addr {

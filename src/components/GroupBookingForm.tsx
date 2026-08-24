@@ -9,6 +9,8 @@ import type { GeocodeResult } from "@/lib/geo";
 import type { MapMarker } from "@/components/Map";
 import { suggestFleet, vehicleClass as vehicleClassInfo, type FleetOption } from "@/lib/vehicleClasses";
 
+import { CardChooser } from "@/components/CardChooser";
+
 const Map = dynamic(() => import("@/components/Map"), { ssr: false });
 
 interface Addr {
@@ -26,6 +28,9 @@ export function GroupBookingForm() {
   const [eventLabel, setEventLabel] = useState("");
   const [notes, setNotes] = useState("");
   const [payment, setPayment] = useState<"CASH" | "CARD">("CASH");
+  // Bei Kartenzahlung gilt die gespeicherte Karte des Kontos – es wird nichts reserviert.
+  const [cardId, setCardId] = useState<string | null>(null);
+  const [hasUsableCard, setHasUsableCard] = useState(false);
   const [scheduled, setScheduled] = useState(false);
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
@@ -211,6 +216,7 @@ export function GroupBookingForm() {
           notes: notes || null,
           scheduledAt,
           paymentMethod: payment,
+          cardId: payment === "CARD" ? cardId : null,
           verificationToken,
         }),
       });
@@ -298,9 +304,22 @@ export function GroupBookingForm() {
             💶 Barzahlung
           </button>
           <button type="button" data-testid="group-pay-card" onClick={() => setPayment("CARD")} className={`rounded-2xl border-2 p-3 text-sm font-bold transition ${payment === "CARD" ? "border-brand-500 bg-brand-50 text-ink-900" : "border-ink-200 bg-white text-ink-600"}`}>
-            💳 Karte im Taxi
+            💳 Kartenzahlung
           </button>
         </div>
+
+        {payment === "CARD" && (
+          <div className="mt-3">
+            <CardChooser
+              loggedIn={!!account}
+              value={cardId}
+              onChange={(id, usable) => {
+                setCardId(id);
+                setHasUsableCard(usable);
+              }}
+            />
+          </div>
+        )}
       </div>
 
       {/* Flotten-Vorschläge */}

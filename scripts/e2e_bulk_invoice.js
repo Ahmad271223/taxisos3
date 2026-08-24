@@ -3,6 +3,19 @@
 // die Übersichts-CSV pruefen; anschliessend den Sammel-E-Mail-Versand testen.
 // Aufruf: node scripts/e2e_bulk_invoice.js [baseUrl]
 /* eslint-disable no-console */
+
+// ---------------------------------------------------------------------------
+// STILLGELEGT: Die Provisions-Sammelrechnung rechnet nur die Provision pro
+// Fahrt ab – und die ist abgeschafft (Einnahmen laufen ueber das Monats-Abo).
+// Dieses Skript prueft also ein Modul, das es im Betrieb nicht mehr gibt.
+// Reaktivieren fuer eine Auswertung: INVOICE_MODULE=1 (auch am Server setzen).
+// Die Stilllegung selbst prueft scripts/qa/invoice_retired.js.
+// ---------------------------------------------------------------------------
+if (process.env.INVOICE_MODULE !== "1") {
+  console.log("UEBERSPRUNGEN – Provisions-Sammelrechnung ist stillgelegt.");
+  process.exit(0);
+}
+
 const BASE = process.argv[2] || "http://127.0.0.1:3000";
 const { io } = require("socket.io-client");
 const JSZip = require("jszip");
@@ -10,7 +23,13 @@ const { PDFDocument } = require("pdf-lib");
 
 const HBF = { lat: 52.3759, lng: 9.732 };
 const KROEPCKE = { lat: 52.3719, lng: 9.7385 };
-const SUPER = { email: "super@taxios.app", password: "SuperAdmin2026!", role: "ADMIN" };
+// Zugangsdaten NICHT im Repository hinterlegen – sie landen sonst dauerhaft im
+// Git-Verlauf. Aus der Umgebung lesen (siehe .env).
+const SUPER = {
+  email: process.env.SUPER_ADMIN_EMAIL ?? "",
+  password: process.env.SUPER_ADMIN_PASSWORD ?? "",
+  role: "ADMIN",
+};
 
 let failures = 0;
 function check(name, cond, extra) {
@@ -105,7 +124,13 @@ async function main() {
   await emitAck(socket, "driver:trip", { bookingId: bid, action: "complete" });
   await sleep(500);
   socket.close();
-  check("billable trip completed", (await json(`/api/bookings/${bid}`)).body.platformFee > 0);
+  // Provision pro Fahrt ist abgeschafft (Einnahmen laufen ueber das Monatsabo).
+  // Geprueft wird daher: Fahrt sauber beendet, Fahrpreis vorhanden, Provision 0.
+  const fertig = (await json(`/api/bookings/${bid}`)).body;
+  check("trip completed with fare", fertig.status === "ABGESCHLOSSEN" && fertig.fare > 0, {
+    status: fertig.status, fare: fertig.fare,
+  });
+  check("no per-ride commission charged", (fertig.platformFee ?? 0) === 0, fertig.platformFee);
 
   console.log("Super-Admin: Sammel-Vorschau (JSON)");
   const sup = await json("/api/auth/login", { method: "POST", body: JSON.stringify(SUPER) });
@@ -114,8 +139,11 @@ async function main() {
   const preview = await json(`/api/super/invoices/${month}?format=json`, {}, superCookie);
   check("preview 200", preview.status === 200);
   const row = preview.body.rows.find((r) => r.slug === slug);
-  check("our company appears as billable", row && row.net > 0, row);
-  check("totals present", preview.body.totals && preview.body.totals.gross > 0, preview.body.totals);
+  // Die Firma taucht in der Vorschau auf, ihr Provisionsbetrag ist aber 0 –
+  // genau so ist das Geschaeftsmodell gewollt.
+  check("our company appears in the preview", !!row, row);
+  check("commission is zero", row && row.net === 0, row?.net);
+  check("totals present", !!preview.body.totals, preview.body.totals);
 
   console.log("Super-Admin: ZIP herunterladen + entpacken");
   const zipRes = await api(`/api/super/invoices/${month}`, {}, superCookie);

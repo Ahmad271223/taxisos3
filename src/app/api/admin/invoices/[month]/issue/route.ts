@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { parseMonth } from "@/lib/invoice";
 import { issueInvoice, invoiceDTO } from "@/lib/invoiceStore";
 
+import { invoiceModuleRetired } from "@/lib/invoiceRetired";
 export const dynamic = "force-dynamic";
 
 /**
@@ -11,6 +12,8 @@ export const dynamic = "force-dynamic";
  * Firmen-Admin: eigene Firma; Super-Admin: via ?companyId=.
  */
 export async function POST(req: Request, { params }: { params: { month: string } }) {
+  const gesperrt = invoiceModuleRetired();
+  if (gesperrt) return gesperrt;
   const session = getSession();
   if (!session || (session.role !== "ADMIN" && session.role !== "SUPER_ADMIN")) {
     return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });

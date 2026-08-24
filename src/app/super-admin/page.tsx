@@ -4,8 +4,6 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Brand } from "@/components/Brand";
-import { SuperInvoiceRun } from "@/components/SuperInvoiceRun";
-import { SuperInvoiceArchive } from "@/components/SuperInvoiceArchive";
 import { formatEuro, formatDateTime } from "@/lib/format";
 
 export default function SuperAdminPage() {
@@ -57,15 +55,27 @@ export default function SuperAdminPage() {
 
       <div className="mx-auto grid max-w-6xl gap-5 px-5 py-8">
         {/* Plattform-Finanzen */}
+        {/*
+          Frueher stand hier die "Vermittlungsprovision". Die gibt es nicht mehr:
+          der Fahrpreis geht vollstaendig an das Unternehmen. Verdient wird am
+          Monats-Abo – also wird genau das angezeigt.
+        */}
         <div className="rounded-3xl bg-ink-900 p-6 text-white" data-testid="platform-financials">
-          <p className="eyebrow text-brand-500">Plattform-Provision</p>
-          <h2 className="mt-1 font-display text-2xl font-extrabold">Vermittlungs­einnahmen</h2>
+          <p className="eyebrow text-brand-500">Plattform-Einnahmen</p>
+          <h2 className="mt-1 font-display text-2xl font-extrabold">Monats-Abos</h2>
           <div className="mt-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <FinStat label="Brutto-Umsatz aller Fahrten" value={formatEuro(data.totals.grossRevenue)} testid="fin-gross" />
-            <FinStat label="Plattform-Einnahmen" value={formatEuro(data.totals.platformFee)} accent testid="fin-fee" />
-            <FinStat label="Auszahlung an Firmen" value={formatEuro(data.totals.companyNet)} testid="fin-net" />
+            <FinStat label="Abo-Einnahmen pro Monat" value={formatEuro(data.totals.subscriptionMonthly ?? 0)} accent testid="fin-subscription" />
+            <FinStat label="Zahlende Unternehmen" value={data.totals.payingCompanies ?? 0} testid="fin-paying" />
+            <FinStat label="In der Testphase" value={data.totals.trialCompanies ?? 0} testid="fin-trial" />
+            <FinStat label="Zahlung offen" value={data.totals.overdueCompanies ?? 0} testid="fin-overdue" />
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-4 border-t border-white/10 pt-4 lg:grid-cols-4">
+            <FinStat label="Fahrtvolumen (geht an die Firmen)" value={formatEuro(data.totals.grossRevenue)} testid="fin-gross" />
             <FinStat label="Abgeschlossene Fahrten" value={data.totals.completedTrips} testid="fin-trips" />
           </div>
+          <p className="mt-4 text-xs text-ink-300">
+            Auf einzelne Fahrten fällt keine Provision an – der volle Fahrpreis geht direkt an das Taxiunternehmen.
+          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -82,11 +92,12 @@ export default function SuperAdminPage() {
               <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
                 <tr>
                   <th className="px-5 py-3">Firma</th>
-                  <th className="px-3 py-3">Tarif</th>
+                  <th className="px-3 py-3">Abo</th>
+                  <th className="px-3 py-3">Status</th>
+                  <th className="px-3 py-3 text-right">Fahrer</th>
                   <th className="px-3 py-3 text-right">Fahrten</th>
-                  <th className="px-3 py-3 text-right">Brutto</th>
-                  <th className="px-3 py-3 text-right">Provision</th>
-                  <th className="px-3 py-3 text-right">Netto</th>
+                  <th className="px-3 py-3 text-right">Fahrtvolumen</th>
+                  <th className="px-3 py-3 text-right">Abo / Monat</th>
                   <th className="px-3 py-3 text-right">★</th>
                 </tr>
               </thead>
@@ -98,20 +109,23 @@ export default function SuperAdminPage() {
                       <p className="text-xs text-ink-500">/c/{c.slug}</p>
                     </td>
                     <td className="px-3 py-3">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-                          c.cityTier === "BIG"
-                            ? "bg-brand-500 text-ink-900"
-                            : "bg-ink-100 text-ink-700"
-                        }`}
-                      >
-                        {c.cityTier === "BIG" ? "Großstadt 7%" : "Klein/Land 5%"}
+                      <span className="rounded-full bg-brand-500 px-2 py-0.5 text-xs font-bold text-ink-900">
+                        {c.plan ?? "P5"}
                       </span>
+                      <p className="mt-1 text-xs text-ink-500">bis {c.planMaxDrivers ?? 5} Fahrer</p>
+                    </td>
+                    <td className="px-3 py-3">
+                      <SubscriptionBadge status={c.subscriptionStatus} />
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      <span className={c.drivers > (c.planMaxDrivers ?? 5) ? "font-extrabold text-red-600" : ""}>
+                        {c.drivers}
+                      </span>
+                      <span className="text-ink-400"> / {c.planMaxDrivers ?? 5}</span>
                     </td>
                     <td className="px-3 py-3 text-right font-semibold">{c.completedTrips}</td>
                     <td className="px-3 py-3 text-right">{formatEuro(c.grossRevenue)}</td>
-                    <td className="px-3 py-3 text-right font-extrabold text-brand-700">{formatEuro(c.platformFee)}</td>
-                    <td className="px-3 py-3 text-right">{formatEuro(c.companyNet)}</td>
+                    <td className="px-3 py-3 text-right font-extrabold text-brand-700">{formatEuro(c.monthlyPrice ?? 0)}</td>
                     <td className="px-3 py-3 text-right">{c.avgRating?.toFixed?.(1) ?? "—"}</td>
                   </tr>
                 ))}
@@ -126,16 +140,39 @@ export default function SuperAdminPage() {
         {/* Preis-Leitplanken + Kassentarif (DTA) */}
         <PlatformConfigCard />
 
-        {/* Sammel-Abrechnung (Phase 5) */}
-        <SuperInvoiceRun />
+        {/*
+          Sammel-Abrechnung und Rechnungs-Archiv sind STILLGELEGT.
 
-        {/* Rechnungs-Archiv + Zahlungsabgleich (Phase 6) */}
-        <SuperInvoiceArchive />
+          Beide rechneten ausschliesslich die Provision pro Fahrt ab. Seit die
+          Provision abgeschafft ist (Einnahmen laufen ueber das Monats-Abo),
+          koennen sie nur noch Rechnungen ueber 0,00 EUR erzeugen – und diese
+          sogar an die Unternehmen versenden. Deshalb sind sie hier entfernt und
+          die zugehoerigen Endpunkte antworten mit einem Hinweis statt zu
+          rechnen.
+
+          Der Code bleibt erhalten, falls die Sammelrechnung spaeter auf die
+          Abo-Gebuehren umgebaut werden soll. Die laufende Abrechnung sehen die
+          Unternehmen unter /admin/abo, die Plattform im Stripe-Dashboard.
+        */}
 
         <Link href="/admin/bewertungen" className="btn-primary w-fit">Alle Bewertungen ansehen</Link>
       </div>
     </main>
   );
+}
+
+// Abo-Status in Klartext. Bei offener Zahlung koennen Unternehmen keine
+// weiteren Fahrer anlegen – das soll hier sofort ins Auge fallen.
+function SubscriptionBadge({ status }: { status?: string | null }) {
+  const s = status ?? "TRIAL";
+  const map: Record<string, { text: string; cls: string }> = {
+    AKTIV: { text: "Aktiv", cls: "bg-green-100 text-green-800" },
+    TRIAL: { text: "Testphase", cls: "bg-ink-100 text-ink-700" },
+    UEBERFAELLIG: { text: "Zahlung offen", cls: "bg-red-100 text-red-700" },
+    GEKUENDIGT: { text: "Gekündigt", cls: "bg-red-100 text-red-700" },
+  };
+  const v = map[s] ?? { text: s, cls: "bg-ink-100 text-ink-700" };
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${v.cls}`}>{v.text}</span>;
 }
 
 const TICKET_CAT: Record<string, string> = {

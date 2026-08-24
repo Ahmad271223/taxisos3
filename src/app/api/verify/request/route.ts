@@ -76,7 +76,12 @@ export async function POST(req: Request) {
   // SMS/E-Mail-Versand (mock) darf der Code NICHT zurückgegeben werden – sonst
   // wäre die Verifizierung trivial umgehbar (Sicherheits-Theater). Läuft die App
   // produktiv ohne Anbieter, sollte REQUIRE_PHONE_VERIFICATION=0 gesetzt werden.
-  const exposeDev = mock && process.env.NODE_ENV !== "production";
+  // Zweite Sicherung: Vergisst ein Deployment NODE_ENV=production, wuerde der
+  // Code sonst an jeden Anrufer gehen. Deshalb zusaetzlich verlangen, dass die
+  // App unter einer lokalen Adresse laeuft.
+  const base = (process.env.APP_BASE_URL ?? "").trim();
+  const lokal = base === "" || /localhost|127\.0\.0\.1|0\.0\.0\.0/.test(base);
+  const exposeDev = mock && process.env.NODE_ENV !== "production" && lokal;
   if (mock && process.env.NODE_ENV === "production") {
     console.warn(`[verify] ${channel}-Versand im Mock-Modus in PRODUKTION – kein Anbieter (Twilio/Resend) konfiguriert. Verifizierung schützt nicht.`);
   }

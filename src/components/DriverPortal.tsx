@@ -30,6 +30,9 @@ export function DriverPortal() {
   const [active, setActive] = useState<any | null>(null);
   const [myScheduled, setMyScheduled] = useState<any[]>([]);
   const [openScheduled, setOpenScheduled] = useState<any[]>([]);
+  // 30-Min-Rückfrage vor einer reservierten Vorbestellung
+  const [confirmAsk, setConfirmAsk] = useState<any | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const [offer, setOffer] = useState<any | null>(null);
   const [remaining, setRemaining] = useState(0);
   const [summary, setSummary] = useState<{ today: { trips: number; revenue: number }; recent: any[] } | null>(null);
@@ -93,12 +96,15 @@ export function DriverPortal() {
       setOffer(null);
       setEmergencyAlert(true);
     };
+    // Rückfrage 30 Min vor einer reservierten Vorbestellung.
+    const onConfirmScheduled = (p: any) => setConfirmAsk(p);
 
     socket.on("driver:state", onState);
     socket.on("driver:offer", onOffer);
     socket.on("driver:offerCancel", onOfferCancel);
     socket.on("driver:booking", onBooking);
     socket.on("driver:emergency", onEmergency);
+    socket.on("driver:confirmScheduled", onConfirmScheduled);
 
     return () => {
       socket.off("driver:state", onState);
@@ -106,6 +112,7 @@ export function DriverPortal() {
       socket.off("driver:offerCancel", onOfferCancel);
       socket.off("driver:booking", onBooking);
       socket.off("driver:emergency", onEmergency);
+      socket.off("driver:confirmScheduled", onConfirmScheduled);
     };
   }, [authState, loadSummary]);
 
@@ -289,6 +296,23 @@ export function DriverPortal() {
   }
   function reserve(bookingId: string) {
     getSocket("driver").emit("driver:reserve", { bookingId });
+  }
+  // Antwort auf die 30-Min-Rückfrage: Ja = behalten, Nein = Storno-Button zeigen.
+  function answerConfirm(bookingId: string, keep: boolean) {
+    setConfirmBusy(true);
+    getSocket("driver").emit("driver:confirmScheduled", { bookingId, keep }, () => {
+      setConfirmBusy(false);
+      setConfirmAsk(null);
+    });
+  }
+  // Endgültige Absage – erst dieser Schritt gibt die Fahrt frei.
+  function cancelScheduled(bookingId: string) {
+    if (!window.confirm("Fahrt wirklich stornieren? Der Kunde wird informiert und wir suchen einen neuen Fahrer.")) return;
+    setConfirmBusy(true);
+    getSocket("driver").emit("driver:cancelScheduled", { bookingId }, () => {
+      setConfirmBusy(false);
+      setConfirmAsk(null);
+    });
   }
   function submitDestChange() {
     if (!active || destAddr.lat == null || destAddr.lng == null) return;
@@ -586,17 +610,87 @@ export function DriverPortal() {
           <ChatPanel bookingId={active.id} me="DRIVER" />
         )}
 
-        {/* Meine Vorbestellungen */}
+        {/* Meine Vorbestellungen (inkl. 30-Min-Rückfrage) */}
         {myScheduled.length > 0 && (
           <div className="card p-5">
             <h2 className="mb-3 font-bold text-ink-900">Meine geplanten Fahrten</h2>
             <div className="grid gap-3">
-              {myScheduled.map((b) => (
-                <div key={b.id} className="rounded-xl bg-ink-50 p-3 text-sm">
-                  <p className="font-semibold">{formatDateTime(b.scheduledAt)}</p>
-                  <p className="text-ink-600">{b.pickupAddress} → {b.destAddress}</p>
-                </div>
-              ))}
+              {myScheduled.map((b) => {
+                const asked = !!b.driverConfirmAskedAt;
+                const declined = !!b.driverDeclinedAt;
+                const confirmed = !!b.driverConfirmedAt;
+                // Rückfrage offen: gestellt, aber noch nicht beantwortet.
+                const open = asked && !declined && !confirmed;
+                return (
+                  <div
+                    key={b.id}
+                    data-testid={`scheduled-${b.id}`}
+                    className={`rounded-xl p-3 text-sm ${
+                      open ? "border-2 border-brand-500 bg-brand-50" : declined ? "border-2 border-red-200 bg-red-50" : "bg-ink-50"
+                    }`}
+                  >
+                    <p className="font-semibold">{formatDateTime(b.scheduledAt)}</p>
+                    <p className="text-ink-600">
+                      {b.pickupAddress} → {b.destAddress}
+                    </p>
+
+                    {open && (
+                      <div className="mt-3" data-testid="confirm-ask">
+                        <p className="font-bold text-ink-900">Möchtest du diese Fahrt weiterhin durchführen?</p>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            disabled={confirmBusy}
+                            data-testid="confirm-yes"
+                            onClick={() => answerConfirm(b.id, true)}
+                            className="rounded-xl bg-green-600 px-4 py-2 font-bold text-white transition hover:bg-green-700 disabled:opacity-60"
+                          >
+                            Ja
+                          </button>
+                          <button
+                            type="button"
+                            disabled={confirmBusy}
+                            data-testid="confirm-no"
+                            onClick={() => answerConfirm(b.id, false)}
+                            className="rounded-xl border-2 border-ink-300 px-4 py-2 font-bold text-ink-800 transition hover:bg-ink-100 disabled:opacity-60"
+                          >
+                            Nein
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {confirmed && (
+                      <p className="mt-2 font-semibold text-green-700" data-testid="confirm-done">
+                        ✓ Zugesagt – die Fahrt bleibt bei dir.
+                      </p>
+                    )}
+
+                    {declined && (
+                      <div className="mt-3" data-testid="cancel-block">
+                        <p className="font-semibold text-red-700">Du hast abgelehnt. Fahrt jetzt endgültig stornieren?</p>
+                        <button
+                          type="button"
+                          disabled={confirmBusy}
+                          data-testid="cancel-scheduled"
+                          onClick={() => cancelScheduled(b.id)}
+                          className="mt-2 w-full rounded-xl bg-red-600 px-4 py-2.5 font-extrabold text-white transition hover:bg-red-700 disabled:opacity-60"
+                        >
+                          Fahrt stornieren
+                        </button>
+                        <button
+                          type="button"
+                          disabled={confirmBusy}
+                          onClick={() => answerConfirm(b.id, true)}
+                          className="mt-2 w-full rounded-xl border border-ink-300 px-4 py-2 text-sm font-bold text-ink-700 transition hover:bg-ink-100 disabled:opacity-60"
+                        >
+                          Doch behalten
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

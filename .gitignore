@@ -30,3 +30,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Test-Zugaenge: enthalten Passwoerter, gehoeren nicht ins Repository.
+memory/test_credentials.md
+
+# Zwischenstand aus Testlaeufen (enthaelt Sitzungs-Token).
+scripts/qa/.freeze_state.json

@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const booking = await prisma.booking.findFirst({
     where: bookingRefWhere(params.id),
-    include: { driver: true, signature: { select: { signedAt: true } } },
+    include: { driver: true, card: true, signature: { select: { signedAt: true } } },
   });
   if (!booking) {
     return NextResponse.json({ error: "Auftrag nicht gefunden" }, { status: 404 });

@@ -35,6 +35,54 @@ export function TrackingView({ id }: { id: string }) {
   const [sosRescue, setSosRescue] = useState<any | null>(null);
   const [sigOpen, setSigOpen] = useState(false);
   const [sigBusy, setSigBusy] = useState(false);
+  // Trinkgeld-Auswahl NACH Fahrtende (-1 = eigener Betrag)
+  const [tipPercent, setTipPercent] = useState<number>(0);
+  const [customTip, setCustomTip] = useState("");
+  const [tipBusy, setTipBusy] = useState(false);
+  const [tipError, setTipError] = useState<string | null>(null);
+  const [payCards, setPayCards] = useState<any[]>([]);
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+
+  // Endgueltige Zahlung nach Fahrtende: Fahrpreis + gewaehltes Trinkgeld.
+  // `amount = 0` bedeutet ausdruecklich "ohne Trinkgeld bezahlen".
+  async function payNow(amount: number, cardId?: string) {
+    setTipBusy(true);
+    setTipError(null);
+    try {
+      const res = await fetch(`/api/bookings/${id}/pay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tip: amount, ...(cardId ? { cardId } : {}) }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        // Waehrend der Fahrt bedeutet Erfolg nur: die neue Karte ist bestaetigt.
+        // Bezahlt wird weiterhin erst nach Fahrtende.
+        const neu = d.paymentStatus ?? "BEZAHLT";
+        setBooking((b: any) =>
+          b
+            ? {
+                ...b,
+                paymentStatus: neu,
+                ...(neu === "BEZAHLT" ? { tip: d.tip ?? amount } : {}),
+                paymentError: null,
+              }
+            : b,
+        );
+        setPayCards([]);
+      } else {
+        setTipError(d.error ?? "Die Zahlung konnte nicht durchgeführt werden.");
+        if (Array.isArray(d.cards)) setPayCards(d.cards);
+        if (d.paymentStatus) {
+          setBooking((b: any) => (b ? { ...b, paymentStatus: d.paymentStatus, paymentError: d.detail ?? d.error } : b));
+        }
+      }
+    } catch {
+      setTipError("Netzwerkfehler – bitte erneut versuchen.");
+    } finally {
+      setTipBusy(false);
+    }
+  }
 
   // Fahrtnachweis: Unterschrift + GPS speichern.
   async function submitSignature(dataUrl: string, name: string) {
@@ -173,14 +221,22 @@ export function TrackingView({ id }: { id: string }) {
     const onDriverLoc = (p: { bookingId: string; lat: number; lng: number }) => {
       if (p.bookingId === id) setDriverLoc({ lat: p.lat, lng: p.lng });
     };
+    // Die Ankunftszeit kommt waehrend der Anfahrt laufend nach, damit sie sich
+    // mit dem Wagen mitbewegt statt beim Wert der Annahme stehen zu bleiben.
+    const onEta = (p: { bookingId: string; etaSeconds: number }) => {
+      if (p.bookingId !== id) return;
+      setBooking((b: any) => (b ? { ...b, etaSeconds: p.etaSeconds } : b));
+    };
     socket.on("booking:update", onUpdate);
     socket.on("booking:driverLocation", onDriverLoc);
+    socket.on("booking:eta", onEta);
     socket.on("connect", () => socket.emit("track:join", { bookingId: id }));
 
     return () => {
       mounted = false;
       socket.off("booking:update", onUpdate);
       socket.off("booking:driverLocation", onDriverLoc);
+      socket.off("booking:eta", onEta);
     };
   }, [id]);
 
@@ -204,6 +260,55 @@ export function TrackingView({ id }: { id: string }) {
     }, 6000);
     return () => clearInterval(iv);
   }, [id, booking?.trackingStatus, notFound]);
+
+  // Countdown des Trinkgeld-Fensters. Laeuft es ab, rechnet der Server
+  // automatisch ohne Trinkgeld ab – die Anzeige holt sich dann den neuen Stand.
+  useEffect(() => {
+    const promptedAt = booking?.tipPromptedAt ? new Date(booking.tipPromptedAt).getTime() : null;
+    if (!promptedAt || booking?.paymentStatus !== "KARTE_HINTERLEGT") {
+      setSecondsLeft(null);
+      return;
+    }
+    let stopped = false;
+    const tick = () => {
+      if (stopped) return;
+      // Fensterlaenge kommt vom Server (Standard 120 s).
+      const windowMs = (booking?.tipWindowSeconds ?? 120) * 1000;
+      const left = Math.max(0, Math.round((promptedAt + windowMs - Date.now()) / 1000));
+      setSecondsLeft(left);
+      if (left === 0) {
+        // Automatische Abrechnung abwarten und Stand neu laden.
+        setTimeout(() => {
+          fetch(`/api/bookings/${id}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => d?.booking && setBooking(d.booking))
+            .catch(() => {});
+        }, 3000);
+      }
+    };
+    tick();
+    const iv = setInterval(tick, 1000);
+    return () => {
+      stopped = true;
+      clearInterval(iv);
+    };
+  }, [id, booking?.tipPromptedAt, booking?.paymentStatus, booking?.tipWindowSeconds]);
+
+  // Bei einem Zahlungsproblem die anderen Karten des Kunden nachladen, damit er
+  // sofort wechseln kann – auch schon waehrend der Fahrt.
+  useEffect(() => {
+    if (booking?.paymentStatus !== "FEHLGESCHLAGEN") return;
+    let cancelled = false;
+    fetch(`/api/bookings/${id}/pay`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && Array.isArray(d?.cards)) setPayCards(d.cards);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [booking?.paymentStatus, id]);
 
   useEffect(() => {
     if (!booking) return;
@@ -278,6 +383,25 @@ export function TrackingView({ id }: { id: string }) {
   const chatOpen = !!booking.driver && !["BEENDET", "STORNIERT"].includes(status);
   const platformPhone = process.env.NEXT_PUBLIC_PLATFORM_PHONE;
 
+  // Trinkgeld-Basis ist der endgueltige Fahrpreis (steht erst nach Fahrtende fest).
+  const tipBase = booking.fare ?? booking.priceExact ?? 0;
+  const effectiveTip =
+    tipPercent === -1
+      ? Math.max(0, Math.round((Number(customTip.replace(",", ".")) || 0) * 100) / 100)
+      : Math.round(((tipBase * tipPercent) / 100) * 100) / 100;
+  const tipTotal = Math.round((tipBase + effectiveTip) * 100) / 100;
+  // Trinkgeld gibt es AUSSCHLIESSLICH nach Fahrtende und AUSSCHLIESSLICH bei
+  // Kartenzahlung. Waehrend Suche, Anfahrt und Fahrt erscheint es nie – bei
+  // Barzahlung ueberhaupt nicht (dort wird direkt beim Fahrer gezahlt).
+  const canTip = isCard && status === "BEENDET" && booking.paymentStatus === "KARTE_HINTERLEGT";
+  const paymentFailed = isCard && booking.paymentStatus === "FEHLGESCHLAGEN";
+  // Schlaegt die Deckungspruefung beim Fahrtstart fehl, erscheint dieselbe Box
+  // schon WAEHREND der Fahrt – dann steht aber noch kein Betrag offen, und der
+  // Kunde soll die Karte in Ruhe wechseln koennen, bevor die Fahrt endet.
+  const paymentFailedBeforeEnd = paymentFailed && status !== "BEENDET";
+  const finalFare = booking.fare ?? booking.priceExact ?? booking.priceMax ?? 0;
+  const finalTip = booking.tip ?? 0;
+
   return (
     <main className="min-h-screen bg-ink-50">
       <header className="sticky top-0 z-10 border-b border-ink-100 bg-white/95 backdrop-blur">
@@ -330,19 +454,46 @@ export function TrackingView({ id }: { id: string }) {
           )}
         </div>
 
-        {/* Plattform-Hotline bei fehlendem Fahrer (Phase 3j) */}
-        {noDriver && platformPhone && (
-          <a
-            href={`tel:${platformPhone}`}
-            data-testid="platform-hotline"
-            className="card flex items-center justify-between gap-3 p-4 transition hover:bg-ink-50"
-          >
-            <div className="text-sm text-ink-600">
-              <p className="font-semibold text-ink-900">Lieber telefonisch buchen?</p>
-              <p>Unsere Zentrale hilft Ihnen sofort weiter.</p>
-            </div>
-            <span className="shrink-0 rounded-xl bg-ink-900 px-4 py-2 text-sm font-bold text-white">{platformPhone}</span>
-          </a>
+        {/* Suche nach 3 Minuten erfolglos beendet: neue Anfrage oder Zentrale anrufen */}
+        {noDriver && (
+          <div className="card p-5" data-testid="no-driver-card">
+            <p className="font-display text-lg font-extrabold text-ink-900">
+              Wir konnten gerade keinen freien Fahrer finden
+            </p>
+            <p className="mt-1 text-sm text-ink-600">
+              Die Suche wurde nach 3 Minuten beendet. Stellen Sie einfach eine neue Anfrage – oder rufen Sie
+              unsere Zentrale an, die einen Fahrer direkt für Sie beauftragt.
+            </p>
+
+            {platformPhone && (
+              <a
+                href={`tel:${platformPhone.replace(/[^\d+]/g, "")}`}
+                data-testid="platform-hotline"
+                className="mt-4 flex items-center gap-4 rounded-2xl bg-ink-900 p-4 text-white transition hover:bg-ink-800"
+              >
+                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-brand-500 text-ink-900">
+                  <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" aria-hidden="true">
+                    <path
+                      d="M5 4h3l2 5-2.5 1.5a11 11 0 0 0 6 6L15 14l5 2v3a2 2 0 0 1-2 2A15 15 0 0 1 3 6a2 2 0 0 1 2-2Z"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </span>
+                <span className="flex-1">
+                  <span className="block text-xs font-semibold uppercase tracking-wider text-brand-500">
+                    Taxi-Zentrale anrufen
+                  </span>
+                  <span className="block font-display text-2xl font-extrabold leading-tight">{platformPhone}</span>
+                </span>
+              </a>
+            )}
+
+            <Link href="/buchen" data-testid="new-request" className="btn-primary mt-3 w-full justify-center">
+              Neue Anfrage stellen
+            </Link>
+          </div>
         )}
 
         {/* Stornierung (Kunde) */}
@@ -538,7 +689,12 @@ export function TrackingView({ id }: { id: string }) {
             <h2 className="mt-2 text-xl font-extrabold text-ink-900">Vielen Dank!</h2>
             <p className="text-ink-600">Ihre Fahrt ist beendet.</p>
             <p className="mt-4 eyebrow text-ink-400">Gesamtpreis</p>
-            <p className="text-3xl font-extrabold text-ink-900" data-testid="final-fare">{formatEuro(booking.fare ?? booking.priceExact ?? booking.priceMax)}</p>
+            <p className="text-3xl font-extrabold text-ink-900" data-testid="final-fare">{formatEuro(finalFare + finalTip)}</p>
+            {finalTip > 0 && (
+              <p className="mt-1 text-sm text-ink-500" data-testid="final-tip-breakdown">
+                {formatEuro(finalFare)} Fahrpreis + {formatEuro(finalTip)} Trinkgeld
+              </p>
+            )}
             {booking.rating || ratedDone ? (
               <p className="mt-4 font-semibold text-green-600">Danke für Ihre Bewertung! ⭐</p>
             ) : (
@@ -659,6 +815,186 @@ export function TrackingView({ id }: { id: string }) {
         {/* Zahlung (Phase 2g) */}
         <div className="card p-5" data-testid="payment-card">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink-500">Zahlung</h2>
+
+          {/* Trinkgeld-Auswahl - NUR nach Fahrtende und NUR bei Kartenzahlung */}
+          {canTip && (
+            <div className="mb-4 rounded-2xl bg-ink-50 p-4" data-testid="tip-selector">
+              <div className="text-center">
+                <p className="eyebrow text-ink-400">Fahrpreis</p>
+                <p className="font-display text-3xl font-extrabold text-ink-900" data-testid="tip-fare">
+                  {formatEuro(tipBase)}
+                </p>
+              </div>
+
+              <p className="mt-4 text-center font-semibold text-ink-900">
+                Möchten Sie Ihrem Fahrer Trinkgeld geben?
+              </p>
+
+              <div className="mt-3 grid grid-cols-5 gap-1.5">
+                {[0, 5, 10, 15, 20].map((p) => {
+                  const active = tipPercent === p;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      data-testid={`tip-${p}`}
+                      onClick={() => {
+                        setTipPercent(p);
+                        setCustomTip("");
+                        setTipError(null);
+                      }}
+                      className={`rounded-xl border px-1 py-2 text-center transition ${
+                        active
+                          ? "border-brand-500 bg-brand-500 text-ink-900"
+                          : "border-ink-200 bg-white text-ink-700 hover:border-brand-300"
+                      }`}
+                    >
+                      <span className="block text-sm font-extrabold leading-tight">
+                        {p === 0 ? "Kein" : `${p} %`}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Eigener Betrag */}
+              <div className="mt-2 flex items-center gap-2 rounded-xl border border-ink-200 bg-white px-3 py-2">
+                <label htmlFor="custom-tip" className="whitespace-nowrap text-sm font-semibold text-ink-700">
+                  Eigener Betrag
+                </label>
+                <input
+                  id="custom-tip"
+                  data-testid="tip-custom"
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  value={customTip}
+                  onChange={(e) => {
+                    setCustomTip(e.target.value);
+                    setTipPercent(-1);
+                    setTipError(null);
+                  }}
+                  className="w-full min-w-0 flex-1 border-0 bg-transparent text-right font-semibold text-ink-900 outline-none"
+                />
+                <span className="text-sm font-semibold text-ink-500">€</span>
+              </div>
+
+              <div className="mt-4 border-t border-ink-200 pt-3 text-center">
+                <p className="text-xs text-ink-500">
+                  {formatEuro(tipBase)} Fahrpreis
+                  {effectiveTip > 0 && <> + {formatEuro(effectiveTip)} Trinkgeld</>}
+                </p>
+                <p className="font-display text-2xl font-extrabold text-ink-900" data-testid="tip-total">
+                  {formatEuro(tipTotal)}
+                </p>
+              </div>
+
+              {tipError && (
+                <p className="mt-2 text-xs font-bold text-red-600" data-testid="tip-error">
+                  {tipError}
+                </p>
+              )}
+
+              <button
+                type="button"
+                onClick={() => payNow(effectiveTip)}
+                disabled={tipBusy}
+                data-testid="pay-now"
+                className="btn-primary mt-3 w-full justify-center disabled:opacity-60"
+              >
+                {tipBusy ? "Zahlung läuft …" : `Jetzt ${formatEuro(tipTotal)} bezahlen`}
+              </button>
+
+              {/* Ohne Trinkgeld muss IMMER deutlich moeglich sein */}
+              {effectiveTip > 0 && (
+                <button
+                  type="button"
+                  onClick={() => payNow(0)}
+                  disabled={tipBusy}
+                  data-testid="pay-without-tip"
+                  className="mt-2 w-full rounded-xl border border-ink-300 px-4 py-2.5 text-sm font-bold text-ink-700 transition hover:bg-ink-100 disabled:opacity-60"
+                >
+                  Ohne Trinkgeld bezahlen ({formatEuro(tipBase)})
+                </button>
+              )}
+
+              {secondsLeft != null && (
+                <p className="mt-2 text-center text-[11px] text-ink-400" data-testid="tip-countdown">
+                  {secondsLeft > 0
+                    ? `Ohne Auswahl wird in ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")} Min. automatisch der Fahrpreis ohne Trinkgeld abgebucht.`
+                    : "Der Fahrpreis wird jetzt automatisch abgebucht …"}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Zahlung fehlgeschlagen: andere Karte waehlen oder erneut versuchen */}
+          {paymentFailed && (
+            <div className="mb-4 rounded-2xl border-2 border-red-200 bg-red-50 p-4" data-testid="payment-failed">
+              <p className="font-bold text-red-700">
+                {paymentFailedBeforeEnd
+                  ? "Ihre Karte konnte nicht bestätigt werden."
+                  : "Die Zahlung für Ihre Fahrt konnte nicht durchgeführt werden."}
+              </p>
+              <p className="mt-1 text-sm text-ink-700">
+                {booking.paymentError ?? "Bitte aktualisieren Sie Ihre Zahlungsmethode."}
+              </p>
+              {paymentFailedBeforeEnd ? (
+                <p className="mt-2 text-sm font-semibold text-ink-900">
+                  Es wurde noch nichts abgebucht. Bitte wählen Sie jetzt eine andere Karte – sonst
+                  zahlen Sie am Ende bitte bar beim Fahrer.
+                </p>
+              ) : (
+                <p className="mt-2 text-sm font-semibold text-ink-900">
+                  Offener Betrag: {formatEuro((booking.fare ?? 0) + (booking.tip ?? 0))}
+                </p>
+              )}
+
+              {payCards.length > 0 && (
+                <div className="mt-3 grid gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-500">Andere Karte verwenden</p>
+                  {payCards.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      disabled={tipBusy || c.expired}
+                      data-testid={`retry-card-${c.id}`}
+                      onClick={() => payNow(booking.tip ?? 0, c.id)}
+                      className="flex items-center justify-between rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm font-semibold text-ink-800 transition hover:border-brand-400 disabled:opacity-50"
+                    >
+                      <span>
+                        {c.brand} •••• {c.last4}
+                      </span>
+                      <span className="text-xs text-ink-500">{c.expired ? "abgelaufen" : "verwenden"}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className={`mt-3 grid gap-2 ${paymentFailedBeforeEnd ? "" : "sm:grid-cols-2"}`}>
+                {/* Waehrend der Fahrt gibt es nichts zu bezahlen – nur zu klaeren. */}
+                {!paymentFailedBeforeEnd && (
+                  <button
+                    type="button"
+                    onClick={() => payNow(booking.tip ?? 0)}
+                    disabled={tipBusy}
+                    data-testid="payment-retry"
+                    className="btn-primary justify-center disabled:opacity-60"
+                  >
+                    {tipBusy ? "Zahlung läuft …" : "Zahlung erneut versuchen"}
+                  </button>
+                )}
+                <Link href="/konto?tab=payment" className="btn-ghost justify-center text-center">
+                  Neue Karte hinzufügen
+                </Link>
+              </div>
+              {tipError && (
+                <p className="mt-2 text-xs font-bold text-red-700" data-testid="tip-error">
+                  {tipError}
+                </p>
+              )}
+            </div>
+          )}
+
           {booking.paymentMethod === "FIRMA" ? (
             <div className="flex items-center justify-between gap-3 text-sm">
               <span className="text-ink-600">Firmenmobilität{booking.corporatePayer ? ` · ${booking.corporatePayer}` : ""}</span>
@@ -682,7 +1018,7 @@ export function TrackingView({ id }: { id: string }) {
                   className={`rounded-full px-2 py-0.5 text-xs font-extrabold ${
                     booking.paymentStatus === "BEZAHLT"
                       ? "bg-green-100 text-green-800"
-                      : booking.paymentStatus === "AUTORISIERT"
+                      : booking.paymentStatus === "KARTE_HINTERLEGT"
                       ? "bg-brand-100 text-ink-900"
                       : booking.paymentStatus === "FEHLGESCHLAGEN"
                       ? "bg-red-100 text-red-700"
@@ -691,31 +1027,35 @@ export function TrackingView({ id }: { id: string }) {
                 >
                   {(
                     {
-                      AUTORISIERT: "Autorisiert",
+                      KARTE_HINTERLEGT: status === "BEENDET" ? "Zahlung offen" : "Karte hinterlegt",
                       BEZAHLT: "Bezahlt",
-                      FEHLGESCHLAGEN: "Fehlgeschlagen",
+                      FEHLGESCHLAGEN: "Zahlung ausstehend",
                       STORNIERT: "Freigegeben",
                       OFFEN: "Offen",
                     } as Record<string, string>
                   )[booking.paymentStatus as string] ?? booking.paymentStatus}
                 </span>
               </div>
-              {booking.paymentStatus === "AUTORISIERT" && (
+
+              {booking.card && (
+                <div className="flex items-center justify-between text-xs text-ink-500">
+                  <span>Zahlungsmittel</span>
+                  <span className="font-semibold text-ink-800">
+                    {booking.card.brand} •••• {booking.card.last4}
+                  </span>
+                </div>
+              )}
+
+              {booking.paymentStatus === "KARTE_HINTERLEGT" && status !== "BEENDET" && (
                 <p className="rounded-xl bg-brand-50 px-3 py-2 text-xs font-semibold text-ink-700">
-                  {booking.priceAuthorized != null
-                    ? `${formatEuro(booking.priceAuthorized)} auf Ihrer Karte reserviert. `
-                    : "Betrag auf Ihrer Karte reserviert. "}
-                  Die endgültige Belastung erfolgt erst nach Fahrtende.
+                  Ihre Karte ist hinterlegt. Es wird <b>nichts reserviert</b> und <b>nichts abgebucht</b> –
+                  bezahlt wird erst nach Ende der Fahrt.
                 </p>
               )}
               {booking.paymentStatus === "BEZAHLT" && (
                 <p className="rounded-xl bg-green-50 px-3 py-2 text-xs font-semibold text-green-800">
-                  {formatEuro(booking.fare ?? booking.priceExact)} wurden Ihrer Karte belastet.
-                </p>
-              )}
-              {booking.paymentStatus === "FEHLGESCHLAGEN" && (
-                <p className="rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
-                  Kartenzahlung fehlgeschlagen – bitte begleichen Sie den Betrag bar beim Fahrer.
+                  {formatEuro((booking.fare ?? booking.priceExact ?? 0) + (booking.tip ?? 0))} wurden Ihrer Karte belastet.
+                  {(booking.tip ?? 0) > 0 && ` (inkl. ${formatEuro(booking.tip)} Trinkgeld)`}
                 </p>
               )}
             </div>

@@ -4,19 +4,21 @@ import { prisma } from "@/lib/prisma";
 import { estimatePriceViaWith } from "@/lib/geo";
 import { pricingForSlug, classFactorForSlug, applyClassFactor } from "@/lib/pricing";
 import { normalizeClass } from "@/lib/vehicleClasses";
-import { airportPickupTime } from "@/lib/flights";
+import { airportPickupTime, lookupFlight } from "@/lib/flights";
 import { meetGreetFee } from "@/lib/airportExtras";
 import { promoUsable, promoDiscountAmount } from "@/lib/promo";
 import { normalizeCorporateCode, corporateUsable, corporateReasonText } from "@/lib/corporate";
 import { fixedPriceRange } from "@/lib/fixedPrice";
 import { normalizeMedicalType, medicalDetailsSchema, medicalDetailsData } from "@/lib/medical";
 import { serializeStops } from "@/lib/stops";
-import { authorizePayment, paymentEnabled, retrieveIntent } from "@/lib/stripe";
+import { paymentEnabled } from "@/lib/stripe";
+import { checkBookingPreconditions } from "@/lib/bookingGuard";
 import { normalizeTarget, phoneVerificationRequired, verifyVerifyToken } from "@/lib/verify";
 import { getPlatformRate, approxFare } from "@/lib/platformRate";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { getSession } from "@/lib/session";
 import { getDispatcher } from "@/server/runtime";
+import { sendSms } from "@/lib/notify";
 import { bookingDTO } from "@/server/serialize";
 
 export const dynamic = "force-dynamic";
@@ -68,8 +70,9 @@ const schema = z.object({
   paymentMethod: z.enum(["CASH", "CARD"]).optional(),
   // Nachweis der Gast-Telefon-Verifizierung (Phase 3h).
   verificationToken: z.string().optional().nullable(),
-  // Vom Client autorisierter Stripe-PaymentIntent (Phase, echte Kartenzahlung).
-  paymentIntentId: z.string().optional().nullable(),
+  // Gespeicherte Karte, die fuer DIESE Fahrt verwendet werden soll.
+  // Ohne Angabe gilt die Standardkarte des Kundenkontos.
+  cardId: z.string().optional().nullable(),
 });
 
 export async function POST(req: Request) {
@@ -109,6 +112,7 @@ export async function POST(req: Request) {
 
   // Gast-Telefon-Verifizierung (Phase 3h): vor Dispatch verpflichtend (außer
   // der eingeloggte Kunde bucht mit seiner bereits bestätigten Kontonummer).
+  let verifiedByToken = false;
   if (phoneVerificationRequired() && !phoneAlreadyVerified) {
     const expected = normalizeTarget("SMS", d.customerPhone);
     const proof = verifyVerifyToken(d.verificationToken, { channel: "SMS", target: expected });
@@ -118,6 +122,7 @@ export async function POST(req: Request) {
         { status: 403 },
       );
     }
+    verifiedByToken = true;
   }
 
   // Optional: Plattform-Buchung ohne Firma (Standard).
@@ -206,47 +211,65 @@ export async function POST(req: Request) {
 
   // Flughafen-Modul (Phase 14): bei ANKUNFT ergibt sich die Abholzeit aus der
   // geplanten Landung + Verspätung + Gepäckpuffer. Sonst gilt die gewählte Zeit.
-  const flightScheduledAt = d.flightScheduledAt ? new Date(d.flightScheduledAt) : null;
-  const flightDelayMinutes = d.flightDelayMinutes ?? 0;
+  // WICHTIG: Landezeit und Verspaetung NICHT ungeprueft vom Client uebernehmen –
+  // sonst liesse sich die Abholzeit beliebig verschieben. Ist eine Flugnummer
+  // angegeben, fragt der Server die Flugdaten selbst ab und rechnet damit.
+  let flightScheduledAt = d.flightScheduledAt ? new Date(d.flightScheduledAt) : null;
+  let flightDelayMinutes = d.flightDelayMinutes ?? 0;
+  let flightStatusServer = d.flightStatus ?? null;
+  let terminalServer = d.terminal ?? null;
+  if (d.flightNumber && d.flightDirection) {
+    try {
+      const info = await lookupFlight(d.flightNumber, d.flightDirection);
+      // Demo-Daten (kein Flugdaten-Zugang) im Echtbetrieb nicht als echte
+      // Landezeit uebernehmen – sonst richtet sich die Abholzeit nach einer
+      // erfundenen Verspaetung.
+      const brauchbar = info?.source !== "mock" || process.env.NODE_ENV !== "production";
+      if (info?.scheduledAt && brauchbar) {
+        flightScheduledAt = new Date(info.scheduledAt);
+        flightDelayMinutes = info.delayMinutes ?? 0;
+        flightStatusServer = info.status;
+        terminalServer = info.terminal ?? terminalServer;
+      }
+    } catch {
+      /* Anbieter nicht erreichbar -> Clientwerte als Naeherung behalten */
+    }
+  }
+  // Annullierter Flug: Fahrt nicht stillschweigend anlegen.
+  if (flightStatusServer === "CANCELLED") {
+    return NextResponse.json(
+      { error: "Dieser Flug wurde annulliert. Bitte buchen Sie die Fahrt zu einem anderen Zeitpunkt.", code: "FLIGHT_CANCELLED" },
+      { status: 409 },
+    );
+  }
   let scheduledAt = d.scheduledAt ? new Date(d.scheduledAt) : null;
   if (d.flightDirection === "ARRIVAL" && flightScheduledAt) {
     scheduledAt = airportPickupTime(flightScheduledAt, "ARRIVAL", flightDelayMinutes);
   }
   const isScheduled = !!scheduledAt && scheduledAt.getTime() > Date.now() + 60_000;
 
-  // Kartenzahlung (Authorize-then-Capture). Belastet wird erst nach Fahrtende.
-  // Firmen-Code aktiv -> Zahlart FIRMA (Firmenkonto deckt die Fahrt, kein Karten-Hold).
+  // ---- Zahlungsart pruefen (Punkt 1 des Zahlungsablaufs) -------------------
+  // Bar und Karte sind strikt getrennt. Bei Karte wird NICHTS reserviert und
+  // NICHTS abgebucht – es wird nur geprueft, dass eine gueltige Karte im Konto
+  // hinterlegt ist. Die Belastung erfolgt erst nach Fahrtende.
   const paymentMethod = corporateActive ? "FIRMA" : (d.paymentMethod ?? "CASH");
-  let paymentStatus = corporateActive ? "FIRMA" : "OFFEN";
-  let paymentRef: string | null = null;
-  let priceAuthorized: number | null = null;
-  if (paymentMethod === "CARD") {
-    if (paymentEnabled()) {
-      // Echter Stripe-Modus: der Client hat den PaymentIntent bereits mit der
-      // Karte autorisiert -> serverseitig verifizieren (Status requires_capture).
-      if (!d.paymentIntentId) {
-        return NextResponse.json({ error: "Kartenzahlung nicht autorisiert.", code: "PAYMENT_REQUIRED" }, { status: 402 });
-      }
-      const pi = await retrieveIntent(d.paymentIntentId);
-      const okHold = pi && pi.status === "requires_capture";
-      const enough = pi && pi.amount >= Math.round((priceMin ?? 0) * 100);
-      if (!okHold || !enough) {
-        return NextResponse.json(
-          { error: "Kartenautorisierung ungültig oder unzureichend.", code: "PAYMENT_INVALID" },
-          { status: 402 },
-        );
-      }
-      paymentRef = pi.id;
-      priceAuthorized = Math.round((pi.amount / 100) * 100) / 100;
-      paymentStatus = "AUTORISIERT";
-    } else {
-      // Mock (kein Stripe-Key): wie bisher, damit lokaler Flow/Tests laufen.
-      const auth = await authorizePayment(priceMax, { kind: "taxi_ride" });
-      paymentStatus = auth.status;
-      paymentRef = auth.ref;
-      if (auth.ok) priceAuthorized = priceMax;
-    }
+  const guard = await checkBookingPreconditions({
+    paymentMethod: paymentMethod as any,
+    customerId,
+    phoneVerified: !phoneVerificationRequired() || phoneAlreadyVerified || verifiedByToken,
+    requestedCardId: d.cardId,
+  });
+  if (!guard.ok) {
+    return NextResponse.json({ error: guard.error, code: guard.code }, { status: guard.status });
   }
+
+  //  CASH  -> OFFEN            (Kunde zahlt bar beim Fahrer, kein Trinkgeld-Dialog)
+  //  CARD  -> KARTE_HINTERLEGT (Karte vorgemerkt, Abbuchung nach Fahrtende)
+  //  FIRMA -> FIRMA            (Firmenkonto uebernimmt)
+  const paymentStatus = corporateActive ? "FIRMA" : paymentMethod === "CARD" ? "KARTE_HINTERLEGT" : "OFFEN";
+  const cardId = guard.card?.id ?? null;
+  const paymentRef: string | null = null;
+  const priceAuthorized: number | null = null;
 
   const booking = await prisma.booking.create({
     data: {
@@ -279,8 +302,9 @@ export async function POST(req: Request) {
       scheduledAt,
       flightNumber: d.flightNumber ?? null,
       flightDirection: d.flightDirection ?? null,
-      terminal: d.terminal ?? null,
-      flightStatus: d.flightStatus ?? null,
+      // serverseitig verifizierte Flugdaten (nicht die Clientwerte)
+      terminal: terminalServer,
+      flightStatus: flightStatusServer,
       flightScheduledAt,
       flightDelayMinutes,
       meetGreet: d.meetGreet ?? null,
@@ -299,6 +323,7 @@ export async function POST(req: Request) {
       paymentStatus,
       paymentRef,
       priceAuthorized,
+      cardId,
     },
   });
 
@@ -311,6 +336,21 @@ export async function POST(req: Request) {
 
   if (!isScheduled) {
     getDispatcher()?.dispatchBooking(booking.id).catch(() => {});
+  }
+
+  // Buchungsbestaetigung per SMS inkl. Tracking-Link. Genau EINE pro Buchung
+  // (dedupeKey), damit ein Client-Retry keine zweite SMS ausloest.
+  {
+    const base = (process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
+    const link = `${base}/verfolgen/${booking.trackingToken ?? booking.id}`;
+    const when = isScheduled && booking.scheduledAt
+      ? ` für ${new Date(booking.scheduledAt).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} Uhr`
+      : "";
+    sendSms(
+      booking.customerPhone,
+      `Ihre Taxifahrt${when} ist bestätigt. Status verfolgen: ${link}`,
+      { dedupeKey: `booking-confirmed:${booking.id}`, kind: "BOOKING_CONFIRMED", bookingId: booking.id },
+    ).catch(() => {});
   }
 
   // Automatische Rückfahrt (Phase B): zweite, geplante Buchung mit vertauschter

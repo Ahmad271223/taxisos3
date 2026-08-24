@@ -76,7 +76,8 @@ async function main() {
     check("status FREI", mine.status === "FREI", mine.status);
     check("seats present", mine.vehicleSeats === 7, mine.vehicleSeats);
     check("luggage present", mine.luggage > 0, mine.luggage);
-    check("car details", mine.vehiclePlate === "H-LV 1" && !!mine.vehicleModel, mine);
+    // Oeffentliche Karte: Fahrzeugdaten ja, Kennzeichen NEIN (Datenschutz, siehe api/taxis/live).
+  check("car details (Modell sichtbar, Kennzeichen verborgen)", mine.vehiclePlate === null && !!mine.vehicleModel, mine);
   }
   check("available count >= 1", (live.body.available || 0) >= 1, live.body.available);
 

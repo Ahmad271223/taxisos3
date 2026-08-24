@@ -1,10 +1,19 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
+import { monthlyPriceFor, getPlan } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
 
-/** Plattform-weite Statistik fuer den Super-Admin. */
+/**
+ * Plattform-weite Statistik fuer den Super-Admin.
+ *
+ * WICHTIG: Die Plattform verdient NICHTS an einzelnen Fahrten – die Provision
+ * ist abgeschafft. Einnahmen entstehen ausschliesslich ueber das Monats-Abo der
+ * Unternehmen. Frueher stand hier "Vermittlungseinnahmen" auf Basis von
+ * `platformFee`; das ist seither konstant 0 und wurde durch die tatsaechlichen
+ * Abo-Einnahmen ersetzt.
+ */
 export async function GET() {
   const session = requireRole("SUPER_ADMIN");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
@@ -58,9 +67,18 @@ export async function GET() {
       ratings,
       completedTrips: completed,
       cancellations30d: cancelled30d,
+      // Fahrtvolumen, das ueber die Plattform laeuft (geht vollstaendig an die
+      // Unternehmen – die Plattform behaelt davon nichts).
       grossRevenue: Math.round((platformAgg._sum.fare ?? 0) * 100) / 100,
-      platformFee: Math.round((platformAgg._sum.platformFee ?? 0) * 100) / 100,
-      companyNet: Math.round((platformAgg._sum.companyNet ?? 0) * 100) / 100,
+      // Wiederkehrende Abo-Einnahmen pro Monat, nur aktive bzw. Testphasen.
+      subscriptionMonthly: Math.round(
+        companies
+          .filter((c) => ["AKTIV", "TRIAL"].includes(c.subscriptionStatus ?? "TRIAL"))
+          .reduce((sum, c) => sum + monthlyPriceFor(c.plan), 0) * 100,
+      ) / 100,
+      payingCompanies: companies.filter((c) => c.subscriptionStatus === "AKTIV").length,
+      trialCompanies: companies.filter((c) => (c.subscriptionStatus ?? "TRIAL") === "TRIAL").length,
+      overdueCompanies: companies.filter((c) => ["UEBERFAELLIG", "GEKUENDIGT"].includes(c.subscriptionStatus ?? "")).length,
     },
     companies: companies.map((c) => {
       const f = finMap.get(c.id);
@@ -72,14 +90,19 @@ export async function GET() {
         address: c.address,
         phone: c.phone,
         cityTier: c.cityTier,
-        commissionRate: c.cityTier === "BIG" ? 0.07 : 0.05,
+        // Abo statt Provision: Tarif, Status und Monatspreis.
+        plan: c.plan ?? "P5",
+        planName: getPlan(c.plan).name,
+        planMaxDrivers: getPlan(c.plan).maxDrivers,
+        monthlyPrice: monthlyPriceFor(c.plan),
+        subscriptionStatus: c.subscriptionStatus ?? "TRIAL",
+        subscriptionUntil: c.subscriptionUntil,
         createdAt: c.createdAt,
         drivers: c._count.drivers,
         bookings: c._count.bookings,
         completedTrips: f?._count?._all ?? 0,
+        // Der volle Fahrpreis bleibt beim Unternehmen (0 % Provision).
         grossRevenue: Math.round((f?._sum?.fare ?? 0) * 100) / 100,
-        platformFee: Math.round((f?._sum?.platformFee ?? 0) * 100) / 100,
-        companyNet: Math.round((f?._sum?.companyNet ?? 0) * 100) / 100,
         avgRating: avgMap.get(c.id) ?? null,
       };
     }),

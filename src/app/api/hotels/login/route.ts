@@ -41,6 +41,6 @@ export async function POST(req: Request) {
 
   const token = signSession({ sub: parentId, role: "HOTEL", name: displayName, username: email, companyId: parentId, portalRole });
   const res = NextResponse.json({ ok: true, id: parentId, name: displayName });
-  res.cookies.set(HOTEL_COOKIE, token, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 7 * 24 * 3600 });
+  res.cookies.set(HOTEL_COOKIE, token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: 7 * 24 * 3600 });
   return res;
 }

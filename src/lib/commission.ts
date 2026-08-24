@@ -1,13 +1,17 @@
-// Plattform-Provision (Vermittlungsgebuehr).
-// Großstadt (cityTier="BIG")  -> 7 %
-// Klein-/laendlich (SMALL)    -> 5 %
-// Keine Firma zugeordnet      -> 5 % (Default-Fallback)
+// KEINE Plattform-Provision pro Fahrt.
+//
+// Geschaeftsmodell: die Plattform verdient ausschliesslich am monatlichen
+// Unternehmens-Abo (siehe lib/plans.ts). Der komplette Fahrpreis gehoert dem
+// Taxiunternehmen; bei Kartenzahlung geht das Geld per Stripe Connect direkt
+// auf dessen Auszahlungskonto (siehe lib/stripe.ts).
+//
+// Die Funktionen bleiben erhalten (0 %), damit bestehende Auswertungen,
+// Rechnungen und gespeicherte Altdaten weiter funktionieren.
 
-export const COMMISSION_RATE_BIG = 0.07;
-export const COMMISSION_RATE_SMALL = 0.05;
+export const COMMISSION_RATE = 0;
 
-export function commissionRate(cityTier?: string | null): number {
-  return cityTier === "BIG" ? COMMISSION_RATE_BIG : COMMISSION_RATE_SMALL;
+export function commissionRate(_cityTier?: string | null): number {
+  return COMMISSION_RATE;
 }
 
 export interface CommissionBreakdown {
@@ -16,9 +20,7 @@ export interface CommissionBreakdown {
   companyNet: number;
 }
 
-export function computeCommission(fare: number, cityTier?: string | null): CommissionBreakdown {
-  const rate = commissionRate(cityTier);
-  const platformFee = Math.round(fare * rate * 100) / 100;
-  const companyNet = Math.round((fare - platformFee) * 100) / 100;
-  return { rate, platformFee, companyNet };
+export function computeCommission(fare: number, _cityTier?: string | null): CommissionBreakdown {
+  const net = Math.round(fare * 100) / 100;
+  return { rate: 0, platformFee: 0, companyNet: net };
 }

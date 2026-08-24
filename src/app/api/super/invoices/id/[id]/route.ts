@@ -4,6 +4,7 @@ import { requireRole } from "@/lib/session";
 import { invoiceDTO, invoiceToData, markPaid, markUnpaid, recordReminder } from "@/lib/invoiceStore";
 import { sendInvoiceEmail } from "@/lib/invoiceMail";
 
+import { invoiceModuleRetired } from "@/lib/invoiceRetired";
 export const dynamic = "force-dynamic";
 
 /**
@@ -13,6 +14,8 @@ export const dynamic = "force-dynamic";
  *  { action: "remind" }     -> Mahnung per E-Mail senden
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
+  const gesperrt = invoiceModuleRetired();
+  if (gesperrt) return gesperrt;
   const session = requireRole("SUPER_ADMIN");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
 

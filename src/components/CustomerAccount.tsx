@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamicImport from "next/dynamic";
 import { Brand } from "@/components/Brand";
+import { PaymentMethods } from "@/components/PaymentMethods";
 import { formatEuro, formatDateTime } from "@/lib/format";
 import { TRACKING_LABEL } from "@/lib/status";
 import type { MapMarker } from "@/components/Map";
@@ -245,7 +246,14 @@ function RegisterForm({ onDone }: { onDone: () => void }) {
             <button type="button" onClick={sendCode} disabled={busy || !phone.trim()} data-testid="reg-send-code" className="btn-ghost text-sm disabled:opacity-50">SMS-Code senden</button>
           ) : (
             <div className="grid gap-2">
-              {devCode && <p className="rounded bg-brand-50 px-2 py-1 text-xs font-semibold" data-testid="reg-devcode">Testmodus – Code: <span className="font-mono font-bold">{devCode}</span></p>}
+              <p className="text-sm font-semibold text-ink-800">
+                Code aus der SMS eingeben und auf <b>Bestätigen</b> tippen.
+              </p>
+              {devCode && (
+                <p className="rounded bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800" data-testid="reg-devcode">
+                  Kein SMS-Versand eingerichtet – Code zum Testen: <span className="font-mono font-bold">{devCode}</span>
+                </p>
+              )}
               <div className="grid grid-cols-[1fr_auto] gap-2">
                 <input className="field text-center font-mono" inputMode="numeric" maxLength={6} placeholder="Code" data-testid="reg-code" value={code} onChange={(e) => setCode(e.target.value.replace(/[^0-9]/g, ""))} />
                 <button type="button" onClick={confirmCode} disabled={busy || code.length < 4} data-testid="reg-confirm" className="btn-primary">Bestätigen</button>
@@ -260,7 +268,13 @@ function RegisterForm({ onDone }: { onDone: () => void }) {
       <div><label className="label">Passwort (min. 6)</label><input className="field" type="password" data-testid="reg-password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} /></div>
       {err && <p className="text-sm font-bold text-red-600" data-testid="reg-error">{err}</p>}
       <button className="btn-primary disabled:opacity-50" disabled={busy || !token} data-testid="reg-submit">{busy ? "Erstelle …" : "Konto erstellen"}</button>
-      {!token && <p className="text-center text-xs text-ink-400">Bitte zuerst die Telefonnummer bestätigen.</p>}
+      {!token && (
+        <p className="text-center text-xs text-ink-400">
+          {vState === "sent"
+            ? "Noch ein Schritt: Code oben eingeben und bestätigen."
+            : "Bitte zuerst die Telefonnummer bestätigen."}
+        </p>
+      )}
     </form>
   );
 }
@@ -293,12 +307,13 @@ function LoggedIn({
   const points = profile?.points ?? 0;
   const favIds = new Set(favorites.map((f) => f.driverId));
   const firstName = name.split(" ")[0];
-  const [tab, setTab] = useState<"rides" | "recurring" | "favorites" | "profile">("rides");
+  const [tab, setTab] = useState<"rides" | "recurring" | "favorites" | "payment" | "profile">("rides");
   const activeRecurring = recurring.filter((r) => r.active).length;
   const tabs = [
     { key: "rides" as const, label: "Fahrten", count: bookings.length },
     { key: "recurring" as const, label: "Regelmäßig", count: activeRecurring },
     { key: "favorites" as const, label: "Favoriten", count: favorites.length },
+    { key: "payment" as const, label: "Zahlung", count: 0 },
     { key: "profile" as const, label: "Profil", count: 0 },
   ];
 
@@ -461,6 +476,7 @@ function LoggedIn({
       )}
 
       {/* Tab: Profil (Notfallkontakt) */}
+      {tab === "payment" && <PaymentMethods />}
       {tab === "profile" && <EmergencyCard profile={profile} onSave={onSaveEmergency} />}
     </div>
   );

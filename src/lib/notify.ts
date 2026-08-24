@@ -24,6 +24,10 @@ function smsSender(): { messagingServiceSid: string } | { from: string } | null 
 }
 
 export function smsEnabled(): boolean {
+  // Not-Aus fuer Tests/Lastlaeufe: verhindert, dass echte SMS (und damit
+  // Kosten bzw. das Tageskontingent) durch automatisierte Tests verbraucht
+  // werden. Der komplette Code-Pfad laeuft weiter, nur der Versand ist Mock.
+  if (process.env.SMS_DISABLED === "1") return false;
   return !!(process.env.TWILIO_ACCOUNT_SID && hasTwilioAuth() && smsSender());
 }
 
@@ -67,19 +71,103 @@ export interface SendResult {
   mock: boolean;
   id?: string | null;
   error?: string;
+  // true = wurde wegen Doppelversand-Sperre nicht erneut gesendet
+  deduped?: boolean;
 }
 
-export async function sendSms(to: string, body: string): Promise<SendResult> {
+// Telefonnummer nach E.164 normalisieren. Twilio lehnt alles andere mit
+// Fehler 21211 ("Invalid To Phone Number") ab – deutsche Nummern werden in der
+// Praxis fast immer als "0511 123456" / "0176-123 456" eingegeben.
+const DEFAULT_COUNTRY_CODE = (process.env.SMS_DEFAULT_COUNTRY_CODE ?? "49").replace(/\D/g, "");
+
+export function toE164(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let s = String(raw).trim();
+  if (!s || s === "—") return null;
+  // Internationale Schreibweise 00.. -> +..
+  s = s.replace(/^00/, "+");
+  const plus = s.startsWith("+");
+  const digits = s.replace(/\D/g, "");
+  if (!digits) return null;
+  if (plus) return "+" + digits;
+  // Fuehrende nationale 0 durch die Landesvorwahl ersetzen.
+  if (digits.startsWith("0")) return "+" + DEFAULT_COUNTRY_CODE + digits.replace(/^0+/, "");
+  // Bereits mit Landesvorwahl (z. B. "4915112345678")
+  if (digits.startsWith(DEFAULT_COUNTRY_CODE)) return "+" + digits;
+  return "+" + DEFAULT_COUNTRY_CODE + digits;
+}
+
+export interface SmsOptions {
+  // Fachlicher Schluessel zur Doppelversand-Sperre, z. B. `driver-cancel:<bookingId>`.
+  // Ein zweiter Versand mit demselben Schluessel wird verworfen.
+  dedupeKey?: string;
+  // Zweck fuer das Protokoll (z. B. "BOOKING_CONFIRMED").
+  kind?: string;
+  bookingId?: string | null;
+}
+
+// Bereits versendete dedupeKeys (Prozess-Speicher). Zusaetzlich wird jede SMS
+// in der Tabelle SmsLog protokolliert, die auch prozessuebergreifend sperrt.
+const sentKeys = new Set<string>();
+
+export async function sendSms(to: string, body: string, opts: SmsOptions = {}): Promise<SendResult> {
+  const target = toE164(to);
+  if (!target) {
+    console.warn(`[notify] SMS verworfen – ungueltige Nummer: ${JSON.stringify(to)}`);
+    return { ok: false, mock: false, error: "invalid_phone" };
+  }
+
+  // --- Doppelversand-Sperre -------------------------------------------------
+  const key = opts.dedupeKey;
+  if (key) {
+    if (sentKeys.has(key)) {
+      console.log(`[notify] SMS uebersprungen (Duplikat): ${key}`);
+      return { ok: true, mock: false, id: null, deduped: true };
+    }
+    // DB-Sperre: @@unique(dedupeKey) verhindert Doppelversand auch bei
+    // parallelen Scheduler-Laeufen oder mehreren Server-Instanzen.
+    try {
+      const { prisma } = await import("./prisma");
+      await prisma.smsLog.create({
+        data: { dedupeKey: key, kind: opts.kind ?? null, bookingId: opts.bookingId ?? null, to: target, body: body.slice(0, 500), status: "PENDING" },
+      });
+    } catch {
+      // Unique-Verletzung = eine andere Instanz hat die SMS bereits uebernommen.
+      sentKeys.add(key);
+      console.log(`[notify] SMS uebersprungen (bereits protokolliert): ${key}`);
+      return { ok: true, mock: false, id: null, deduped: true };
+    }
+    sentKeys.add(key);
+  }
+
+  const finish = async (res: SendResult) => {
+    if (key) {
+      try {
+        const { prisma } = await import("./prisma");
+        await prisma.smsLog.update({
+          where: { dedupeKey: key },
+          data: { status: res.ok ? (res.mock ? "MOCK" : "SENT") : "FAILED", providerId: res.id ?? null, error: res.error ?? null },
+        });
+      } catch {
+        /* Protokoll ist best effort */
+      }
+      // Fehlgeschlagene SMS darf spaeter erneut versucht werden.
+      if (!res.ok) sentKeys.delete(key);
+    }
+    return res;
+  };
+
   const client = await getTwilio();
   if (!client) {
-    console.log(`[notify:mock SMS] -> ${to}: ${body}`);
-    return { ok: true, mock: true, id: null };
+    console.log(`[notify:mock SMS] -> ${target}: ${body}`);
+    return finish({ ok: true, mock: true, id: null });
   }
   try {
-    const msg = await client.messages.create({ to, ...(smsSender() as object), body });
-    return { ok: true, mock: false, id: msg.sid };
+    const msg = await client.messages.create({ to: target, ...(smsSender() as object), body });
+    return finish({ ok: true, mock: false, id: msg.sid });
   } catch (e: any) {
-    return { ok: false, mock: false, error: e?.message ?? "twilio_error" };
+    console.warn(`[notify] SMS an ${target} fehlgeschlagen: ${e?.message}`);
+    return finish({ ok: false, mock: false, error: e?.message ?? "twilio_error" });
   }
 }
 

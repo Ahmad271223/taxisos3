@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { getSocket } from "@/lib/socket";
 import { Brand } from "@/components/Brand";
+import { AdminPayments } from "@/components/AdminPayments";
 import {
   DRIVER_STATUS_LABEL,
   DRIVER_STATUS_COLOR,
@@ -307,18 +308,24 @@ export function AdminDashboard() {
             </div>
             <div className="sm:col-span-4 border-t border-ink-100 pt-3">
               <a
-                href="/admin/abrechnung"
-                data-testid="invoice-link"
+                href="/admin/abo"
+                data-testid="subscription-link"
                 className="inline-flex items-center gap-2 text-sm font-bold text-ink-700 hover:text-ink-900"
               >
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
-                  <path d="M7 3h7l5 5v13H7z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-                  <path d="M14 3v5h5M9 13h6M9 17h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  <rect x="2.5" y="5.5" width="19" height="13" rx="2.5" stroke="currentColor" strokeWidth="2" />
+                  <path d="M2.5 10h19" stroke="currentColor" strokeWidth="2" />
                 </svg>
-                Monatliche Provisions-Rechnung als PDF →
+                Abo &amp; Abrechnung – Tarif, Zahlungsmittel, Rechnungen →
               </a>
+              <p className="mt-1 text-xs text-ink-400">
+                Fahrpreise gehen zu 100 % an Sie – wir berechnen nur die monatliche Gebühr.
+              </p>
             </div>
           </div>
+
+          {/* Zahlungen: bezahlt / ausstehend je abgeschlossener Fahrt */}
+          <AdminPayments />
 
           {/* Krankenfahrten-Zuweisungs-Pool (Einrichtungen) */}
           <MedicalPoolCard drivers={driverList} />

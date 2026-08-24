@@ -43,7 +43,8 @@ async function main() {
   check("cancelReason NO_SHOW", b.cancelReason === "NO_SHOW", b.cancelReason);
   check("noShowFee = 15", b.noShowFee === 15, b.noShowFee);
   check("fare = 15 (Gebühr abgerechnet)", b.fare === 15, b.fare);
-  check("Provision berechnet", b.platformFee > 0, b.platformFee);
+  // Geschaeftsmodell: KEINE Provision pro Fahrt (Einnahmen nur ueber das Abo).
+  check("Keine Provision einbehalten (0 %)", b.platformFee === 0 && b.companyNet === b.fare, { platformFee: b.platformFee, companyNet: b.companyNet, fare: b.fare });
 
   // Negativ: noshow OHNE vorheriges "arrived" wird abgelehnt
   const bk2 = await api("/api/bookings", { method: "POST", body: JSON.stringify({ customerName: "NS2", customerPhone: "0511797" + (ts % 1000), pickupAddress: "HBF", pickup: HBF, destAddress: "Kröpcke", dest: KROEPCKE }) });

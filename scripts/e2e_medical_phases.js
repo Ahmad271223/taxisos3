@@ -81,6 +81,10 @@ async function main() {
   const reg = await api("/api/companies/register", { method: "POST", body: JSON.stringify({ name: `TEST_MPH_${ts}`, email: `mph+${ts}@test.com`, password: "Pass1234", cityTier: "SMALL" }) });
   check("company registered", reg.status === 201 || reg.status === 200, reg.body);
   const adminCookie = reg.cookie;
+  // Wird fuer Phase C gebraucht: medizinische Dokumente sind nach Mandant
+  // getrennt. Eine plattformweite Buchung ohne Firma gehoert noch niemandem,
+  // also sieht sie auch kein Unternehmen – das ist so gewollt.
+  const companySlug = reg.body?.company?.slug ?? reg.body?.slug ?? null;
 
   const drvRamp = await api("/api/admin/drivers", { method: "POST", body: JSON.stringify({ name: "Ramp Fahrer", username: `mphr${ts}`, password: "Pass1234", vehicleClass: "WHEELCHAIR", medicalAllowed: true, hasRamp: true }) }, adminCookie);
   check("ramp driver created (medical+ramp)", drvRamp.body?.driver?.medicalAllowed === true && drvRamp.body?.driver?.hasRamp === true, drvRamp.body?.driver);
@@ -96,6 +100,7 @@ async function main() {
   const phoneB = "0151610" + (ts % 1000);
   const tokenB = await verifyToken(phoneB);
   const bookB = await api("/api/bookings", { method: "POST", body: JSON.stringify({
+    ...(companySlug ? { company: companySlug } : {}),
     customerName: "Besteller B", customerPhone: phoneB,
     pickupAddress: "HBF", pickup: HBF, destAddress: "Dialyse", dest: KROEPCKE,
     vehicleClass: "WHEELCHAIR", medicalType: "DIALYSE",
@@ -117,7 +122,11 @@ async function main() {
   check("B: insuranceNumber persisted", got.body?.insuranceNumber === "A123456789", got.body?.insuranceNumber);
 
   console.log("3) Phase C: Dokument-Upload + Admin-Prüfung");
-  const up = await api("/api/medical/documents", { method: "POST", body: JSON.stringify({ kind: "VERORDNUNG", fileName: "verordnung.txt", mimeType: "text/plain", dataBase64: Buffer.from("Verordnung Krankenbeförderung").toString("base64"), bookingId: bidB }) });
+  // Die API laesst fuer Verordnungen bewusst nur PDF/Bild zu (Schutz vor
+  // gespeichertem Schadcode durch HTML/SVG). Der Test lud frueher eine .txt
+  // hoch und schlug deshalb zu Recht fehl -> jetzt eine minimale PDF-Datei.
+  const minimalPdf = ["%PDF-1.4", "1 0 obj<</Type/Catalog>>endobj", "trailer<</Root 1 0 R>>", "%%EOF"].join("\n");
+  const up = await api("/api/medical/documents", { method: "POST", body: JSON.stringify({ kind: "VERORDNUNG", fileName: "verordnung.pdf", mimeType: "application/pdf", dataBase64: Buffer.from(minimalPdf).toString("base64"), bookingId: bidB }) });
   check("C: document uploaded", up.status === 201, up.body);
   const docId = up.body?.document?.id;
   const list = await api("/api/medical/documents?status=PENDING", {}, adminCookie);
@@ -142,6 +151,12 @@ async function main() {
   await sleep(1500);
   check("D: noramp driver did NOT receive offer", !noramp.offers.has((o) => o.id === bidD));
 
+  // Das Angebot aus Phase D haengt sonst offen und der Rampen-Fahrer bleibt
+  // gebunden – Phase E wuerde ihm dann gar kein neues Angebot schicken.
+  // Also ausdruecklich ablehnen, damit er wieder frei ist.
+  await new Promise((res) => ramp.socket.emit("driver:respond", { bookingId: bidD, accept: false }, res));
+  await sleep(800);
+
   console.log("5) Phase E: Einrichtungs-Portal (Registrierung, Patient, Fahrt)");
   const instReg = await api("/api/institutions/register", { method: "POST", body: JSON.stringify({ name: `Dialysezentrum ${ts}`, type: "DIALYSE", email: `inst+${ts}@test.com`, password: "Pass1234", phone: "0511999" }) });
   check("E: institution registered", instReg.status === 201, instReg.body);
@@ -151,7 +166,10 @@ async function main() {
   const pat = await api("/api/institutions/patients", { method: "POST", body: JSON.stringify({ name: "Patient Müller", birthDate: "1955-03-03", mobility: "WHEELCHAIR" }) }, instCookie);
   check("E: patient created", pat.status === 201, pat.body);
   const patientId = pat.body?.patient?.id;
-  const instRide = await api("/api/institutions/rides", { method: "POST", body: JSON.stringify({ patientId, pickup: { address: "Heim", ...HBF }, dest: { address: "Dialyse", ...KROEPCKE }, medicalType: "DIALYSE", vehicleClass: "WHEELCHAIR" }) }, instCookie);
+  // Fahrten aus dem Einrichtungs-Portal gehen standardmaessig an die Disposition
+  // (dispatchMode ADMIN). Nur mit quickOrder wird sofort ein Fahrer gesucht –
+  // und genau das prueft die folgende Zusicherung.
+  const instRide = await api("/api/institutions/rides", { method: "POST", body: JSON.stringify({ patientId, pickup: { address: "Heim", ...HBF }, dest: { address: "Dialyse", ...KROEPCKE }, medicalType: "DIALYSE", vehicleClass: "WHEELCHAIR", quickOrder: true }) }, instCookie);
   check("E: institution ride created", instRide.status === 201, instRide.body);
   const instRideId = instRide.body?.id;
   const ridesList = await api("/api/institutions/rides", {}, instCookie);
@@ -184,7 +202,8 @@ async function main() {
   check("return route swapped (pickup = orig. dest)", retGet.body?.pickupAddress === "Dialysezentrum", retGet.body?.pickupAddress);
 
   console.log("8) Phase C: zweites Dokument als GENEHMIGUNG");
-  const up2 = await api("/api/medical/documents", { method: "POST", body: JSON.stringify({ kind: "GENEHMIGUNG", fileName: "genehmigung.txt", mimeType: "text/plain", dataBase64: Buffer.from("Kassengenehmigung").toString("base64"), bookingId: bidB }) });
+  // Ebenfalls PDF: text/plain ist bewusst nicht erlaubt (siehe Phase C oben).
+  const up2 = await api("/api/medical/documents", { method: "POST", body: JSON.stringify({ kind: "GENEHMIGUNG", fileName: "genehmigung.pdf", mimeType: "application/pdf", dataBase64: Buffer.from(minimalPdf).toString("base64"), bookingId: bidB }) });
   check("C: GENEHMIGUNG uploaded with correct kind", up2.body?.document?.kind === "GENEHMIGUNG", up2.body?.document);
 
   console.log("9) Phase E: Monats-Abrechnung der Einrichtung");

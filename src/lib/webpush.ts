@@ -99,6 +99,23 @@ export async function sendToDriver(driverId: string, payload: PushPayload): Prom
   return sent;
 }
 
+// Rueckfrage 30 Min vor einer reservierten Vorbestellung pushen. Wichtig,
+// wenn die App im Hintergrund laeuft oder das Handy gesperrt ist.
+export async function notifyDriverConfirm(driverId: string, booking: any): Promise<void> {
+  if (!webPushEnabled()) return;
+  const when = booking?.scheduledAt
+    ? new Date(booking.scheduledAt).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })
+    : "";
+  const from = booking?.pickupAddress ? String(booking.pickupAddress).split(",")[0] : "Abholung";
+  await sendToDriver(driverId, {
+    title: "Fahrt in 30 Minuten",
+    body: `Möchtest du die Fahrt${when ? ` um ${when} Uhr` : ""} (${from}) weiterhin durchführen?`,
+    tag: `confirm-${booking?.id ?? "x"}`,
+    url: "/fahrer",
+    data: { bookingId: booking?.id ?? null, kind: "confirmScheduled" },
+  }).catch(() => {});
+}
+
 // Komfort: ein neues Fahrtangebot pushen.
 export async function notifyDriverOffer(driverId: string, dto: any): Promise<void> {
   if (!webPushEnabled()) return;

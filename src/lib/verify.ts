@@ -9,8 +9,21 @@ export const CODE_TTL_MS = 10 * 60_000; // 10 Minuten gueltig
 export const MAX_ATTEMPTS = 5;
 const TOKEN_TTL = "20m"; // Nachweis-Token nach erfolgreicher Verifizierung
 
+const DEFAULT_DEV_SECRET = "dev-secret-bitte-aendern";
+
 function secret(): string {
-  return process.env.AUTH_SECRET ?? "dev-secret-bitte-aendern";
+  const s = process.env.AUTH_SECRET;
+  // Dieser Schluessel signiert den Nachweis "Telefonnummer bestaetigt". Mit
+  // einem bekannten Standardwert koennte sich jeder diesen Nachweis selbst
+  // ausstellen und die Verifizierung komplett umgehen. Im Echtbetrieb daher
+  // hart abbrechen statt unsicher weiterlaufen – wie in lib/auth.ts.
+  if (!s || s === DEFAULT_DEV_SECRET || s === "bitte-aendern") {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("AUTH_SECRET ist nicht gesetzt – im Produktivbetrieb zwingend erforderlich.");
+    }
+    return DEFAULT_DEV_SECRET;
+  }
+  return s;
 }
 
 // Pflicht-Schalter: Telefon-Verifizierung vor Dispatch. Default AN.

@@ -41,7 +41,8 @@ async function main() {
   check("nach Zuweisung: STORNIERT", b.status === "STORNIERT", b.status);
   check("cancelReason LATE_CANCEL", b.cancelReason === "LATE_CANCEL", b.cancelReason);
   check("Storno-Gebühr fare=10", b.fare === 10, b.fare);
-  check("Provision berechnet", b.platformFee > 0, b.platformFee);
+  // Geschaeftsmodell: KEINE Provision pro Fahrt (Einnahmen nur ueber das Abo).
+  check("Keine Provision einbehalten (0 %)", b.platformFee === 0 && b.companyNet === b.fare, { platformFee: b.platformFee, companyNet: b.companyNet, fare: b.fare });
 
   // Fahrer wieder frei machen
   await new Promise((r) => socket.emit("driver:status", { status: "PAUSE" }, r));

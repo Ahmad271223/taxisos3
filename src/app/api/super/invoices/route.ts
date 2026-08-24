@@ -5,10 +5,13 @@ import { parseMonth } from "@/lib/invoice";
 import { issueInvoice, listAll, invoiceToData, recordReminder } from "@/lib/invoiceStore";
 import { sendInvoiceEmail } from "@/lib/invoiceMail";
 
+import { invoiceModuleRetired } from "@/lib/invoiceRetired";
 export const dynamic = "force-dynamic";
 
 /** Plattformweites Rechnungs-Archiv (Phase 6, Super-Admin). */
 export async function GET(req: Request) {
+  const gesperrt = invoiceModuleRetired();
+  if (gesperrt) return gesperrt;
   const session = requireRole("SUPER_ADMIN");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
 
@@ -34,6 +37,8 @@ export async function GET(req: Request) {
  *  { action: "remind-overdue" }   -> Mahnung an alle überfälligen offenen Rechnungen
  */
 export async function POST(req: Request) {
+  const gesperrt = invoiceModuleRetired();
+  if (gesperrt) return gesperrt;
   const session = requireRole("SUPER_ADMIN");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
 
@@ -64,7 +69,8 @@ export async function POST(req: Request) {
 
   if (action === "remind-overdue") {
     const overdue = await listAll({ status: "OFFEN", overdueOnly: true });
-    const results = [];
+    // Siehe oben: ohne Typangabe wird never[] abgeleitet.
+    const results: { invoiceNo: string; company?: string; sent: boolean; mock: boolean }[] = [];
     for (const dto of overdue) {
       const inv = await prisma.invoice.findUnique({ where: { id: dto.id } });
       if (!inv) continue;

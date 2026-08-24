@@ -3,6 +3,7 @@ import { requireRole } from "@/lib/session";
 import { buildAllInvoices, parseMonth } from "@/lib/invoice";
 import { sendInvoiceEmail } from "@/lib/invoiceMail";
 
+import { invoiceModuleRetired } from "@/lib/invoiceRetired";
 export const dynamic = "force-dynamic";
 
 /**
@@ -11,6 +12,8 @@ export const dynamic = "force-dynamic";
  * Ohne RESEND_API_KEY -> Mock (kein echter Versand, results.mock=true).
  */
 export async function POST(_req: Request, { params }: { params: { month: string } }) {
+  const gesperrt = invoiceModuleRetired();
+  if (gesperrt) return gesperrt;
   const session = requireRole("SUPER_ADMIN");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
 
@@ -19,7 +22,9 @@ export async function POST(_req: Request, { params }: { params: { month: string 
   }
 
   const invoices = (await buildAllInvoices(params.month)).filter((d) => d.net > 0);
-  const results = [];
+  // Ohne Typangabe leitet TypeScript hier never[] ab und meldet jeden Zugriff
+  // auf die Ergebnisfelder als Fehler.
+  const results: Awaited<ReturnType<typeof sendInvoiceEmail>>[] = [];
   for (const d of invoices) {
     results.push(await sendInvoiceEmail(d));
   }

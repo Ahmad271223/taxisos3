@@ -4,10 +4,13 @@ import { getSession } from "@/lib/session";
 import { invoicePdf } from "@/lib/pdf";
 import { invoiceToData } from "@/lib/invoiceStore";
 
+import { invoiceModuleRetired } from "@/lib/invoiceRetired";
 export const dynamic = "force-dynamic";
 
 /** PDF einer festgeschriebenen (archivierten) Rechnung – eingefrorener Snapshot. */
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
+  const gesperrt = invoiceModuleRetired();
+  if (gesperrt) return gesperrt;
   const session = getSession();
   if (!session || (session.role !== "ADMIN" && session.role !== "SUPER_ADMIN")) {
     return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });

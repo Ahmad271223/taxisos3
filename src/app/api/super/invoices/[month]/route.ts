@@ -4,6 +4,7 @@ import { requireRole } from "@/lib/session";
 import { buildAllInvoices, parseMonth, type InvoiceData } from "@/lib/invoice";
 import { invoicePdf } from "@/lib/pdf";
 
+import { invoiceModuleRetired } from "@/lib/invoiceRetired";
 export const dynamic = "force-dynamic";
 
 function summaryRow(d: InvoiceData) {
@@ -36,6 +37,8 @@ function buildCsv(invoices: InvoiceData[]): string {
  *  GET /api/super/invoices/<YYYY-MM>?format=json  -> Vorschau-Liste (alle Firmen)
  */
 export async function GET(req: Request, { params }: { params: { month: string } }) {
+  const gesperrt = invoiceModuleRetired();
+  if (gesperrt) return gesperrt;
   const session = requireRole("SUPER_ADMIN");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
 

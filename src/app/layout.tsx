@@ -3,6 +3,7 @@ import { Plus_Jakarta_Sans, Manrope } from "next/font/google";
 import "leaflet/dist/leaflet.css";
 import "./globals.css";
 import { CookieNotice } from "@/components/CookieNotice";
+import { ChunkRecovery } from "@/components/ChunkRecovery";
 
 const display = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -43,6 +44,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="de" className={`${sans.variable} ${display.variable}`}>
       <body className="font-sans">
         {children}
+        <ChunkRecovery />
         <CookieNotice />
       </body>
     </html>

@@ -19,24 +19,61 @@ export function ChatPanel({ bookingId, me }: { bookingId: string; me: "CUSTOMER"
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let mounted = true;
-    fetch(`/api/bookings/${bookingId}/messages`)
-      .then((r) => (r.ok ? r.json() : { messages: [] }))
-      .then((d) => mounted && setMessages(d.messages ?? []))
-      .catch(() => {});
+
+    // Verlauf laden bzw. nachladen. Wird auch nach jedem Reconnect und beim
+    // Zurueckkehren aus dem Hintergrund aufgerufen: waehrend einer getrennten
+    // Verbindung gesendete Nachrichten wuerden sonst dauerhaft fehlen, weil
+    // Socket-Events nur an Clients gehen, die im Raum sind.
+    const load = () =>
+      fetch(`/api/bookings/${bookingId}/messages`)
+        .then((r) => (r.ok ? r.json() : { messages: [] }))
+        .then((d) => {
+          if (!mounted) return;
+          const fresh: Msg[] = d.messages ?? [];
+          // Serverstand mit evtl. schon lokal eingetroffenen Nachrichten mischen.
+          setMessages((cur) => {
+            const byId = new Map(fresh.map((m) => [m.id, m]));
+            for (const m of cur) if (!byId.has(m.id)) byId.set(m.id, m);
+            return Array.from(byId.values()).sort(
+              (a, b) => new Date(a.createdAt ?? 0).getTime() - new Date(b.createdAt ?? 0).getTime(),
+            );
+          });
+        })
+        .catch(() => {});
+
+    load();
 
     const socket = getSocket();
     const onMsg = (m: Msg) => {
       if (m.bookingId !== bookingId) return;
       setMessages((cur) => (cur.some((x) => x.id === m.id) ? cur : [...cur, m]));
     };
+    const onConnect = () => {
+      setOffline(false);
+      load(); // verpasste Nachrichten nachholen
+    };
+    const onDisconnect = () => setOffline(true);
+    // Handy entsperrt / Tab wieder im Vordergrund -> Stand auffrischen.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+
     socket.on("chat:message", onMsg);
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    document.addEventListener("visibilitychange", onVisible);
+
     return () => {
       mounted = false;
       socket.off("chat:message", onMsg);
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [bookingId]);
 
@@ -49,7 +86,20 @@ export function ChatPanel({ bookingId, me }: { bookingId: string; me: "CUSTOMER"
     if (!t) return;
     setSending(true);
     setError(null);
+    // Ohne Timeout bleibt der Button bei getrennter Verbindung dauerhaft
+    // deaktiviert, weil die Bestaetigung (ACK) nie eintrifft.
+    let answered = false;
+    const timer = setTimeout(() => {
+      if (answered) return;
+      answered = true;
+      setSending(false);
+      setError("Keine Verbindung – Nachricht nicht gesendet. Bitte erneut versuchen.");
+    }, 8000);
+
     getSocket().emit("chat:send", { bookingId, text: t }, (r: any) => {
+      if (answered) return;
+      answered = true;
+      clearTimeout(timer);
       setSending(false);
       if (r?.ok) setText("");
       else setError(r?.error ?? "Senden fehlgeschlagen.");
@@ -58,8 +108,13 @@ export function ChatPanel({ bookingId, me }: { bookingId: string; me: "CUSTOMER"
 
   return (
     <div className="card p-4" data-testid="chat-panel">
-      <h2 className="mb-2 eyebrow text-ink-500">
-        {me === "CUSTOMER" ? "Chat mit dem Fahrer" : "Chat mit dem Fahrgast"}
+      <h2 className="mb-2 flex items-center justify-between eyebrow text-ink-500">
+        <span>{me === "CUSTOMER" ? "Chat mit dem Fahrer" : "Chat mit dem Fahrgast"}</span>
+        {offline && (
+          <span data-testid="chat-offline" className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+            Offline – Verbindung wird wiederhergestellt
+          </span>
+        )}
       </h2>
       <div ref={listRef} data-testid="chat-messages" className="mb-3 flex max-h-56 flex-col gap-2 overflow-y-auto">
         {messages.length === 0 ? (

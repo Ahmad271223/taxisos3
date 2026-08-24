@@ -50,14 +50,27 @@ export async function sendDueReminders(): Promise<number> {
     const label = b.medicalType ? medicalLabel(b.medicalType) ?? "Fahrt" : "Fahrt";
     const body = `Erinnerung: ${label} für ${who} am ${when} Uhr ab ${b.pickupAddress}.`;
 
+    // Merker ZUERST setzen (atomar, nur wenn der Offset noch nicht drin ist).
+    // Sonst koennte ein paralleler Lauf dieselbe Erinnerung erneut senden,
+    // weil das Flag frueher nur NACH dem Twilio-Roundtrip geschrieben wurde.
+    already.add(due.key);
+    const claimed = await prisma.booking.updateMany({
+      where: { id: b.id, remindersSent: b.remindersSent ?? "" },
+      data: { remindersSent: Array.from(already).join(",") },
+    });
+    if (claimed.count === 0) continue; // anderer Lauf war schneller
+
     if (b.customerPhone && b.customerPhone !== "—") {
-      await sendSms(b.customerPhone, body).catch(() => {});
+      // Zusaetzliche Sperre ueber das SMS-Protokoll (wirkt auch bei mehreren
+      // Server-Instanzen, die sich die Datenbank teilen).
+      await sendSms(b.customerPhone, body, {
+        dedupeKey: `reminder:${b.id}:${due.key}`,
+        kind: "REMINDER",
+        bookingId: b.id,
+      }).catch(() => {});
     } else {
       console.log(`[reminder:no-phone] ${b.id}: ${body}`);
     }
-
-    already.add(due.key);
-    await prisma.booking.update({ where: { id: b.id }, data: { remindersSent: Array.from(already).join(",") } });
     sent++;
   }
   return sent;

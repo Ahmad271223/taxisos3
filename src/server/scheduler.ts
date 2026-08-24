@@ -7,6 +7,8 @@ import { prisma } from "../lib/prisma";
 import { lookupFlight, airportPickupTime } from "../lib/flights";
 import { materializeDueRides } from "../lib/recurring";
 import { sendDueReminders } from "../lib/reminders";
+import { sendSms } from "../lib/notify";
+import { settleDueRides, TIP_WINDOW_MS } from "../lib/settle";
 import type { Dispatcher } from "./dispatch";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -66,9 +68,34 @@ async function pollFlights(dispatcher: Dispatcher): Promise<void> {
   for (const b of bookings) {
     try {
       const info = await lookupFlight(b.flightNumber!, "ARRIVAL");
+      // Ohne Flugdaten-Zugang liefert lookupFlight erfundene Demo-Werte. Damit
+      // duerfen im Echtbetrieb NIEMALS Abholzeiten verschoben oder – schlimmer –
+      // Fahrten storniert werden. Im Testbetrieb bleibt es fuer die QA aktiv.
+      if (info.source === "mock" && process.env.NODE_ENV === "production") continue;
       const changed = info.delayMinutes !== (b.flightDelayMinutes ?? 0) || info.status !== b.flightStatus;
       if (!changed) continue;
-      const newScheduled = airportPickupTime(b.flightScheduledAt!, "ARRIVAL", info.delayMinutes);
+
+      // Annullierter Flug: Fahrt stornieren statt den Fahrer zu einem Flug
+      // zu schicken, der nie landet. Kunde wird per SMS informiert.
+      if (info.status === "CANCELLED") {
+        await prisma.booking.update({
+          where: { id: b.id },
+          data: { flightStatus: "CANCELLED", status: "STORNIERT", trackingStatus: "STORNIERT" },
+        });
+        sendSms(
+          b.customerPhone,
+          `Ihr Flug ${b.flightNumber} wurde annulliert – wir haben die Taxifahrt storniert. Buchen Sie bei Bedarf einfach neu.`,
+          { dedupeKey: `flight-cancelled:${b.id}`, kind: "FLIGHT_CANCELLED", bookingId: b.id },
+        ).catch(() => {});
+        await dispatcher.refreshBooking(b.id);
+        continue;
+      }
+
+      // Basis ist immer die urspruenglich geplante Landung -> keine kumulative
+      // Drift. Ist der Flug bereits gelandet, zaehlt die tatsaechliche Landezeit.
+      const base = info.status === "LANDED" && info.actualAt ? new Date(info.actualAt) : b.flightScheduledAt!;
+      const delayForCalc = info.status === "LANDED" && info.actualAt ? 0 : info.delayMinutes;
+      const newScheduled = airportPickupTime(base, "ARRIVAL", delayForCalc);
       await prisma.booking.update({
         where: { id: b.id },
         data: {
@@ -86,7 +113,22 @@ async function pollFlights(dispatcher: Dispatcher): Promise<void> {
 }
 
 export function scheduleFlightPolling(dispatcher: Dispatcher): void {
-  setInterval(() => pollFlights(dispatcher).catch(() => {}), FLIGHT_POLL_MS);
+  // Ueberlappungsschutz: ein langsamer Lauf darf den naechsten nicht doppelt
+  // starten (sonst doppelte Updates/SMS).
+  let running = false;
+  const run = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await pollFlights(dispatcher);
+    } catch {
+      /* Lauf darf nie den Scheduler stoppen */
+    } finally {
+      running = false;
+    }
+  };
+  setInterval(run, FLIGHT_POLL_MS);
+  run(); // auch direkt beim Start einmal pruefen
 }
 
 // --- Wiederkehrende (Kranken-)Fahrten (Phase 15): vorausplanen ------------
@@ -109,14 +151,45 @@ export function scheduleRecurringRides(): void {
 const REMINDER_POLL_MS = 5 * 60_000;
 
 export function scheduleRideReminders(): void {
+  // Ueberlappungsschutz: dauert ein Lauf laenger als das Intervall, wuerde der
+  // naechste dieselben faelligen Erinnerungen erneut verschicken (Doppel-SMS).
+  let running = false;
   const run = async () => {
+    if (running) return;
+    running = true;
     try {
       const n = await sendDueReminders();
       if (n > 0) console.log(`  Erinnerungen: ${n} gesendet.`);
     } catch (e) {
       console.error("Reminder-Lauf fehlgeschlagen:", e);
+    } finally {
+      running = false;
     }
   };
   run().catch(() => {}); // beim Boot
   setInterval(() => run().catch(() => {}), REMINDER_POLL_MS);
+}
+
+// --- Automatische Abrechnung nach Fahrtende --------------------------------
+// Reagiert der Kunde nicht innerhalb des Trinkgeld-Fensters, wird der
+// Fahrpreis OHNE Trinkgeld abgebucht. So bleibt keine beendete Fahrt unbezahlt,
+// nur weil jemand die Seite geschlossen hat.
+const SETTLE_POLL_MS = Math.max(15_000, Math.min(30_000, Math.round(TIP_WINDOW_MS / 4)));
+
+export function scheduleRideSettlement(): void {
+  let running = false;
+  const run = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const n = await settleDueRides();
+      if (n > 0) console.log(`  Zahlungen: ${n} Fahrt(en) automatisch abgerechnet (ohne Trinkgeld).`);
+    } catch (e) {
+      console.error("Abrechnungslauf fehlgeschlagen:", e);
+    } finally {
+      running = false;
+    }
+  };
+  run().catch(() => {});
+  setInterval(() => run().catch(() => {}), SETTLE_POLL_MS);
 }

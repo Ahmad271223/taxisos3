@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { AddressInput } from "@/components/AddressInput";
 import { MapPickerModal } from "@/components/MapPickerModal";
-import { StripePayment } from "@/components/StripePayment";
+import { CardChooser } from "@/components/CardChooser";
 import { formatDistance, formatDuration, formatEuro } from "@/lib/format";
 import type { GeocodeResult, PriceEstimateT } from "@/lib/geo";
 import type { MapMarker } from "@/components/Map";
@@ -118,6 +118,9 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
   // Eingeloggter Kunde (Phase 11): Name/Telefon vorausfüllen, bestätigte Nummer
   // braucht keine erneute SMS-Verifizierung.
   const [account, setAccount] = useState<{ name: string; phone: string } | null>(null);
+  // Bei Kartenzahlung gewaehlte gespeicherte Karte (es wird nichts reserviert).
+  const [cardId, setCardId] = useState<string | null>(null);
+  const [hasUsableCard, setHasUsableCard] = useState(false);
 
   const [quote, setQuote] = useState<(PriceEstimateT & { priceApprox?: number; classes?: any[] }) | null>(null);
   const [routeLine, setRouteLine] = useState<[number, number][] | null>(null);
@@ -403,14 +406,14 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
     }
   }
 
-  // Echte Stripe-Kartenzahlung nur, wenn ein Publishable Key vorhanden ist;
-  // sonst läuft CARD über den Mock-Pfad (Server autorisiert).
-  const stripePubKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
-  const useStripeCard = payment === "CARD" && !!stripePubKey;
+  // Kartenzahlung braucht KEINEN Stripe-Schluessel im Browser: die Karte wird
+  // vorab im Konto auf der Seite von Stripe hinterlegt, hier waehlt der Kunde
+  // nur noch aus. Abgebucht wird erst nach der Fahrt.
+  const useStripeCard = payment === "CARD";
 
   // Schritt 2: tatsächliche Buchung absenden → Fahrer wird jetzt gesucht.
-  // paymentIntentId: bei echter Stripe-Kartenzahlung der vom Client autorisierte Intent.
-  async function confirmBooking(paymentIntentId?: string) {
+  // Bei Kartenzahlung wird nur die gewaehlte Karte mitgeschickt – keine Zahlung.
+  async function confirmBooking() {
     setError(null);
     setSubmitting(true);
 
@@ -443,7 +446,7 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
           promoCode: promoInfo?.valid ? promoCode.trim().toUpperCase() : null,
           corporateCode: corp?.code ?? null,
           verificationToken,
-          paymentIntentId: paymentIntentId ?? null,
+          cardId: payment === "CARD" ? cardId : null,
         }),
       });
       const data = await res.json();
@@ -524,7 +527,7 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
           ) : (
             <div className="grid gap-2 sm:grid-cols-2">
               <PaymentTile selected={payment === "CASH"} onClick={() => setPayment("CASH")} testid="pay-cash" title="Barzahlung" desc="Beim Fahrer bezahlen" icon="cash" />
-              <PaymentTile selected={payment === "CARD"} onClick={() => setPayment("CARD")} testid="pay-card" title="Karte (Online)" desc="Nach der Fahrt per Link" icon="card" />
+              <PaymentTile selected={payment === "CARD"} onClick={() => setPayment("CARD")} testid="pay-card" title="Kartenzahlung" desc="Abbuchung erst nach der Fahrt" icon="card" />
             </div>
           )}
           {corpError && !corp && (
@@ -614,18 +617,25 @@ export function BookingForm({ scheduled = false, companySlug, initialVehicleClas
             {!verified && (
               <p className="text-center text-xs font-semibold text-ink-500">Bitte bestätigen Sie zuerst Ihre Telefonnummer.</p>
             )}
-            {verified && haveRoute && (
-              <StripePayment
-                params={{
-                  pickup: { lat: pickup.lat as number, lng: pickup.lng as number },
-                  dest: { lat: dest.lat as number, lng: dest.lng as number },
-                  stops: resolvedStops.map((s) => ({ lat: s.lat, lng: s.lng })),
-                  company: companySlug,
+            {verified && (
+              <CardChooser
+                loggedIn={!!account}
+                value={cardId}
+                onChange={(id, usable) => {
+                  setCardId(id);
+                  setHasUsableCard(usable);
                 }}
-                disabled={submitting || !verified}
-                submitting={submitting}
-                onAuthorized={(piId) => confirmBooking(piId)}
               />
+            )}
+            {verified && hasUsableCard && (
+              <button
+                onClick={() => confirmBooking()}
+                disabled={submitting || !cardId}
+                data-testid="confirm-booking-card"
+                className="btn-primary text-lg disabled:opacity-60"
+              >
+                {submitting ? "Wird gesendet \u2026" : scheduled ? "Jetzt vorbestellen" : "Taxi bestellen"}
+              </button>
             )}
             <button onClick={() => setStep("details")} data-testid="back-to-details" className="btn-ghost">← Zurück</button>
           </div>

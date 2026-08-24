@@ -53,10 +53,17 @@ async function main() {
   }
 
   // Aufraeumen: alte Demo-Daten entfernen, damit nichts „mock“ bleibt.
-  const demo = await prisma.company.findUnique({ where: { slug: "citytaxi" } });
-  if (demo) {
-    await prisma.company.delete({ where: { id: demo.id } });
-    console.log("  Demo-Firma 'citytaxi' und alle zugehoerigen Fahrer/Buchungen entfernt.");
+  //
+  // ACHTUNG: hier stand frueher nur "citytaxi"; seed-demo.ts legt die Firma
+  // aber unter "citytaxi-hannover" an. Die Aufraeumroutine traf die Demo-Daten
+  // also NIE – Firma und Fahrer blieben mit dem dokumentierten Passwort
+  // "demo1234" bestehen.
+  for (const slug of ["citytaxi", "citytaxi-hannover"]) {
+    const demo = await prisma.company.findUnique({ where: { slug } });
+    if (demo) {
+      await prisma.company.delete({ where: { id: demo.id } });
+      console.log(`  Demo-Firma '${slug}' und alle zugehoerigen Fahrer/Buchungen entfernt.`);
+    }
   }
 
   console.log("Seed abgeschlossen. Echte Unternehmen registrieren sich unter /registrieren.");

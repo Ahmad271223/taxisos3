@@ -166,14 +166,20 @@ async function main() {
       destAddress: "Kröpcke",
       dest: KROEPCKE,
       stops: [{ address: "Aegidientorplatz", ...AEGI }],
-      paymentMethod: "CARD",
+      // Seit der Zahlungsumstellung braucht Kartenzahlung ein angemeldetes
+      // Konto mit hinterlegter Karte. Dieser Test prueft die Fahrer-Verbindung,
+      // nicht die Zahlung -> Barzahlung.
+      paymentMethod: "CASH",
       verificationToken,
     }),
   });
   check("booking created", bk.status === 201, bk.body);
   const bid = bk.body.id;
-  check("CARD authorized on create", bk.body.booking.paymentStatus === "AUTORISIERT", bk.body.booking.paymentStatus);
-  check("hold amount stored", bk.body.booking.priceAuthorized > 0, bk.body.booking.priceAuthorized);
+  // Frueher wurde beim Buchen ein Hold gesetzt (AUTORISIERT). Das Hold-Modell
+  // ist abgeschafft: es wird beim Buchen NICHTS reserviert. Bei Barzahlung
+  // bleibt die Zahlung bis zum Fahrtende offen.
+  check("no money touched at booking", bk.body.booking.paymentStatus === "OFFEN", bk.body.booking.paymentStatus);
+  check("nothing reserved at booking", !bk.body.booking.priceAuthorized, bk.body.booking.priceAuthorized);
   const offer = await offers.match((o) => o.id === bid, 30000);
   check("offer received for our booking", offer.id === bid, offer.id);
   check("offer contains stops", Array.isArray(offer.stops) && offer.stops.length === 1, offer.stops);
@@ -238,11 +244,15 @@ async function main() {
   b = (await api(`/api/bookings/${bid}`)).body;
   check("status ABGESCHLOSSEN", b.status === "ABGESCHLOSSEN", b.status);
   check("fare equals priceExact", b.fare === b.priceExact, { fare: b.fare, priceExact: b.priceExact });
-  check("CARD captured -> BEZAHLT", b.paymentStatus === "BEZAHLT", b.paymentStatus);
-  check("commission computed", b.platformFee > 0 && b.companyNet > 0 && b.platformFeeRate === 0.05, {
+  // Barfahrt: wird beim Fahrer bezahlt, kein Kartenvorgang, kein Trinkgeld-Dialog.
+  check("cash ride stays open for the driver to collect", b.paymentStatus === "OFFEN", b.paymentStatus);
+  // Provision pro Fahrt ist abgeschafft: das Unternehmen behaelt den vollen
+  // Fahrpreis, die Plattform verdient ausschliesslich am Monatsabo.
+  check("no commission, company keeps the full fare", b.platformFee === 0 && b.platformFeeRate === 0 && b.companyNet === b.fare, {
     rate: b.platformFeeRate,
     fee: b.platformFee,
     net: b.companyNet,
+    fare: b.fare,
   });
 
   socket.close();

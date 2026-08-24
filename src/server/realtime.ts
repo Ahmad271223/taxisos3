@@ -5,6 +5,7 @@ import type { Server as IOServer, Socket } from "socket.io";
 import { prisma } from "../lib/prisma";
 import { verifySession, SESSION_COOKIE, ADMIN_COOKIE, DRIVER_COOKIE } from "../lib/auth";
 import type { Dispatcher } from "./dispatch";
+import { bookingRefWhere } from "../lib/bookingRef";
 import { bookingDTO, driverAdmin, messageDTO } from "./serialize";
 
 function parseCookie(header: string | undefined, name: string): string | null {
@@ -32,12 +33,12 @@ async function adminSnapshot(dispatcher: Dispatcher, companyId: string) {
   });
   const bookings = await prisma.booking.findMany({
     where: { companyId, status: { in: ["OFFEN", "ZUGEWIESEN", "AKTIV"] } },
-    include: { driver: true },
+    include: { driver: true, card: true },
     orderBy: { createdAt: "desc" },
   });
   const scheduled = await prisma.booking.findMany({
     where: { companyId, isScheduled: true, status: { notIn: ["ABGESCHLOSSEN", "STORNIERT"] } },
-    include: { driver: true },
+    include: { driver: true, card: true },
     orderBy: { scheduledAt: "asc" },
   });
   return {
@@ -50,25 +51,42 @@ async function adminSnapshot(dispatcher: Dispatcher, companyId: string) {
 // Vorbestellungen werden erst kurz vor dem Termin "live" geschaltet.
 const SCHEDULED_LEAD_MS = 5 * 60_000;
 
+/** Notfall-Zustand, damit das Fahrer-Dashboard nie ohne Antwort haengen bleibt. */
+function leererFahrerZustand() {
+  return { status: "PAUSE", name: "", activeBooking: null, nextBooking: null, myScheduled: [], openScheduled: [] };
+}
+
 async function driverState(driverId: string) {
-  const me = await prisma.driver.findUnique({ where: { id: driverId } });
+  // Die vier Abfragen sind unabhaengig voneinander -> parallel ausfuehren.
+  // Sequenziell summieren sich die Latenzen; bei vielen gleichzeitigen
+  // Verbindungen (Schichtbeginn) lief driver:state dadurch in einen Timeout.
+  const mePromise = prisma.driver.findUnique({ where: { id: driverId } });
   // Aktueller Auftrag: Sofortfahrt ODER eine Vorbestellung, deren Termin (fast)
   // erreicht ist. Eine reservierte Vorbestellung in der Zukunft erscheint NICHT
   // als aktueller Auftrag, sondern unter "Meine geplanten Fahrten".
-  const active = await prisma.booking.findFirst({
+  const activePromise = prisma.booking.findFirst({
     where: {
       driverId,
       status: { in: ["ZUGEWIESEN", "AKTIV"] },
-      // Nur LIVE laufende Fahrten sind der "aktuelle Auftrag" und sperren den
-      // Status. Eine reservierte Vorbestellung bleibt GEPLANT (erscheint unter
-      // "Meine geplanten Fahrten"), bis der Sweep sie zur Fahrtzeit live schaltet
-      // – sonst würde eine (auch überfällige) geplante Fahrt den Fahrer blockieren.
-      trackingStatus: { not: "GEPLANT" },
+      // NUR die tatsaechlich laufende Fahrt ist der "aktuelle Auftrag".
+      // Bewusst ausgeschlossen:
+      //  - GEPLANT            -> reservierte Vorbestellung ("Meine geplanten Fahrten")
+      //  - RESERVIERT_FAHRER  -> vorgemerkte FOLGEfahrt; sie wurde spaeter
+      //    angenommen und wuerde die laufende Fahrt aus der Sortierung
+      //    verdraengen. Im UI sind fuer diesen Status alle Trip-Buttons
+      //    gesperrt -> das Dashboard waere blockiert.
+      trackingStatus: { in: ["FAHRER_GEFUNDEN", "FAHRER_UNTERWEGS", "FAHRER_ANGEKOMMEN", "FAHRT_LAEUFT"] },
+      // Zusaetzliche Absicherung: eine Vorbestellung, deren Fahrtzeit noch in
+      // der Zukunft liegt, ist NIE der aktuelle Auftrag.
+      NOT: { isScheduled: true, scheduledAt: { gt: new Date(Date.now() + SCHEDULED_LEAD_MS) } },
     },
-    include: { driver: true },
-    orderBy: { acceptedAt: "desc" },
+    include: { driver: true, card: true },
+    // acceptedAt kann null sein (z. B. vorgemerkte Fahrten); Postgres sortiert
+    // bei DESC sonst NULLS FIRST und eine Fahrt ohne Zeitstempel wuerde die
+    // echte, gerade angenommene Fahrt verdraengen.
+    orderBy: [{ acceptedAt: { sort: "desc", nulls: "last" } }],
   });
-  const myScheduled = await prisma.booking.findMany({
+  const myScheduledPromise = prisma.booking.findMany({
     where: {
       driverId,
       isScheduled: true,
@@ -78,16 +96,36 @@ async function driverState(driverId: string) {
     },
     orderBy: { scheduledAt: "asc" },
   });
-  const openScheduled = await prisma.booking.findMany({
+  const openScheduledPromise = prisma.booking.findMany({
     // ADMIN-Pool-Fahrten (Krankenfahrten/Vorbestellungen der Einrichtungen)
     // erscheinen NICHT bei den Fahrern – sie werden von einer Zentrale zugewiesen.
     where: { isScheduled: true, driverId: null, status: "OFFEN", dispatchMode: "AUTO" },
     orderBy: { scheduledAt: "asc" },
+    take: 50,
   });
+  // Vorgemerkte Folgefahrt: waehrend der laufenden Fahrt angenommen, startet
+  // automatisch nach deren Abschluss. Wird separat ausgewiesen, damit sie den
+  // aktuellen Auftrag nicht verdeckt.
+  const nextPromise = prisma.booking.findFirst({
+    where: { driverId, status: "ZUGEWIESEN", trackingStatus: "RESERVIERT_FAHRER" },
+    include: { driver: true, card: true },
+    orderBy: [{ acceptedAt: { sort: "desc", nulls: "last" } }],
+  });
+
+  const [me, active, myScheduled, openScheduled, next] = await Promise.all([
+    mePromise,
+    activePromise,
+    myScheduledPromise,
+    openScheduledPromise,
+    nextPromise,
+  ]);
+
   return {
     status: me?.status ?? "PAUSE",
     name: me?.name ?? "",
     activeBooking: active ? bookingDTO(active) : null,
+    // Vorgemerkte Folgefahrt (startet nach der aktuellen Fahrt automatisch).
+    nextBooking: next ? bookingDTO(next) : null,
     myScheduled: myScheduled.map((b) => bookingDTO(b)),
     openScheduled: openScheduled.map((b) => bookingDTO(b)),
   };
@@ -99,6 +137,22 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
   dispatcher.refreshDriver = async (driverId: string) => {
     try {
       io.to(`driver:${driverId}`).emit("driver:state", await driverState(driverId));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // Allen verbundenen Fahrern einen frischen Stand schicken – z. B. wenn eine
+  // Vorbestellung nach einer Fahrer-Absage wieder in den Pool zurueckkehrt.
+  dispatcher.refreshAllDrivers = async () => {
+    try {
+      const room = io.sockets.adapter.rooms.get("drivers");
+      if (!room) return;
+      for (const socketId of room) {
+        const s = io.sockets.sockets.get(socketId);
+        const did = s?.data?.driverId;
+        if (did) s!.emit("driver:state", await driverState(did));
+      }
     } catch {
       /* ignore */
     }
@@ -141,10 +195,15 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
       socket.join("drivers");
       realDrivers.add(driverId);
       await dispatcher.onDriverConnect(driverId);
+      // WICHTIG: Ein Fehler wurde hier frueher stillschweigend verschluckt –
+      // der Fahrer bekam dann GAR NICHTS, sein Dashboard drehte sich endlos,
+      // ohne Meldung und ohne Wiederholung. Deshalb jetzt: Fehler
+      // protokollieren UND trotzdem einen brauchbaren Zustand schicken.
       try {
         socket.emit("driver:state", await driverState(driverId));
-      } catch {
-        /* ignore */
+      } catch (e: any) {
+        console.error(`driver:state fehlgeschlagen (${driverId}):`, e?.message ?? e);
+        socket.emit("driver:state", leererFahrerZustand());
       }
 
       socket.on("driver:location", (p: { lat: number; lng: number }) => {
@@ -176,6 +235,26 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
         ack?.(r);
       });
 
+      // Antwort auf die 30-Min-Rueckfrage ("Fahrt weiterhin durchfuehren?").
+      // keep=true  -> Fahrt bleibt beim Fahrer.
+      // keep=false -> im UI erscheint der Button "Fahrt stornieren".
+      socket.on(
+        "driver:confirmScheduled",
+        async (p: { bookingId: string; keep: boolean }, ack?: (r: any) => void) => {
+          const r = await dispatcher.respondScheduledConfirm(driverId, p?.bookingId, !!p?.keep);
+          if (r.ok) socket.emit("driver:state", await driverState(driverId));
+          ack?.(r);
+        },
+      );
+
+      // Endgueltige Absage: Fahrt freigeben, Kunde per SMS informieren,
+      // sofort neuen Fahrer suchen.
+      socket.on("driver:cancelScheduled", async (p: { bookingId: string }, ack?: (r: any) => void) => {
+        const r = await dispatcher.releaseScheduledByDriver(driverId, p?.bookingId);
+        if (r.ok) socket.emit("driver:state", await driverState(driverId));
+        ack?.(r);
+      });
+
       // Zieländerung / Zwischenstopp während der Fahrt (Phase 2f).
       socket.on(
         "driver:changeDest",
@@ -199,27 +278,30 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
     }
 
     // ---- Kunde (Tracking) ----
+    // WICHTIG: Gaeste oeffnen /verfolgen/<trackingToken>, senden also den Token
+    // als Referenz. Der Dispatcher sendet aber an `booking:<id>`. Der Raum muss
+    // daher IMMER unter der kanonischen Buchungs-ID betreten werden – sonst
+    // erhaelt der Gast keine Live-Updates und kann nicht chatten.
     socket.on("track:join", async (p: { bookingId: string }, ack?: (r: any) => void) => {
-      if (!p?.bookingId) return;
-      socket.join(`booking:${p.bookingId}`);
-      const b = await prisma.booking.findUnique({
-        where: { id: p.bookingId },
-        include: { driver: true },
+      if (!p?.bookingId) return ack?.({ ok: false });
+      const b = await prisma.booking.findFirst({
+        where: bookingRefWhere(p.bookingId),
+        include: { driver: true, card: true },
       });
-      if (b) {
-        const dto = bookingDTO(b);
-        socket.emit("booking:update", dto);
-        ack?.({ ok: true, booking: dto });
-      } else {
-        ack?.({ ok: false });
-      }
+      if (!b) return ack?.({ ok: false });
+      socket.join(`booking:${b.id}`);
+      const dto = bookingDTO(b);
+      socket.emit("booking:update", dto);
+      ack?.({ ok: true, booking: dto });
     });
 
     // ---- Chat Kunde <-> Fahrer (Phase 3i) ----
     socket.on("chat:history", async (p: { bookingId: string }, ack?: (r: any) => void) => {
       if (!p?.bookingId) return ack?.({ ok: false });
+      const b = await prisma.booking.findFirst({ where: bookingRefWhere(p.bookingId), select: { id: true } });
+      if (!b) return ack?.({ ok: false });
       const msgs = await prisma.chatMessage.findMany({
-        where: { bookingId: p.bookingId },
+        where: { bookingId: b.id },
         orderBy: { createdAt: "asc" },
         take: 100,
       });
@@ -229,7 +311,7 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
     socket.on("chat:send", async (p: { bookingId: string; text: string }, ack?: (r: any) => void) => {
       const text = (p?.text ?? "").toString().trim().slice(0, 1000);
       if (!p?.bookingId || !text) return ack?.({ ok: false, error: "Leere Nachricht." });
-      const b = await prisma.booking.findUnique({ where: { id: p.bookingId } });
+      const b = await prisma.booking.findFirst({ where: bookingRefWhere(p.bookingId) });
       if (!b) return ack?.({ ok: false, error: "Auftrag nicht gefunden." });
       if (b.status === "ABGESCHLOSSEN" || b.status === "STORNIERT") {
         return ack?.({ ok: false, error: "Chat geschlossen." });
@@ -241,16 +323,17 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
         if (b.driverId !== socket.data.driverId) return ack?.({ ok: false, error: "Nicht berechtigt." });
         sender = "DRIVER";
       } else {
-        // Kunde muss dem Tracking-Raum dieser Buchung beigetreten sein.
-        if (!socket.rooms.has(`booking:${p.bookingId}`)) {
+        // Kunde muss dem Tracking-Raum dieser Buchung beigetreten sein
+        // (Raumname ist immer die kanonische Buchungs-ID, siehe track:join).
+        if (!socket.rooms.has(`booking:${b.id}`)) {
           return ack?.({ ok: false, error: "Bitte Tracking öffnen." });
         }
         sender = "CUSTOMER";
       }
 
-      const msg = await prisma.chatMessage.create({ data: { bookingId: p.bookingId, sender, text } });
+      const msg = await prisma.chatMessage.create({ data: { bookingId: b.id, sender, text } });
       const dto = messageDTO(msg);
-      io.to(`booking:${p.bookingId}`).emit("chat:message", dto);
+      io.to(`booking:${b.id}`).emit("chat:message", dto);
       io.to(`driver:${b.driverId}`).emit("chat:message", dto);
       ack?.({ ok: true, message: dto });
     });

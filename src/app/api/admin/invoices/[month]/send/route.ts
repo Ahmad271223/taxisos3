@@ -3,6 +3,7 @@ import { requireRole } from "@/lib/session";
 import { buildInvoice, parseMonth } from "@/lib/invoice";
 import { sendInvoiceEmail } from "@/lib/invoiceMail";
 
+import { invoiceModuleRetired } from "@/lib/invoiceRetired";
 export const dynamic = "force-dynamic";
 
 /**
@@ -10,6 +11,8 @@ export const dynamic = "force-dynamic";
  * Firmen-Admin only. Ohne RESEND_API_KEY -> Mock (kein echter Versand).
  */
 export async function POST(_req: Request, { params }: { params: { month: string } }) {
+  const gesperrt = invoiceModuleRetired();
+  if (gesperrt) return gesperrt;
   const session = requireRole("ADMIN");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
 

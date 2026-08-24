@@ -22,8 +22,24 @@ model Company {
   email        String   @unique // Admin-Login
   passwordHash String
 
-  // Provisionsstufe: BIG (Großstadt, 7%) | SMALL (Klein/ländlich, 5%)
+  // Historisch: Provisionsstufe. Es wird KEINE Provision mehr erhoben
+  // (lib/commission.ts = 0 %); Feld bleibt fuer Altdaten/Auswertungen.
   cityTier     String   @default("SMALL")
+
+  // ---- Monats-Abo (einzige Einnahmequelle der Plattform) ----
+  // P5 (100 €/5 Fahrer) | P10 (190 €/10) | P15 (235 €/15) | P20 (260 €/20)
+  plan               String   @default("P5")
+  // TRIAL | AKTIV | UEBERFAELLIG | GEKUENDIGT
+  subscriptionStatus String   @default("TRIAL")
+  subscriptionUntil  DateTime?
+  stripeSubscriptionId String?
+  stripeCustomerId   String?
+
+  // ---- Stripe Connect (Auszahlungskonto des Unternehmens) ----
+  // Fahrpreise gehen als Destination-Charge direkt an dieses Konto.
+  stripeAccountId      String?
+  stripeChargesEnabled Boolean @default(false)
+  stripePayoutsEnabled Boolean @default(false)
 
   drivers      Driver[]
   bookings     Booking[]
@@ -387,6 +403,23 @@ model Booking {
   paymentMethod  String   @default("CASH") // CASH | CARD | FIRMA
   paymentStatus  String   @default("OFFEN") // OFFEN | AUTORISIERT | BEZAHLT | FEHLGESCHLAGEN | STORNIERT | FIRMA
   paymentRef     String?  // Stripe PaymentIntent o.ae.
+  tip            Float    @default(0)  // Trinkgeld – wird ERST nach Fahrtende gewaehlt
+
+  // Fuer diese Fahrt zu belastende Karte (gespeicherte Zahlungsmethode).
+  // Bei Barzahlung null. Die Belastung erfolgt erst NACH Fahrtende.
+  cardId         String?
+  card           CustomerCard? @relation(fields: [cardId], references: [id])
+  // Zeitpunkt, ab dem die Trinkgeld-Auswahl offen ist (Fahrtende).
+  // Reagiert der Kunde nicht, wird nach TIP_WINDOW_MS ohne Trinkgeld abgebucht.
+  tipPromptedAt  DateTime?
+  // Klartext-Grund einer fehlgeschlagenen Belastung (fuer Kunde + Zentrale).
+  paymentError   String?
+  paymentAttempts Int     @default(0)
+  // Belegt-Markierung waehrend einer laufenden Belastung. Verhindert, dass
+  // zwei gleichzeitige Laeufe (Kunde + automatische Abrechnung) dieselbe Fahrt
+  // doppelt abbuchen. Wird nach Abschluss wieder geleert; alte Eintraege
+  // verfallen nach SETTLE_LOCK_MS, damit ein Absturz nichts blockiert.
+  settlingAt     DateTime?
 
   // Festpreis-Engine: wurde der Endpreis aus einer Festpreis-Regel gefroren
   // (true) oder per Meter-Tarif berechnet (false)?
@@ -428,6 +461,14 @@ model Booking {
   // ("24h,2h,30m"), damit jede Erinnerung genau einmal verschickt wird.
   remindersSent  String   @default("")
 
+  // Fahrer-Rueckfrage 30 Min vor einer reservierten Vorbestellung:
+  // "Moechtest du diese Fahrt weiterhin durchfuehren?" (Ja/Nein)
+  driverConfirmAskedAt DateTime?
+  driverConfirmedAt    DateTime?   // Fahrer hat mit "Ja" bestaetigt
+  driverDeclinedAt     DateTime?   // Fahrer hat "Nein" gewaehlt (Storno-Button erscheint)
+  // Wie oft die Fahrt nach einer Fahrer-Absage neu vermittelt wurde.
+  reassignCount        Int      @default(0)
+
   // Notfall-Rettungsfahrt (Phase 21): per SOS automatisch zum Standort disponiert.
   isSos          Boolean  @default(false)
 
@@ -450,6 +491,15 @@ model Booking {
   @@index([driverId])
   @@index([groupId])
   @@index([recurringId])
+  // Heisse Pfade beim Verbinden eines Fahrers (driver:state):
+  //  - aktuelle bzw. vorgemerkte Fahrt des Fahrers
+  //  - offene Vorbestellungen im Pool
+  // Ohne diese Indizes wuchs die Antwortzeit mit der Zahl der Fahrten und
+  // fuehrte bei vielen gleichzeitigen Anmeldungen zu Zeitueberschreitungen.
+  @@index([driverId, status, trackingStatus])
+  @@index([isScheduled, status, dispatchMode, scheduledAt])
+  // Automatische Abrechnung nach Fahrtende (settleDueRides).
+  @@index([paymentMethod, paymentStatus, tipPromptedAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -540,6 +590,17 @@ model Customer {
   passwordHash String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  // Konto gesperrt -> darf nicht buchen (Zahlungsrueckstand, Missbrauch).
+  blocked      Boolean  @default(false)
+  blockedReason String?
+  // Telefonnummer bestaetigt (Voraussetzung fuer Buchungen).
+  phoneVerifiedAt DateTime?
+
+  // Stripe-Kunde auf dem PLATTFORM-Konto. Gespeicherte Karten haengen hier und
+  // funktionieren dadurch bei JEDEM verbundenen Taxiunternehmen (Destination-Charge).
+  stripeCustomerId String?
+  cards        CustomerCard[]
 
   // Bonus-/Punktesystem (Phase 18)
   points       Int      @default(0)
@@ -1058,4 +1119,48 @@ model PushSubscription {
   createdAt DateTime @default(now())
 
   @@index([driverId])
+}
+
+// Protokoll aller SMS-Versuche. Der eindeutige `dedupeKey` verhindert
+// Doppelversand – auch bei ueberlappenden Scheduler-Laeufen oder mehreren
+// Server-Instanzen (die Unique-Verletzung wirkt als verteilte Sperre).
+model SmsLog {
+  id         String   @id @default(cuid())
+  dedupeKey  String   @unique
+  kind       String?  // BOOKING_CONFIRMED | DRIVER_CANCELLED | NEW_DRIVER | REMINDER | ...
+  bookingId  String?
+  to         String
+  body       String
+  status     String   @default("PENDING") // PENDING | SENT | MOCK | FAILED
+  providerId String?  // Twilio Message SID
+  error      String?
+  createdAt  DateTime @default(now())
+
+  @@index([bookingId])
+  @@index([kind])
+  @@index([createdAt])
+}
+
+// Gespeicherte Zahlungsmethode eines Kunden.
+// WICHTIG: Es werden NIEMALS vollstaendige Kartendaten gespeichert – nur die
+// Stripe-Referenz und die Anzeigedaten (Marke, letzte 4 Ziffern, Ablauf).
+// Die Karte haengt am Plattform-Stripe-Kunden und ist damit bei allen
+// verbundenen Taxiunternehmen nutzbar.
+model CustomerCard {
+  id                    String   @id @default(cuid())
+  customerId            String
+  customer              Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  stripePaymentMethodId String   @unique
+  brand                 String   // visa | mastercard | amex | ...
+  last4                 String
+  expMonth              Int
+  expYear               Int
+  isDefault             Boolean  @default(false)
+
+  createdAt             DateTime @default(now())
+
+  bookings              Booking[]
+
+  @@index([customerId])
 }

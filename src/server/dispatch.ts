@@ -24,12 +24,13 @@ import { normalizeClass } from "../lib/vehicleClasses";
 import { computeCommission } from "../lib/commission";
 import { bookingRoutePoints, parseStops, serializeStops, type Stop } from "../lib/stops";
 import { waitCharge } from "../lib/airportExtras";
-import { capturePayment, voidPayment } from "../lib/stripe";
+import { chargeCancellationFee, prepareRidePayment } from "../lib/settle";
 import { settleCorporateComplete, releaseCorporate } from "./corporateSettle";
 import { fixedPriceFor } from "../lib/fixedPrice";
 import { getPlatformConfig } from "../lib/platformConfig";
 import { insuranceFare, riskBufferFare, stopSurcharge, applyFloor } from "../lib/fareAdjust";
-import { notifyDriverOffer } from "../lib/webpush";
+import { notifyDriverOffer, notifyDriverConfirm } from "../lib/webpush";
+import { sendSms } from "../lib/notify";
 import { bookingDTO, driverAdmin } from "./serialize";
 
 const PHASE_DURATION_MS = 15_000;
@@ -39,7 +40,13 @@ const PHASES_METERS = [500, 1000, 2000, 3000, 5000];
 // Über SEARCH_MAX_MS (env) für Tests verkürzbar; Standard 180 s.
 const SEARCH_MAX_MS = Number(process.env.SEARCH_MAX_MS ?? 180_000);
 const NEAR_COMPLETION_METERS = 300;
+// Ankunftszeit waehrend der Anfahrt hoechstens alle 20 s bzw. alle 200 m neu
+// berechnen – sonst wuerde jede GPS-Meldung eine Routenabfrage ausloesen.
+const ETA_REFRESH_MS = 20_000;
+const ETA_REFRESH_METERS = 200;
 const SCHEDULED_LEAD_MS = 5 * 60_000;
+// Vorlauf fuer die Fahrer-Rueckfrage ("Fahrt weiterhin durchfuehren?").
+const DRIVER_CONFIRM_LEAD_MS = 30 * 60_000;
 const LOCATION_PERSIST_MS = 8_000;
 
 interface LiveDriver {
@@ -77,6 +84,8 @@ export class Dispatcher {
   private dispatches = new Map<string, ActiveDispatch>(); // key = bookingId
   private driverActiveBooking = new Map<string, string>();
   private driverActiveBookingDest = new Map<string, { lat: number; lng: number }>();
+  // Letzte Ankunftszeit-Berechnung je Fahrt (Drosselung, siehe refreshEta).
+  private lastEtaCalc = new Map<string, { at: number; lat: number; lng: number }>();
   private driverNearCompletion = new Set<string>();
   // Reservierung der naechsten Fahrt (Bolt-Style near completion)
   private driverReservedBooking = new Map<string, string>();
@@ -87,6 +96,9 @@ export class Dispatcher {
   // Hook (von realtime gesetzt): pusht den Fahrer-State neu, z. B. wenn eine
   // reservierte Vorbestellung faellig wird.
   public refreshDriver?: (driverId: string) => void | Promise<void>;
+  // Allen verbundenen Fahrern einen frischen driver:state schicken (z. B. wenn
+  // eine Vorbestellung wieder in den Pool zurueckgeht).
+  public refreshAllDrivers?: () => void | Promise<void>;
 
   constructor(io: IOServer) {
     this.io = io;
@@ -112,14 +124,31 @@ export class Dispatcher {
       });
       await prisma.driver.update({ where: { id: d.id }, data: { status: "OFFLINE" } });
     }
+    // Nur WIRKLICH laufende Fahrten als aktuellen Auftrag wiederherstellen.
+    // Reservierte Vorbestellungen (GEPLANT) duerfen hier NICHT landen: sonst
+    // gilt der Fahrer nach einem Neustart als "in Fahrt" und die naechste
+    // angenommene Fahrt wird faelschlich RESERVIERT_FAHRER + Fahrer RESERVIERT
+    // – in dem Zustand sind im Fahrer-Dashboard alle Trip-Buttons gesperrt.
     const active = await prisma.booking.findMany({
-      where: { status: { in: ["ZUGEWIESEN", "AKTIV"] }, driverId: { not: null } },
+      where: {
+        status: { in: ["ZUGEWIESEN", "AKTIV"] },
+        driverId: { not: null },
+        trackingStatus: { in: ["FAHRER_GEFUNDEN", "FAHRER_UNTERWEGS", "FAHRER_ANGEKOMMEN", "FAHRT_LAEUFT"] },
+      },
     });
     for (const b of active) {
       if (b.driverId) {
         this.driverActiveBooking.set(b.driverId, b.id);
         this.driverActiveBookingDest.set(b.driverId, { lat: b.destLat, lng: b.destLng });
       }
+    }
+    // Vorgemerkte Folgefahrten (angenommen, waehrend eine andere lief) in die
+    // richtige Map zurueckholen, damit sie nach Fahrtende live geschaltet werden.
+    const reserved = await prisma.booking.findMany({
+      where: { status: "ZUGEWIESEN", driverId: { not: null }, trackingStatus: "RESERVIERT_FAHRER" },
+    });
+    for (const b of reserved) {
+      if (b.driverId) this.driverReservedBooking.set(b.driverId, b.id);
     }
 
     setInterval(() => this.sweep().catch(() => {}), 20_000);
@@ -141,7 +170,7 @@ export class Dispatcher {
   private async emitBooking(bookingId: string, event = "booking:update") {
     const b = await prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { driver: true },
+      include: { driver: true, card: true },
     });
     if (!b) return;
     const eta = this.driverActiveBooking.get(b.driverId ?? "") === b.id
@@ -156,6 +185,41 @@ export class Dispatcher {
       this.io.to(`driver:${b.driverId}`).emit("driver:booking", dto);
     }
     return dto;
+  }
+
+  /**
+   * Ankunftszeit waehrend der Anfahrt fortschreiben.
+   *
+   * Die Route wird bei einem echten Kartendienst abgefragt – das darf nicht bei
+   * JEDER GPS-Meldung passieren (ein Fahrer sendet im Sekundentakt). Deshalb nur
+   * neu rechnen, wenn seit der letzten Berechnung genug Zeit vergangen ist ODER
+   * der Wagen ein Stueck gefahren ist. Nach dem Einsteigen ist die Zeit bis zum
+   * Abholpunkt gegenstandslos, dann wird nichts mehr gesendet.
+   */
+  private async refreshEta(bookingId: string, driverId: string, lat: number, lng: number): Promise<void> {
+    const letzte = this.lastEtaCalc.get(bookingId);
+    const alt = !letzte || Date.now() - letzte.at > ETA_REFRESH_MS;
+    const bewegt = letzte ? haversineMeters({ lat, lng }, { lat: letzte.lat, lng: letzte.lng }) > ETA_REFRESH_METERS : true;
+    if (!alt && !bewegt) return;
+    this.lastEtaCalc.set(bookingId, { at: Date.now(), lat, lng });
+
+    try {
+      const b = await prisma.booking.findUnique({
+        where: { id: bookingId },
+        select: { trackingStatus: true, pickupLat: true, pickupLng: true, driverId: true },
+      });
+      // Nur auf der Anfahrt, und nur fuer den Fahrer, der die Fahrt hat.
+      if (!b || b.driverId !== driverId) return;
+      if (!["FAHRER_GEFUNDEN", "FAHRER_UNTERWEGS"].includes(b.trackingStatus)) return;
+
+      const r = await routeBetween({ lat, lng }, { lat: b.pickupLat, lng: b.pickupLng });
+      const eta = r?.durationSeconds ?? null;
+      if (eta == null) return;
+      this.io.to(`booking:${bookingId}`).emit("booking:eta", { bookingId, etaSeconds: eta });
+      this.io.to(`driver:${driverId}`).emit("driver:eta", { bookingId, etaSeconds: eta });
+    } catch {
+      /* Routendienst nicht erreichbar: alte Anzeige stehen lassen */
+    }
   }
 
   private async etaSeconds(b: any): Promise<number | null> {
@@ -258,6 +322,11 @@ export class Dispatcher {
         lng,
       });
 
+      // Ankunftszeit mitlaufen lassen. Ohne das blieb im Kundenfenster die bei
+      // der Annahme berechnete Zeit stehen, waehrend sich der Wagen sichtbar
+      // naeherte ("Ankunft in ca. 6 Min", auch wenn er schon vor der Tuer war).
+      void this.refreshEta(activeBooking, driverId, lat, lng);
+
       // Near-Completion-Check: <300 m vom Ziel -> wieder fuer Anfragen freischalten.
       const dest = this.driverActiveBookingDest.get(driverId);
       if (dest) {
@@ -302,6 +371,57 @@ export class Dispatcher {
     await this.startOrContinueDispatch(bookingId, 0);
   }
 
+  /**
+   * Deckungspruefung, sobald die Fahrt live geht (Fahrer unterwegs).
+   *
+   * Erst hier – nicht beim Buchen – wird der geschaetzte Fahrpreis bei der Bank
+   * reserviert. Damit steht fest, dass die Karte gedeckt ist, BEVOR der Gast
+   * einsteigt. Klappt es nicht, erfahren es Kunde und Zentrale sofort.
+   *
+   * Laeuft bewusst im Hintergrund: die Fahrerzuweisung darf nicht auf Stripe warten.
+   */
+  private async checkFunds(bookingId: string): Promise<void> {
+    const res = await prepareRidePayment(bookingId).catch((e) => ({
+      ok: false,
+      error: e?.message ?? "Zahlung konnte nicht geprüft werden.",
+      skipped: false,
+    }));
+    if (res.ok || (res as any).skipped) return;
+
+    const b = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: { customerPhone: true, companyId: true },
+    });
+    if (!b) return;
+
+    await sendSms(
+      b.customerPhone,
+      `Ihre hinterlegte Karte konnte nicht bestätigt werden (${res.error}). Bitte hinterlegen Sie in Ihrem Konto eine andere Karte oder zahlen Sie bar beim Fahrer.`,
+      { dedupeKey: `card-check-failed:${bookingId}`, kind: "PAYMENT_FAILED", bookingId },
+    ).catch(() => {});
+
+    // Zentrale/Unternehmen sehen es live im Dashboard.
+    if (b.companyId) {
+      this.io.to(`admins:${b.companyId}`).emit("booking:paymentIssue", { bookingId, error: res.error });
+    }
+    await this.emitBooking(bookingId);
+  }
+
+  // Suche erfolglos beendet: der Kunde sitzt selten vor der Tracking-Seite, also
+  // per SMS informieren und die Nummer der Zentrale mitschicken – dort kann ein
+  // Disponent einen Fahrer direkt beauftragen. Genau EINE SMS je Buchung.
+  private async notifyNoDriver(b: any): Promise<void> {
+    const hotline = (process.env.NEXT_PUBLIC_PLATFORM_PHONE ?? "").trim();
+    const text = hotline
+      ? `Leider ist gerade kein Taxi frei. Bitte stellen Sie eine neue Anfrage oder rufen Sie unsere Zentrale an: ${hotline} – wir beauftragen dann direkt einen Fahrer für Sie.`
+      : `Leider ist gerade kein Taxi frei. Bitte stellen Sie in Kürze eine neue Anfrage.`;
+    await sendSms(b.customerPhone, text, {
+      dedupeKey: `no-driver:${b.id}:${b.reassignCount ?? 0}`,
+      kind: "NO_DRIVER",
+      bookingId: b.id,
+    }).catch(() => {});
+  }
+
   private async startOrContinueDispatch(bookingId: string, phaseIndex: number): Promise<void> {
     const b = await prisma.booking.findUnique({ where: { id: bookingId } });
     if (!b) return;
@@ -319,6 +439,7 @@ export class Dispatcher {
       if (b.trackingStatus !== "KEIN_FAHRER") {
         await prisma.booking.update({ where: { id: bookingId }, data: { trackingStatus: "KEIN_FAHRER" } });
         await this.emitBooking(bookingId);
+        await this.notifyNoDriver(b);
       }
       return;
     }
@@ -332,6 +453,7 @@ export class Dispatcher {
           data: { trackingStatus: "KEIN_FAHRER" },
         });
         await this.emitBooking(bookingId);
+        await this.notifyNoDriver(b);
       }
       return;
     }
@@ -406,7 +528,10 @@ export class Dispatcher {
         timer,
         phaseEndsAt: Date.now() + PHASE_DURATION_MS,
       });
-      if (b.trackingStatus !== "SUCHE") {
+      // Eine bereits endgueltig beendete Suche NICHT wiederbeleben: sonst
+      // springt der Auftrag von KEIN_FAHRER zurueck auf SUCHE und haengt dort
+      // dauerhaft, obwohl das Suchfenster abgelaufen ist.
+      if (b.trackingStatus !== "SUCHE" && b.trackingStatus !== "KEIN_FAHRER") {
         await prisma.booking.update({
           where: { id: bookingId },
           data: { trackingStatus: "SUCHE", assignedAt: b.assignedAt ?? new Date() },
@@ -442,7 +567,7 @@ export class Dispatcher {
     const updated = await prisma.booking.update({
       where: { id: bookingId },
       data: { trackingStatus: "SUCHE", assignedAt: b.assignedAt ?? new Date() },
-      include: { driver: true },
+      include: { driver: true, card: true },
     });
 
     // Jedem Kandidaten ein Angebot zustellen.
@@ -600,20 +725,43 @@ export class Dispatcher {
         priceIsFixed,
         isReserved: isReservation,
       },
-      include: { driver: true },
+      include: { driver: true, card: true },
     });
 
     if (isReservation) {
       // Reservierte Folgefahrt: aktuelle Fahrt laeuft weiter,
       // Fahrer wird auf RESERVIERT gesetzt, neuer Auftrag wartet.
+      // Geld wird hier NICHT reserviert – erst wenn die Fahrt wirklich losgeht.
       this.driverReservedBooking.set(driverId, bookingId);
       await this.setStatusInternal(driverId, "RESERVIERT");
     } else {
+      // Fahrt geht jetzt live -> Deckung der Karte pruefen.
+      void this.checkFunds(bookingId);
       this.driverActiveBooking.set(driverId, bookingId);
       this.driverActiveBookingDest.set(driverId, { lat: updated.destLat, lng: updated.destLng });
       this.driverNearCompletion.delete(driverId);
       await this.setStatusInternal(driverId, "BESETZT");
     }
+
+    // Kunde per SMS informieren, dass ein Fahrer unterwegs ist. Nach einer
+    // Fahrer-Absage ist das ausdruecklich die "neuer Fahrer gefunden"-Meldung.
+    const dv: any = (updated as any).driver;
+    const wasReassigned = (updated.reassignCount ?? 0) > 0;
+    const veh = [dv?.vehicleColor, dv?.vehicleModel].filter(Boolean).join(" ");
+    const fahrzeug = `${veh}${dv?.vehiclePlate ? ` (${dv.vehiclePlate})` : ""}`.trim();
+    sendSms(
+      updated.customerPhone,
+      wasReassigned
+        ? `Gute Nachricht: Wir haben einen neuen Fahrer für Sie gefunden. ${dv?.name ?? "Ihr Fahrer"}${fahrzeug ? `, ${fahrzeug}` : ""} übernimmt Ihre Fahrt.`
+        : `Ihr Taxi ist unterwegs. Fahrer: ${dv?.name ?? ""}${fahrzeug ? `, ${fahrzeug}` : ""}.`,
+      {
+        // Je Zuweisungsrunde genau eine SMS – auch bei Reconnects/Retries.
+        dedupeKey: `driver-assigned:${bookingId}:${updated.reassignCount ?? 0}`,
+        kind: wasReassigned ? "NEW_DRIVER" : "DRIVER_ASSIGNED",
+        bookingId,
+      },
+    ).catch(() => {});
+
     await this.emitBooking(bookingId);
   }
 
@@ -652,9 +800,10 @@ export class Dispatcher {
         assignedAt: now,
         acceptedAt: now,
       },
-      include: { driver: true },
+      include: { driver: true, card: true },
     });
 
+    void this.checkFunds(bookingId); // Fahrt geht live -> Karte auf Deckung pruefen
     this.driverActiveBooking.set(driverId, bookingId);
     this.driverActiveBookingDest.set(driverId, { lat: updated.destLat, lng: updated.destLng });
     this.driverNearCompletion.delete(driverId);
@@ -694,12 +843,21 @@ export class Dispatcher {
   async tripAction(driverId: string, bookingId: string, action: "arrived" | "start" | "complete" | "cancel" | "noshow"): Promise<{ ok: boolean }> {
     const b = await prisma.booking.findUnique({ where: { id: bookingId } });
     if (!b || b.driverId !== driverId) return { ok: false };
+    // Abgeschlossene/stornierte Fahrten sind endgueltig: doppelte Klicks oder
+    // ein spaeter eintreffendes Event duerfen den Zustand nicht zurueckdrehen.
+    if (b.status === "ABGESCHLOSSEN" || b.status === "STORNIERT") return { ok: false };
 
     if (action === "arrived") {
       await prisma.booking.update({
         where: { id: bookingId },
         data: { trackingStatus: "FAHRER_ANGEKOMMEN", arrivedAt: new Date() },
       });
+      // Der Gast wartet nicht zwingend auf der Tracking-Seite -> eine SMS.
+      sendSms(
+        b.customerPhone,
+        `Ihr Taxi ist da und wartet an der Abholadresse: ${String(b.pickupAddress).split(",")[0]}.`,
+        { dedupeKey: `arrived:${bookingId}:${b.reassignCount ?? 0}`, kind: "DRIVER_ARRIVED", bookingId },
+      ).catch(() => {});
     } else if (action === "start") {
       await prisma.booking.update({
         where: { id: bookingId },
@@ -728,14 +886,14 @@ export class Dispatcher {
         companyNet = c.companyNet;
       }
 
-      // Karte belasten (Phase 2g): exakten Fahrpreis vom Hold abbuchen.
-      // Capture darf den autorisierten Betrag nicht uebersteigen -> deckeln.
-      let paymentStatus = b.paymentStatus;
-      if (b.paymentMethod === "CARD" && b.paymentStatus === "AUTORISIERT") {
-        const captureAmount = b.priceAuthorized != null ? Math.min(fare, b.priceAuthorized) : fare;
-        const cap = await capturePayment(b.paymentRef, captureAmount);
-        paymentStatus = cap.status; // BEZAHLT | FEHLGESCHLAGEN
-      }
+      // Karte belasten (Phase 2g): Fahrpreis + Trinkgeld vom Hold abbuchen.
+      // Capture darf den autorisierten Betrag nicht uebersteigen -> Trinkgeld
+      // auf den freien Rest des Holds deckeln (kein neuer Hold moeglich).
+      // WICHTIG: Bei Kartenzahlung wird hier NICHT abgebucht. Der Kunde bekommt
+      // zuerst die Trinkgeld-Auswahl (Punkt 9/10). Abgebucht wird danach – oder
+      // automatisch ohne Trinkgeld, wenn er nicht reagiert (Punkt 13).
+      // Barzahlung: gar keine Trinkgeld-Abfrage, Fahrt ist einfach beendet.
+      const isCardRide = b.paymentMethod === "CARD" && b.paymentStatus === "KARTE_HINTERLEGT";
 
       await prisma.booking.update({
         where: { id: bookingId },
@@ -744,12 +902,15 @@ export class Dispatcher {
           trackingStatus: "BEENDET",
           completedAt: new Date(),
           fare,
+          // Trinkgeld wird erst NACH Fahrtende gewaehlt -> hier immer 0.
+          tip: 0,
           waitMinutes: wait.minutes || null,
           waitFee: wait.fee || null,
           platformFeeRate,
           platformFee,
           companyNet,
-          paymentStatus,
+          // Startet das Trinkgeld-Zeitfenster nur bei Kartenzahlung.
+          ...(isCardRide ? { tipPromptedAt: new Date() } : {}),
         },
       });
       this.driverActiveBooking.delete(driverId);
@@ -768,21 +929,30 @@ export class Dispatcher {
 
       // Reservierte Folgefahrt automatisch starten?
       const reservedId = this.driverReservedBooking.get(driverId);
+      let promoted = false;
       if (reservedId) {
         this.driverReservedBooking.delete(driverId);
-        const reserved = await prisma.booking.update({
-          where: { id: reservedId },
-          data: {
-            trackingStatus: "FAHRER_UNTERWEGS",
-            isReserved: false,
-          },
-          include: { driver: true },
+        // WICHTIG: nur eine noch offene Vormerkung live schalten. Ohne diese
+        // Bedingung wuerde eine bereits beendete/stornierte Fahrt wieder auf
+        // FAHRER_UNTERWEGS gesetzt ("wiederbelebt") – sie stand dann auf
+        // ABGESCHLOSSEN + FAHRER_UNTERWEGS zugleich.
+        const claim = await prisma.booking.updateMany({
+          where: { id: reservedId, driverId, status: "ZUGEWIESEN", trackingStatus: "RESERVIERT_FAHRER" },
+          data: { trackingStatus: "FAHRER_UNTERWEGS", isReserved: false },
         });
-        this.driverActiveBooking.set(driverId, reservedId);
-        this.driverActiveBookingDest.set(driverId, { lat: reserved.destLat, lng: reserved.destLng });
-        await this.setStatusInternal(driverId, "BESETZT");
-        await this.emitBooking(reservedId);
-      } else {
+        if (claim.count > 0) {
+          const reserved = await prisma.booking.findUnique({ where: { id: reservedId } });
+          if (reserved) {
+            void this.checkFunds(reservedId); // Folgefahrt geht jetzt live
+            this.driverActiveBooking.set(driverId, reservedId);
+            this.driverActiveBookingDest.set(driverId, { lat: reserved.destLat, lng: reserved.destLng });
+            await this.setStatusInternal(driverId, "BESETZT");
+            await this.emitBooking(reservedId);
+            promoted = true;
+          }
+        }
+      }
+      if (!promoted) {
         await this.setStatus(driverId, "FREI");
       }
     } else if (action === "noshow") {
@@ -802,16 +972,11 @@ export class Dispatcher {
         platformFee = c.platformFee;
         companyNet = c.companyNet;
       }
-      // Karte: Gebühr abbuchen (sonst Hold freigeben). Bar: Gebühr bleibt offen.
+      // Karte: Gebuehr direkt von der hinterlegten Karte abbuchen. Es gibt
+      // keinen Hold mehr, der freigegeben werden muesste. Bar: Gebuehr bleibt offen.
       let paymentStatus = b.paymentStatus;
-      if (b.paymentMethod === "CARD" && b.paymentStatus === "AUTORISIERT") {
-        if (fee > 0) {
-          const cap = await capturePayment(b.paymentRef, Math.min(fee, b.priceAuthorized ?? fee));
-          paymentStatus = cap.status;
-        } else {
-          const v = await voidPayment(b.paymentRef);
-          paymentStatus = v.status;
-        }
+      if (b.paymentMethod === "CARD") {
+        paymentStatus = await chargeCancellationFee(bookingId, fee);
       }
       await prisma.booking.update({
         where: { id: bookingId },
@@ -842,11 +1007,11 @@ export class Dispatcher {
       }
       await this.setStatus(driverId, "FREI");
     } else if (action === "cancel") {
-      // Karten-Autorisierung wieder freigeben (Phase 2g).
+      // Fahrer storniert vor Fahrtbeginn: keine Zahlung, keine Gebuehr.
+      // Die vorgemerkte Karte wird nur freigegeben (es gab nie einen Hold).
       let paymentStatus = b.paymentStatus;
-      if (b.paymentMethod === "CARD" && b.paymentStatus === "AUTORISIERT") {
-        const v = await voidPayment(b.paymentRef);
-        paymentStatus = v.status; // STORNIERT | FEHLGESCHLAGEN
+      if (b.paymentMethod === "CARD") {
+        paymentStatus = await chargeCancellationFee(bookingId, 0);
       }
       await prisma.booking.update({
         where: { id: bookingId },
@@ -888,15 +1053,43 @@ export class Dispatcher {
     if (!b || !b.isScheduled) return { ok: false, reason: "Keine Vorbestellung." };
     if (b.driverId) return { ok: false, reason: "Bereits reserviert." };
     const live = this.live.get(driverId);
-    const updated = await prisma.booking.update({
+    // Wie assignFromPool: der trackingStatus MUSS explizit gesetzt werden.
+    // Eine faellige Vorbestellung steht nach dem Sweep auf "SUCHE" – bliebe sie
+    // dabei, haelt driverState() sie fuer die laufende Fahrt und das
+    // Fahrer-Dashboard blockiert (alle Trip-/Status-Buttons disabled).
+    const immediate = !(b.isScheduled && b.scheduledAt && b.scheduledAt.getTime() > Date.now() + SCHEDULED_LEAD_MS);
+    await prisma.booking.update({
       where: { id: bookingId },
       data: {
         driverId,
         companyId: live?.companyId ?? undefined,
         status: "ZUGEWIESEN",
+        ...(immediate
+          ? { trackingStatus: "FAHRER_UNTERWEGS", isReserved: false, acceptedAt: new Date() }
+          : { trackingStatus: "GEPLANT", isReserved: true }),
       },
-      include: { driver: true },
     });
+    if (immediate) {
+      // Faellige Fahrt: wird sofort zum aktuellen Auftrag des Fahrers.
+      void this.checkFunds(bookingId);
+      const b2 = await prisma.booking.findUnique({ where: { id: bookingId } });
+      this.driverActiveBooking.set(driverId, bookingId);
+      if (b2) this.driverActiveBookingDest.set(driverId, { lat: b2.destLat, lng: b2.destLng });
+      await this.setStatusInternal(driverId, "BESETZT");
+    }
+    // Wurde die Fahrt zuvor von einem Fahrer abgesagt, ist das die
+    // "neuer Fahrer gefunden"-Meldung an den Kunden.
+    if ((b.reassignCount ?? 0) > 0) {
+      const drv = await prisma.driver.findUnique({ where: { id: driverId } });
+      const veh = [drv?.vehicleColor, drv?.vehicleModel].filter(Boolean).join(" ");
+      const fahrzeug = `${veh}${drv?.vehiclePlate ? ` (${drv.vehiclePlate})` : ""}`.trim();
+      sendSms(
+        b.customerPhone,
+        `Gute Nachricht: Wir haben einen neuen Fahrer für Sie gefunden. ${drv?.name ?? "Ihr Fahrer"}${fahrzeug ? `, ${fahrzeug}` : ""} übernimmt Ihre Fahrt.`,
+        { dedupeKey: `driver-assigned:${bookingId}:${b.reassignCount}`, kind: "NEW_DRIVER", bookingId },
+      ).catch(() => {});
+    }
+
     await this.emitBooking(bookingId);
     this.io.to("drivers").emit("driver:scheduledTaken", { bookingId });
     return { ok: true };
@@ -921,6 +1114,7 @@ export class Dispatcher {
     if (immediate) {
       // Direkt der aktuelle Auftrag des Fahrers.
       await prisma.booking.update({ where: { id: bookingId }, data: { trackingStatus: "FAHRER_UNTERWEGS", isReserved: false } });
+      void this.checkFunds(bookingId);
       this.driverActiveBooking.set(driverId, bookingId);
       this.driverActiveBookingDest.set(driverId, { lat: b.destLat, lng: b.destLng });
       await this.setStatusInternal(driverId, "BESETZT");
@@ -970,16 +1164,11 @@ export class Dispatcher {
       }
     }
 
-    // Karte: Storno-Gebühr abbuchen, sonst Autorisierung freigeben (Phase 2g).
+    // Karte: Storno-Gebuehr direkt von der hinterlegten Karte abbuchen;
+    // ohne Gebuehr wird die Karte einfach freigegeben (kein Hold vorhanden).
     let paymentStatus = b.paymentStatus;
-    if (b.paymentMethod === "CARD" && b.paymentStatus === "AUTORISIERT") {
-      if (fee > 0) {
-        const cap = await capturePayment(b.paymentRef, Math.min(fee, b.priceAuthorized ?? fee));
-        paymentStatus = cap.status;
-      } else {
-        const v = await voidPayment(b.paymentRef);
-        paymentStatus = v.status; // STORNIERT | FEHLGESCHLAGEN
-      }
+    if (b.paymentMethod === "CARD") {
+      paymentStatus = await chargeCancellationFee(bookingId, fee);
     }
     await prisma.booking.update({
       where: { id: bookingId },
@@ -1084,7 +1273,7 @@ export class Dispatcher {
         destChangedAt: new Date(),
         destChangeCount: { increment: 1 },
       },
-      include: { driver: true },
+      include: { driver: true, card: true },
     });
 
     // Near-Completion-Logik nutzt das aktuelle Ziel -> mitziehen.
@@ -1119,8 +1308,129 @@ export class Dispatcher {
     }
   }
 
+  // -- Fahrer-Rueckfrage vor einer reservierten Vorbestellung ---------------
+  // 30 Min vor der Abholung: "Moechtest du diese Fahrt weiterhin durchfuehren?"
+  // Ja  -> Fahrt bleibt beim Fahrer.
+  // Nein-> im Fahrer-UI erscheint der Button "Fahrt stornieren"; erst dieser
+  //        gibt die Fahrt frei (siehe releaseScheduledByDriver).
+  private async askDriverConfirmations(): Promise<void> {
+    const askFrom = new Date(Date.now() + DRIVER_CONFIRM_LEAD_MS);
+    const due = await prisma.booking.findMany({
+      where: {
+        isScheduled: true,
+        status: "ZUGEWIESEN",
+        trackingStatus: "GEPLANT",
+        driverId: { not: null },
+        scheduledAt: { lte: askFrom, gt: new Date() },
+        driverConfirmAskedAt: null,
+      },
+      include: { driver: true, card: true },
+    });
+    for (const b of due) {
+      if (!b.driverId) continue;
+      // Merker ZUERST setzen (atomar): verhindert doppelte Rueckfragen bei
+      // ueberlappenden Sweeps oder mehreren Server-Instanzen.
+      const claim = await prisma.booking.updateMany({
+        where: { id: b.id, driverConfirmAskedAt: null },
+        data: { driverConfirmAskedAt: new Date() },
+      });
+      if (claim.count === 0) continue;
+
+      const dto = bookingDTO(b);
+      this.io.to(`driver:${b.driverId}`).emit("driver:confirmScheduled", {
+        bookingId: b.id,
+        scheduledAt: b.scheduledAt,
+        pickupAddress: b.pickupAddress,
+        destAddress: b.destAddress,
+        booking: dto,
+      });
+      // Push, falls die App im Hintergrund/das Handy gesperrt ist.
+      notifyDriverConfirm(b.driverId, b).catch(() => {});
+      await this.refreshDriver?.(b.driverId);
+    }
+  }
+
+  // Fahrer beantwortet die Rueckfrage.
+  async respondScheduledConfirm(driverId: string, bookingId: string, keep: boolean): Promise<{ ok: boolean; reason?: string }> {
+    const b = await prisma.booking.findUnique({ where: { id: bookingId } });
+    if (!b || b.driverId !== driverId) return { ok: false, reason: "Fahrt nicht gefunden." };
+    if (b.status !== "ZUGEWIESEN") return { ok: false, reason: "Fahrt ist nicht mehr aktiv." };
+    await prisma.booking.update({
+      where: { id: bookingId },
+      data: keep
+        ? { driverConfirmedAt: new Date(), driverDeclinedAt: null }
+        : { driverDeclinedAt: new Date(), driverConfirmedAt: null },
+    });
+    await this.emitBooking(bookingId);
+    await this.refreshDriver?.(driverId);
+    return { ok: true };
+  }
+
+  // Endgueltige Absage durch den Fahrer ("Fahrt stornieren"-Button).
+  // Der Kunde wird per SMS informiert und die Fahrt sofort neu vermittelt.
+  async releaseScheduledByDriver(driverId: string, bookingId: string): Promise<{ ok: boolean; reason?: string }> {
+    const b = await prisma.booking.findUnique({ where: { id: bookingId } });
+    if (!b || b.driverId !== driverId) return { ok: false, reason: "Fahrt nicht gefunden." };
+    if (!["ZUGEWIESEN", "OFFEN"].includes(b.status)) return { ok: false, reason: "Fahrt ist nicht mehr stornierbar." };
+
+    // Liegt die Fahrt noch weiter in der Zukunft, darf sie NICHT sofort live
+    // disponiert werden (der Ersatzfahrer wuerde sofort losfahren). Sie geht
+    // zurueck in den Pool der offenen Vorbestellungen: alle Fahrer sehen sie
+    // sofort und koennen sie reservieren; der Sweep schaltet sie zur Fahrtzeit live.
+    const stillFuture = !!(b.isScheduled && b.scheduledAt && b.scheduledAt.getTime() > Date.now() + SCHEDULED_LEAD_MS);
+
+    // Atomar freigeben: nur der Fahrer, dem sie aktuell gehoert, darf sie loesen.
+    const released = await prisma.booking.updateMany({
+      where: { id: bookingId, driverId },
+      data: {
+        driverId: null,
+        status: "OFFEN",
+        trackingStatus: stillFuture ? "GEPLANT" : "SUCHE",
+        isReserved: false,
+        acceptedAt: null,
+        driverConfirmAskedAt: null,
+        driverConfirmedAt: null,
+        driverDeclinedAt: null,
+        reassignCount: { increment: 1 },
+        // Der absagende Fahrer bekommt die Fahrt nicht erneut angeboten.
+        declinedDriverIds: b.declinedDriverIds
+          ? Array.from(new Set([...b.declinedDriverIds.split(",").filter(Boolean), driverId])).join(",")
+          : driverId,
+      },
+    });
+    if (released.count === 0) return { ok: false, reason: "Fahrt wurde bereits neu vergeben." };
+
+    this.driverActiveBooking.delete(driverId);
+    this.driverActiveBookingDest.delete(driverId);
+    this.driverReservedBooking.delete(driverId);
+
+    // Kunde informieren – genau EINMAL je Absage (dedupeKey mit Zaehler).
+    const when = b.scheduledAt
+      ? new Date(b.scheduledAt).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })
+      : "";
+    sendSms(
+      b.customerPhone,
+      `Ihre Fahrt${when ? ` für ${when} Uhr` : ""} wurde vom Fahrer storniert. Wir suchen bereits einen neuen Fahrer für Sie.`,
+      { dedupeKey: `driver-cancel:${bookingId}:${(b.reassignCount ?? 0) + 1}`, kind: "DRIVER_CANCELLED", bookingId },
+    ).catch(() => {});
+
+    await this.emitBooking(bookingId);
+    await this.refreshDriver?.(driverId);
+
+    if (stillFuture) {
+      // Alle Fahrer sofort ueber die wieder freie Vorbestellung informieren.
+      this.io.to("drivers").emit("driver:scheduledReleased", { bookingId });
+      await this.refreshAllDrivers?.();
+    } else {
+      // Faellige Fahrt: sofort neuen Fahrer suchen.
+      await this.startOrContinueDispatch(bookingId, 0);
+    }
+    return { ok: true };
+  }
+
   private async sweep(): Promise<void> {
     await this.tryAssignPending();
+    await this.askDriverConfirmations().catch(() => {});
     const dueAt = new Date(Date.now() + SCHEDULED_LEAD_MS);
 
     // 1) Unzugewiesene, faellige Vorbestellungen -> Fahrersuche starten.
@@ -1156,6 +1466,9 @@ export class Dispatcher {
         where: { id: b.id },
         data: { trackingStatus: "FAHRER_UNTERWEGS", isReserved: false },
       });
+      // Vorbestellung geht jetzt live -> jetzt (und nicht Tage vorher) pruefen,
+      // ob die hinterlegte Karte gedeckt ist.
+      void this.checkFunds(b.id);
       this.driverActiveBooking.set(b.driverId, b.id);
       this.driverActiveBookingDest.set(b.driverId, { lat: b.destLat, lng: b.destLng });
       await this.setStatusInternal(b.driverId, "BESETZT");

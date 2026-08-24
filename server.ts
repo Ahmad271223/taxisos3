@@ -11,10 +11,14 @@ import { Dispatcher } from "./src/server/dispatch";
 import { registerSockets } from "./src/server/realtime";
 import { Simulator } from "./src/server/simulator";
 import { setRuntime } from "./src/server/runtime";
-import { scheduleDailyPlatformRate, scheduleFlightPolling, scheduleRecurringRides, scheduleRideReminders } from "./src/server/scheduler";
+import { assertLiveReady } from "./src/server/liveGuard";
+import { scheduleDailyPlatformRate, scheduleFlightPolling, scheduleRecurringRides, scheduleRideReminders, scheduleRideSettlement } from "./src/server/scheduler";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = Number(process.env.PORT ?? 3000);
+
+// Vor allem anderen: darf dieser Server ueberhaupt im Echtbetrieb laufen?
+assertLiveReady();
 
 async function main() {
   const nextApp = next({ dev });
@@ -52,6 +56,7 @@ async function main() {
 
   // Fahrt-Erinnerungen (24h/2h/30min vor der Fahrt).
   scheduleRideReminders();
+  scheduleRideSettlement();
 
   // GPS-Simulator (optional, fuer Demo ohne echte Smartphones).
   if (process.env.ENABLE_SIMULATOR === "1") {
