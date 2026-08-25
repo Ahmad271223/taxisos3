@@ -58,6 +58,11 @@ export function scheduleRetention(): void {
     }, DAY_MS);
   };
 
+  // Beim Start bestaetigen, dass der Lauf scharf ist. Ein eingeplanter, aber
+  // nie ausgefuehrter Loeschlauf faellt sonst erst auf, wenn jemand danach
+  // fragt – und dann ist die Frist laengst ueberschritten.
+  const inStunden = Math.round(msUntilNext(3, 0) / 3_600_000);
+  console.log(`  Loeschkonzept aktiv – naechster Lauf in ca. ${inStunden} h (taeglich 03:00).`);
   setTimeout(run, msUntilNext(3, 0));
 }
 
