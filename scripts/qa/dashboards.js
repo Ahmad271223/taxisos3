@@ -34,18 +34,19 @@ async function main() {
   check("Profil wird geladen", prof.status === 200, prof.status);
   check("Eigene Daten sind enthalten", (prof.body?.profile?.email ?? prof.body?.email) === kMail, prof.body?.profile?.email);
 
-  // Aenderbar ist im Konto NUR der Notfallkontakt – Name, E-Mail und Telefon
-  // sind bewusst gesperrt (Telefon haengt an der SMS-Verifizierung).
+  // Seit 2026-08-26 sind Name, E-Mail und Telefon selbst aenderbar
+  // (Art. 16 DSGVO) – der Name frei, E-Mail/Telefon nur mit Passwort.
+  // Die frueher hier abgesicherte Sperre war der ALTE Zustand; die
+  // Einzelheiten prueft scripts/qa/profil_aendern.js.
   const notfall = await patch("/api/customer/profile", {
     emergencyContactName: "Maria Muster", emergencyContactPhone: "+4915100000555",
   }, k);
   check("Notfallkontakt lässt sich speichern", notfall.status === 200, notfall.body?.error);
   const prof2 = await get("/api/customer/profile", k);
   check("Notfallkontakt ist gespeichert", (prof2.body?.profile?.emergencyContactName) === "Maria Muster", prof2.body?.profile?.emergencyContactName);
-  const versuch = await patch("/api/customer/profile", { name: "Fremder Name" }, k);
-  const danach = await get("/api/customer/profile", k);
-  check("Name lässt sich NICHT über die Schnittstelle ändern",
-    (danach.body?.profile?.name) === "Dash Kunde", danach.body?.profile?.name);
+  // E-Mail ohne Passwort bleibt gesperrt – DAS ist die Grenze, die zaehlt.
+  const versuch = await patch("/api/customer/profile", { email: "uebernahme@test.de" }, k);
+  check("E-Mail-Wechsel ohne Passwort bleibt gesperrt", versuch.status === 403, versuch.status);
 
   const meine = await get("/api/customer/bookings", k);
   check("Fahrtenliste lädt", meine.status === 200 && Array.isArray(meine.body?.bookings), meine.status);
