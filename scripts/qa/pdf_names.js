@@ -17,14 +17,19 @@ const { check, info, section, finish } = H;
 const ROOT = path.resolve(__dirname, "../..");
 
 // Den ECHTEN Produktionscode prüfen, nicht eine Kopie davon.
+// Frueher wurde safe() als Textausschnitt aus pdf.ts geschnitten und mit eval
+// ausgefuehrt. Das brach, sobald die Funktion exportiert wurde ("Unexpected
+// token 'export'") – und haette bei jeder Umbenennung im Umfeld erneut
+// gebrochen. Jetzt wird das echte Modul geladen; geprueft wird damit auch
+// wirklich der Code, der im Betrieb laeuft.
 function ladeSafe() {
-  const quelle = fs.readFileSync(path.join(ROOT, "src/lib/pdf.ts"), "utf8");
-  const von = quelle.indexOf("const UMSCHRIFT");
-  const bis = quelle.indexOf("function eur");
-  if (von < 0 || bis < 0) throw new Error("safe() nicht gefunden – wurde pdf.ts umgebaut?");
-  const js = quelle.slice(von, bis).replace(/: Record<string, string>/g, "").replace(/: string/g, "");
-  // eslint-disable-next-line no-eval
-  return eval(`(() => { ${js} return safe; })()`);
+  const { register } = require("tsx/cjs/api");
+  register();
+  const modul = require(path.join(ROOT, "src/lib/pdf.ts"));
+  if (typeof modul.safe !== "function") {
+    throw new Error("safe() wird von src/lib/pdf.ts nicht exportiert.");
+  }
+  return modul.safe;
 }
 
 function main() {

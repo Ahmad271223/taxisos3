@@ -287,8 +287,12 @@ async function main() {
   // ohne den kostenpflichtigen Kartendienst zu fragen. Die Drossel sitzt
   // davor und wird trotzdem geprueft. (Mit echten Adressabfragen lief diese
   // Schleife minutenlang und riss den Testlauf in die Zeitgrenze.)
+  // Die Obergrenze ohne erkennbare IP ist bewusst grosszuegig (600), damit
+  // eine Proxy-Fehlkonfiguration nicht wie ein Totalausfall aussieht. Lokal
+  // gilt genau dieser Topf, deshalb muss die Schleife darueber hinausgehen.
+  const deckel = Number(process.env.GEOCODE_LIMIT_ANON ?? 600);
   let code = 200;
-  for (let i = 0; i < 140; i++) {
+  for (let i = 0; i < deckel + 20; i++) {
     const r = await H.get("/api/geocode?reverse=1&lat=x&lng=x&n=" + i);
     if (r.status === 429) { code = 429; break; }
   }
