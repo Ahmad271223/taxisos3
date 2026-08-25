@@ -164,7 +164,40 @@ Firmen-Admin las die letzten 200 Zugriffe ALLER Unternehmen auf Gesundheitsdaten
 samt Dokumentnamen. Jetzt mit `companyId` (Migration `accesslog_tenant`) und
 gefiltert. Altdatensaetze ohne Mandant bleiben bewusst unsichtbar.
 
-Abgesichert durch `scripts/qa/security_refs.js`.
+**Festpreise (behoben 2026-08-25):** Die Festpreis-Regeln wurden bei Buchung
+und Angebot ueber ALLE Firmen geladen – auch dann, wenn der Gast bereits eine
+bestimmte Firma gewaehlt hatte. Damit verschob die Kalkulation fremder
+Unternehmen die angezeigte Spanne und war nach aussen ablesbar. Jetzt zaehlt
+die gewaehlte Firma; ohne Firma bleibt die plattformweite Sicht richtig, weil
+dort jede Firma die Fahrt uebernehmen koennte.
+
+**Weitere Luecken (behoben 2026-08-25):**
+- `/api/geocode` war ein unbegrenzt offener Proxy auf einen kostenpflichtigen
+  Kartendienst. Jetzt gedrosselt (120 Abfragen je IP und 10 Minuten, ohne
+  feststellbare IP 30). Fuer Gaeste bleibt die Adresssuche offen.
+- Das Storno-Protokoll pruefte `if (booking.companyId && ...)`. Eine Fahrt OHNE
+  Firma rutschte durch und war fuer jedes Unternehmen lesbar.
+- Die Anmeldungen der Portale (Veranstalter, Hotel, Einrichtung) hatten keinen
+  Bruteforce-Schutz. Jetzt wie `/api/auth/login`: 20 Versuche je Konto und je
+  IP in 5 Minuten, das Konto-Limit greift auch ohne feststellbare IP.
+- `chat:send` behandelte jeden Nicht-Fahrer als Fahrgast. Eine Zentrale, die
+  dem Verfolgungsraum beigetreten war, konnte im Namen des Fahrgasts
+  schreiben. Der Chat laeuft ausdruecklich zwischen Fahrgast und Fahrer.
+
+**Verfolgung war fuer Fahrgaeste tot (behoben 2026-08-25):** Die Absicherung
+oben hatte eine Nebenwirkung, die niemandem auffiel, weil die Oberflaeche
+denselben Fehler schon vorher hatte: `TrackingView` und `ChatPanel` verglichen
+den Wert aus der Adresszeile – bei Gaesten der TOKEN – mit der Auftrags-ID aus
+den Server-Ereignissen. Jedes Ereignis wurde verworfen. Der Fahrgast sah damit
+weder den Wagen fahren noch eine aktualisierte Ankunftszeit noch eine einzige
+Chatnachricht. Jetzt gelten Token und ID beide; die Chat-API liefert die
+kanonische ID mit. Zusaetzlich kennt der Socket wieder eine Kundenidentitaet,
+damit angemeldete Fahrgaeste ihre EIGENE Fahrt ueber die ID verfolgen duerfen –
+Gaeste weiterhin ausschliesslich ueber den Token.
+
+Abgesichert durch `scripts/qa/security_refs.js` (55 Pruefungen) und
+`scripts/qa/tracking_eta.js` (13).
+
 
 ---
 
@@ -203,7 +236,10 @@ Alles davon liegt außerhalb der Software – es braucht Konten und Verträge:
 5. **Stripe-Webhook** auf `/api/stripe/webhook` einrichten.
 6. **Telefon-Verifizierung** einschalten (`REQUIRE_PHONE_VERIFICATION=1`).
 7. **Flugdaten-Zugang** (`AVIATIONSTACK_KEY`), sonst Demo-Verspätungen.
-8. **Passwörter ändern**: `memory/test_credentials.md` lag im Git-Verlauf.
+8. ~~Passwörter ändern wegen `test_credentials.md` im Git-Verlauf.~~
+   **Berichtigt 2026-08-25:** Die Datei war nie committet, und der gesamte
+   Verlauf (60 Commits) enthält keine echten Schlüssel – nur Platzhalter wie
+   `sk_live_platzhalter` in einer Pruefreihe. Es ist nichts zu rotieren.
 
 ---
 
@@ -278,6 +314,32 @@ node scripts/qa/cleanup.js      # Testdaten entfernen
 
 ---
 
+## 10b. Belege und Rechnungen
+
+Alle vier Belegarten stellen im Namen des **Taxiunternehmens** aus, nicht der
+Plattform: Fahrtbeleg (`ridePdf.ts`), Einrichtungs-Abrechnung
+(`institutionPdf.ts`), Hotel-Abrechnung (`hotelStatementPdf.ts`) und seit
+2026-08-25 auch die Firmenmobilitaet (`corporatePdf.ts`). Fahren in einem
+Monat mehrere Unternehmen fuer denselben Empfaenger, entsteht je Unternehmen
+ein eigener Rechnungsabschnitt mit eigener Nummer – jeder fuer sich buchbar.
+
+Pflichtangaben auf jedem Abschnitt: Anschrift des Ausstellers, Steuernummer
+bzw. USt-IdNr. (fehlt sie, steht ein Hinweis statt einer stillen Luecke),
+Rechnungsnummer, Rechnungsdatum, USt-Ausweis, Zahlungsziel 14 Tage,
+Empfaengeranschrift und Seitenzahlen. USt nach § 12 Abs. 2 Nr. 10 UStG:
+7 % bis 50 km Befoerderungsstrecke, darueber 19 %. Trinkgeld wird getrennt
+ausgewiesen und traegt keine USt.
+
+Die Plattform (`platformIssuer.ts`) erscheint nur noch als Vermittlungshinweis
+in der Fusszeile. Fuer `EventHost` kam dafuer ein Adressfeld dazu (Migration
+`eventhost_address`), weil die Empfaengeranschrift ab 250 EUR Pflicht ist.
+
+Geprueft wird der echte PDF-Code mit echten Daten: `scripts/qa/pdf_invoices.js`
+erzeugt die Dokumente, liest ihren Text zurueck und rechnet die Betraege nach
+(57 Pruefungen).
+
+---
+
 ## 11. Stillgelegt
 
 Die **Provisions-Sammelrechnung** (Super-Admin und Unternehmensseite) rechnete
@@ -293,6 +355,12 @@ jetzt seinen Umsatz **ohne** Provisionsabzug.
 ---
 
 ## 12. Nächste Schritte
+
+Erledigt am 2026-08-25: Mandantentrennung bei Festpreisen, Drosselung von
+`/api/geocode`, Bruteforce-Schutz der Portale, Storno-Protokoll, Chat-Rollen,
+die tote Fahrgast-Verfolgung, Rechnungen je Unternehmen fuer die
+Firmenmobilitaet, Mengenbegrenzung der Zeitgeber und eine CI
+(`.github/workflows/ci.yml`).
 
 - **P1** Kunden können Name, E-Mail und Telefonnummer nicht selbst ändern
   (nur den Notfallkontakt). Für den Echtbetrieb nötig, auch wegen des Rechts
@@ -316,3 +384,19 @@ jetzt seinen Umsatz **ohne** Provisionsabzug.
 - **P2** Preis kennzeichnen, wenn der Routendienst ausgefallen ist
   (Rückfall auf Luftlinie × 1,35 bei 30 km/h ist derzeit unsichtbar).
 - **P3** Zweite Instanz + Redis-Adapter, sobald mehr als ~60 Fahrer gleichzeitig fahren.
+- **P1** Ueberwachung fehlt vollstaendig: kein Sentry, keine Alarme auf
+  fehlgeschlagene Zahlungen, nicht zugewiesene Fahrten oder SMS-Ausfaelle.
+  Ohne das merkt niemand, wenn im Echtbetrieb etwas kippt.
+- **P1** Loeschkonzept, Verzeichnis der Verarbeitungstaetigkeiten und
+  Auftragsverarbeitungsvertraege (Stripe, Twilio, Hoster, Kartendienst).
+  Bei Krankenfahrten sind das Gesundheitsdaten.
+- **P2** Kaskadenloeschung: `Company -> Driver -> Booking` loescht auch
+  abgerechnete Fahrten. Fuer die Buchhaltung braucht es ein Soft-Delete.
+- **P2** Preisaenderungen sind nicht nachvollziehbar protokolliert (wer hat
+  wann welchen Tarif geaendert).
+- **P2** Betriebshandbuch: was tun bei Stripe-Ausfall, Twilio-Ausfall,
+  Datenbank voll, Fahrer meldet falsche Abrechnung.
+- **P2** Sicherung ist erst dann eine Sicherung, wenn eine Wiederherstellung
+  einmal geprobt wurde.
+- **P3** Enum-Werte sind deutsch (`STORNIERT`, `FAHRT_LAEUFT`). Fuer eine
+  spaetere Internationalisierung muessten sie uebersetzt werden.
