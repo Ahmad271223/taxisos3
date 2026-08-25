@@ -288,7 +288,11 @@ async function main() {
   check("Trinkgeld noch 0", doneDb?.tip === 0, doneDb?.tip);
   info(`Fahrpreis: ${doneDb?.fare} EUR`);
 
-  const payState = await get(`/api/bookings/${cardBk.body?.id}/pay`);
+  // Wie im Browser: die Verfolgungsseite kennt den TOKEN aus der Adresszeile,
+  // nicht die interne Auftrags-ID. Seit die ID keine Capability mehr ist,
+  // muss der Test denselben Weg gehen wie die Oberflaeche.
+  const cardToken = cardBk.body?.booking?.trackingToken ?? cardBk.body?.id;
+  const payState = await get(`/api/bookings/${cardToken}/pay`);
   check("Trinkgeld-Fenster wird als offen gemeldet", payState.body?.tipWindowOpen === true, payState.body);
 
   // =========================================================================
@@ -343,7 +347,8 @@ async function main() {
   check("Fahrt abgeschlossen", barDone?.status === "ABGESCHLOSSEN", barDone?.status);
   check("KEIN Trinkgeld-Fenster geoeffnet", barDone?.tipPromptedAt === null, barDone?.tipPromptedAt);
   check("Kein Trinkgeld erfasst", barDone?.tip === 0, barDone?.tip);
-  const barPayState = await get(`/api/bookings/${barBk2.body?.id}/pay`);
+  const barToken = barBk2.body?.booking?.trackingToken ?? barBk2.body?.id;
+  const barPayState = await get(`/api/bookings/${barToken}/pay`);
   check("Trinkgeld-Fenster gilt als geschlossen", barPayState.body?.tipWindowOpen === false, barPayState.body?.tipWindowOpen);
   const barPay = await post(`/api/bookings/${barBk2.body?.id}/pay`, { tip: 5 }, kBar.cookie);
   check("Zahlung in der App wird abgelehnt (Barfahrt)", barPay.status === 400 && barPay.body?.code === "CASH_RIDE", {

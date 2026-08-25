@@ -46,6 +46,36 @@ Nach diesen Zeichenketten suchen:
 
 ---
 
+## 0b. Alarmierung einrichten — **vor** dem Livegang
+
+Ohne diesen Schritt landen Alarme ausschließlich im Serverprotokoll, und das
+liest im Alltag niemand. Der Server sagt beim Start ausdrücklich, ob ein Weg
+eingerichtet ist; steht dort im Echtbetrieb `ACHTUNG: Alarme gehen NUR ins
+Protokoll`, ist die Überwachung nicht scharf.
+
+Mindestens **einen** dieser Wege setzen:
+
+| Variable | Wirkung |
+|---|---|
+| `ALARM_WEBHOOK_URL` | JSON-POST an Slack, Discord, n8n … — der schnellste Weg |
+| `ALARM_EMAIL` | E-Mail, aber **nur** bei Stufe „kritisch" (sonst liest sie niemand mehr) |
+| `SENTRY_DSN` | zusätzlich Sentry; benötigt einmalig `npm i @sentry/node` |
+
+Feineinstellung: `ALARM_MIN_STUFE` (`info` | `warnung` | `kritisch`,
+Standard `warnung`) und `ALARM_DEDUPE_MS` (Standard 15 Minuten
+Zusammenfassung gleicher Meldungen).
+
+**Was Alarm auslöst:**
+
+| Schlüssel | Stufe | Bedeutung |
+|---|---|---|
+| `zahlung-fehlgeschlagen:keine-zahlung-moeglich` | kritisch | Stripe nicht erreichbar — betrifft **alle** Fahrten |
+| `zahlung-fehlgeschlagen:*` | warnung | Einzelne Karte abgelehnt |
+| `sms-versand-fehlgeschlagen` | kritisch | Twilio antwortet nicht |
+| `kein-fahrer-gefunden` | warnung | Auftrag verfällt — Einzelfälle sind normal, Häufung nicht |
+
+---
+
 ## 1. Stripe fällt aus
 
 **Erkennungsmerkmal:** Fahrten enden, aber `paymentStatus` bleibt
@@ -97,6 +127,21 @@ Benachrichtigung.
 eine Vorbestellung 6 (≈ 0,49 €). Bei 1.200 Fahrten im Monat sind das rund
 292 € – mehr als die 100 € Abo-Einnahme im Tarif P5. Steigen die Kosten
 unerwartet, zuerst prüfen, ob Erinnerungen doppelt laufen.
+
+**Stellschraube `SMS_PROFIL`:** Der Kostentreiber sind die **drei**
+Erinnerungen je Vorbestellung (24 h, 2 h, 30 min).
+
+| Profil | Erinnerungen | Übrige Nachrichten |
+|---|---|---|
+| `voll` | 24 h, 2 h, 30 min | alle |
+| `sparsam` **(Standard)** | nur 2 h | alle |
+| `minimal` | keine | nur Bestätigung, „Fahrer da", Absage, Ersatzfahrer, kein Fahrer, Zahlungsproblem |
+
+`sparsam` senkt eine Vorbestellung von rund 6 auf 4 SMS. Unabhängig davon
+lässt sich die Auswahl direkt setzen, z. B. `REMINDER_OFFSETS="24h,30m"`.
+
+Die Bestätigungs-SMS der Telefonverifizierung hängt **nicht** am Profil und
+geht immer raus — ohne sie käme niemand mehr durch die Anmeldung.
 
 ---
 
@@ -192,6 +237,30 @@ Wiederherstellungspunkte. Der kostenlose Plan hat keine.
 
 ---
 
+## 7b. Löschkonzept
+
+Läuft täglich um 03:00 und protokolliert unter `[Loeschkonzept]`, was entfernt
+wurde. Ohne dieses Protokoll ließe sich gegenüber einer Aufsichtsbehörde nicht
+belegen, dass das Konzept auch angewendet wird.
+
+Vorschau, ohne etwas zu ändern:
+
+```bash
+RETENTION_TROCKEN=1 npx tsx scripts/retention_run.ts
+```
+
+**Standardmäßig abgeschaltet, weil unumkehrbar:** das Löschen von Fahrten
+(`RETENTION_FAHRTEN=1`) und das Anonymisieren von Fahrgastkonten
+(`RETENTION_KONTEN=1`). Der Trockenlauf zeigt trotzdem an, wie viele
+Datensätze betroffen wären — die Entscheidung soll bewusst fallen, nicht
+versehentlich. Fristen siehe `memory/DSGVO/Loeschkonzept.md`.
+
+`RETENTION_AKTIV=0` schaltet den Lauf ganz ab; der Server meldet das beim
+Start ausdrücklich, weil ein abgeschaltetes Löschkonzept ein
+Datenschutzverstoß ist, der niemandem auffallen darf.
+
+---
+
 ## 8. Startsperre absichtlich ausgelöst
 
 `src/server/liveGuard.ts` bricht den Start im Echtbetrieb ab, wenn
@@ -222,10 +291,9 @@ umgehen" – jeder dieser Punkte hat einen konkreten Schaden dahinter.
 
 ## 10. Was noch fehlt (ehrlich)
 
-- **Keine Überwachung.** Kein Sentry, keine Alarme bei fehlgeschlagenen
-  Zahlungen, nicht zugewiesenen Fahrten oder SMS-Ausfällen. Heute merkt eine
-  Störung nur, wer zufällig hinschaut oder wen ein Kunde anruft. Das ist der
-  wichtigste offene Punkt in diesem Handbuch.
+- **Überwachung ist eingebaut, aber sie muss eingerichtet werden.** Solange
+  weder `ALARM_WEBHOOK_URL` noch `ALARM_EMAIL` noch `SENTRY_DSN` gesetzt ist,
+  landen alle Alarme nur im Protokoll (siehe Abschnitt 0b).
 - **Kein Prüfpfad für Preisänderungen** (wer hat wann welchen Tarif geändert).
 - Eine Instanz trägt rund 40–60 gleichzeitig fahrende Fahrer. Darüber braucht
   es eine zweite Instanz mit Redis-Adapter für Socket.IO und einen gemeinsamen

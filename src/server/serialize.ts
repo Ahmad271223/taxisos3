@@ -155,6 +155,33 @@ export function messageDTO(m: any) {
 }
 
 // Vollstaendiges Buchungs-DTO.
+/**
+ * Offene Vorbestellung fuer die Marktplatz-Liste der Fahrer.
+ *
+ * Frueher ging hier der volle `bookingDTO` raus – an JEDEN verbundenen Fahrer
+ * JEDER Firma, fuer Fahrten, die noch niemand angenommen hat. Damit konnte
+ * jeder Fahrer Namen, Telefonnummern und Abholadressen fremder Fahrgaeste
+ * abgreifen, ohne je eine Fahrt zu uebernehmen. Angezeigt wurden davon
+ * ohnehin nur Zeit und Strecke.
+ *
+ * Deshalb hier bewusst nur das, was zur Entscheidung "nehme ich die Fahrt?"
+ * noetig ist. Name und Rufnummer bekommt der Fahrer erst NACH dem Annehmen
+ * ueber den regulaeren Auftragsstand.
+ */
+export function offeneFahrtDTO(b: any) {
+  return {
+    id: b.id,
+    scheduledAt: iso(b.scheduledAt),
+    pickupAddress: b.pickupAddress,
+    destAddress: b.destAddress,
+    vehicleClass: b.vehicleClass ?? null,
+    distanceMeters: b.distanceMeters ?? null,
+    priceApprox: b.priceApprox ?? null,
+    passengers: b.passengers ?? null,
+    luggage: b.luggage ?? null,
+  };
+}
+
 export function bookingDTO(b: any, extra: Record<string, any> = {}) {
   return {
     id: b.id,

@@ -104,7 +104,7 @@ jobs:
       # Diese Reihen brauchen weder Stripe noch Twilio noch einen Kartendienst.
       - name: Pruefreihen
         env:
-          QA_REIHEN: security_refs tracking_eta frontend_walk dashboards driver_sync
+          QA_REIHEN: security_refs tracking_eta frontend_walk dashboards driver_sync betrieb
         run: bash scripts/qa/run-all.sh
 
       - name: Serverprotokoll sichern

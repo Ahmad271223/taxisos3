@@ -12,7 +12,8 @@ import { registerSockets } from "./src/server/realtime";
 import { Simulator } from "./src/server/simulator";
 import { setRuntime } from "./src/server/runtime";
 import { assertLiveReady } from "./src/server/liveGuard";
-import { scheduleDailyPlatformRate, scheduleFlightPolling, scheduleRecurringRides, scheduleRideReminders, scheduleRideSettlement } from "./src/server/scheduler";
+import { alarmStatus } from "./src/server/alarm";
+import { scheduleDailyPlatformRate, scheduleFlightPolling, scheduleRecurringRides, scheduleRetention, scheduleRideReminders, scheduleRideSettlement } from "./src/server/scheduler";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = Number(process.env.PORT ?? 3000);
@@ -54,6 +55,7 @@ async function main() {
 
   // Täglicher 02:00-Lauf: Plattform-Durchschnittstarif für den „ca."-Vorabpreis.
   scheduleDailyPlatformRate();
+  scheduleRetention();
 
   // Flughafen-Modul: Flüge regelmäßig auf Verspätung prüfen und Abholzeit anpassen.
   scheduleFlightPolling(dispatcher);
@@ -79,6 +81,10 @@ async function main() {
     console.log(`     Plattform/Registrierung: http://localhost:${port}/`);
     console.log(`     Fahrer-Login:            http://localhost:${port}/fahrer/login`);
     console.log(`     Firmen-Login:            http://localhost:${port}/admin/login\n`);
+    // Einmal beim Start sagen, ob Alarme ueberhaupt bei jemandem ankommen.
+    // Ohne diese Zeile faellt "es gibt keine Ueberwachung" erst auf, wenn zum
+    // ersten Mal etwas kaputtgeht und es niemand merkt.
+    alarmStatus();
   });
 }
 

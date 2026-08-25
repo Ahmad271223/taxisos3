@@ -12,6 +12,7 @@
 import { prisma } from "./prisma";
 import { chargeSavedCard, holdOnSavedCard, capturePayment, voidPayment, retrieveIntent } from "./stripe";
 import { cardIsExpired } from "./customerCards";
+import { alarm } from "../server/alarm";
 
 // Zeitfenster fuer die Trinkgeld-Auswahl nach Fahrtende.
 export const TIP_WINDOW_MS = Number(process.env.TIP_WINDOW_MS ?? 2 * 60_000);
@@ -286,6 +287,19 @@ async function intentSettled(ref: string, total: number): Promise<boolean> {
 
 // Fehlgeschlagene Belastung festhalten: Fahrt gilt NICHT als bezahlt.
 async function failPayment(bookingId: string, message: string, code: string, tip: number): Promise<SettleResult> {
+  // Hier geht echtes Geld verloren: die Fahrt ist gefahren, aber nicht
+  // bezahlt. Ohne Alarm bleibt das liegen, bis jemand zufaellig hinschaut.
+  // "keine-zahlung-moeglich" heisst: Stripe ist gar nicht erreichbar – das
+  // betrifft dann ALLE Fahrten, nicht nur diese eine.
+  alarm(
+    code === "keine-zahlung-moeglich" ? "kritisch" : "warnung",
+    `zahlung-fehlgeschlagen:${code}`,
+    code === "keine-zahlung-moeglich"
+      ? "Zahlungen sind nicht moeglich – Stripe nicht erreichbar"
+      : "Kartenbelastung fehlgeschlagen",
+    { auftrag: bookingId, grund: message, code },
+  );
+
   await prisma.booking.update({
     where: { id: bookingId },
     data: {

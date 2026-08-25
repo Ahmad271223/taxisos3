@@ -11,6 +11,7 @@ import { sendSms } from "../lib/notify";
 import { settleDueRides, TIP_WINDOW_MS } from "../lib/settle";
 import type { Dispatcher } from "./dispatch";
 
+import { retentionLauf, berichtAusgeben } from "./retention";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function msUntilNext(hour: number, minute = 0): number {
@@ -29,6 +30,35 @@ async function ensureFresh(): Promise<void> {
   } catch (e) {
     console.error("PlatformRate ensureFresh fehlgeschlagen:", e);
   }
+}
+
+// --- Loeschkonzept: taeglicher Lauf um 03:00 -------------------------------
+//
+// Bewusst NACH dem PlatformRate-Lauf (02:00) und in der Nacht: die Loeschungen
+// laufen ueber grosse Tabellen und sollen den Tagesbetrieb nicht bremsen.
+export function scheduleRetention(): void {
+  if (process.env.RETENTION_AKTIV === "0") {
+    // Ausdruecklich melden statt still nichts zu tun: ein abgeschaltetes
+    // Loeschkonzept ist ein Datenschutzverstoss, der niemandem auffallen darf.
+    console.warn(
+      "Loeschkonzept ist ABGESCHALTET (RETENTION_AKTIV=0). Es werden keine " +
+        "Daten nach Ablauf ihrer Frist entfernt.",
+    );
+    return;
+  }
+
+  const run = async () => {
+    try {
+      berichtAusgeben(await retentionLauf(false));
+    } catch (e) {
+      console.error("Loeschlauf fehlgeschlagen:", e);
+    }
+    setInterval(() => {
+      retentionLauf(false).then(berichtAusgeben).catch((e) => console.error("Loeschlauf fehlgeschlagen:", e));
+    }, DAY_MS);
+  };
+
+  setTimeout(run, msUntilNext(3, 0));
 }
 
 export function scheduleDailyPlatformRate(): void {

@@ -6,6 +6,11 @@
 // `devCode` zurueckgegeben, sodass der Flow lokal und in CI ohne Provider
 // vollstaendig testbar bleibt.
 
+// Der Alarm-Import ist bewusst statisch: alarm.ts laedt seinerseits den
+// Mailversand aus DIESER Datei erst bei Bedarf nach, damit kein Kreis
+// entsteht.
+import { alarm } from "../server/alarm";
+
 type AnyClient = any;
 
 let twilioPromise: Promise<AnyClient | null> | null = null;
@@ -97,6 +102,47 @@ export function toE164(raw: string | null | undefined): string | null {
   return "+" + DEFAULT_COUNTRY_CODE + digits;
 }
 
+// --- SMS-Sparprofil --------------------------------------------------------
+//
+// Rechnung, die dahinter steht: eine Sofortfahrt loest rund 3 SMS aus
+// (~0,25 EUR), eine Vorbestellung rund 6 (~0,49 EUR). Bei 1.200 Fahrten im
+// Monat sind das ca. 292 EUR Twilio-Kosten – gegen 100 EUR Abo-Einnahme im
+// Tarif P5. Eine aktive kleine Firma kostet damit Geld, statt welches zu
+// bringen. Das ist kein Fehler im Code, sondern eine Preisentscheidung; das
+// Profil macht sie einstellbar, ohne an 13 Stellen Code zu aendern.
+//
+//   voll     – alles wie bisher, Erinnerungen 24 h / 2 h / 30 min
+//   sparsam  – Standard: alles, aber nur EINE Erinnerung (2 h vorher)
+//   minimal  – nur, was der Fahrgast wirklich braucht; keine Erinnerungen
+//
+// Die Bestaetigungs-SMS der Telefonverifizierung hat bewusst kein `kind` und
+// geht IMMER raus – ohne sie kaeme niemand mehr durch die Anmeldung.
+export type SmsProfil = "voll" | "sparsam" | "minimal";
+
+export function smsProfil(): SmsProfil {
+  const v = (process.env.SMS_PROFIL ?? "sparsam").toLowerCase();
+  return v === "voll" || v === "minimal" ? v : "sparsam";
+}
+
+// Ohne diese Nachrichten steht der Fahrgast im Regen oder es geht um Geld.
+const UNVERZICHTBAR = new Set([
+  "BOOKING_CONFIRMED", // enthaelt den Verfolgungslink
+  "DRIVER_ARRIVED",    // der Wagen steht vor der Tuer
+  "DRIVER_CANCELLED",  // der Fahrer hat abgesagt
+  "NEW_DRIVER",        // Ersatz gefunden
+  "NO_DRIVER",         // es kommt niemand
+  "PAYMENT_FAILED",    // Geld
+]);
+
+function profilErlaubt(kind?: string | null): boolean {
+  const profil = smsProfil();
+  if (profil === "voll" || !kind) return true;
+  if (profil === "minimal") return UNVERZICHTBAR.has(kind);
+  // sparsam: Erinnerungen werden ueber die Anzahl der Stufen gesteuert
+  // (siehe lib/reminders.ts), nicht hier abgeschnitten.
+  return true;
+}
+
 export interface SmsOptions {
   // Fachlicher Schluessel zur Doppelversand-Sperre, z. B. `driver-cancel:<bookingId>`.
   // Ein zweiter Versand mit demselben Schluessel wird verworfen.
@@ -115,6 +161,13 @@ export async function sendSms(to: string, body: string, opts: SmsOptions = {}): 
   if (!target) {
     console.warn(`[notify] SMS verworfen – ungueltige Nummer: ${JSON.stringify(to)}`);
     return { ok: false, mock: false, error: "invalid_phone" };
+  }
+
+  if (!profilErlaubt(opts.kind)) {
+    // Kein Fehler: bewusst nicht verschickt. Als solches protokollieren, damit
+    // "die SMS kam nicht an" nachvollziehbar bleibt.
+    console.log(`[notify:profil] ${opts.kind} unterdrueckt (SMS_PROFIL=${smsProfil()})`);
+    return { ok: true, mock: true, id: null };
   }
 
   // --- Doppelversand-Sperre -------------------------------------------------
@@ -167,6 +220,13 @@ export async function sendSms(to: string, body: string, opts: SmsOptions = {}): 
     return finish({ ok: true, mock: false, id: msg.sid });
   } catch (e: any) {
     console.warn(`[notify] SMS an ${target} fehlgeschlagen: ${e?.message}`);
+    // Faellt Twilio aus, bekommt KEIN Fahrgast mehr eine Bestaetigung – und
+    // niemand merkt es, weil der Ablauf sonst normal weiterlaeuft. Einzelne
+    // ungueltige Nummern sind dagegen Alltag und keinen Alarm wert; die
+    // werden weiter oben schon als "invalid_phone" abgefangen.
+    alarm("kritisch", "sms-versand-fehlgeschlagen", "SMS-Versand fehlgeschlagen", {
+      fehler: e?.message ?? "twilio_error",
+    });
     return finish({ ok: false, mock: false, error: e?.message ?? "twilio_error" });
   }
 }

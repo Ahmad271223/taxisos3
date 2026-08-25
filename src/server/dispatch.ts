@@ -33,6 +33,7 @@ import { notifyDriverOffer, notifyDriverConfirm } from "../lib/webpush";
 import { sendSms } from "../lib/notify";
 import { bookingDTO, driverAdmin } from "./serialize";
 
+import { alarm } from "./alarm";
 const PHASE_DURATION_MS = 15_000;
 const PHASES_METERS = [500, 1000, 2000, 3000, 5000];
 // Maximale Dauer der Fahrersuche je Sofortbuchung (ab Suchbeginn). Danach wird
@@ -411,6 +412,15 @@ export class Dispatcher {
   // per SMS informieren und die Nummer der Zentrale mitschicken – dort kann ein
   // Disponent einen Fahrer direkt beauftragen. Genau EINE SMS je Buchung.
   private async notifyNoDriver(b: any): Promise<void> {
+    // Ein verlorener Auftrag ist ein verlorener Kunde. Einzelfaelle sind
+    // normal (nachts, Randlage); haeufen sie sich, stimmt etwas nicht –
+    // deshalb faesst die Alarmierung sie zusammen und nennt die Anzahl.
+    alarm("warnung", "kein-fahrer-gefunden", "Kein Fahrer gefunden – Auftrag verfaellt", {
+      auftrag: b.id,
+      firma: b.companyId ?? "plattformweit",
+      abholung: b.pickupAddress,
+    });
+
     const hotline = (process.env.NEXT_PUBLIC_PLATFORM_PHONE ?? "").trim();
     const text = hotline
       ? `Leider ist gerade kein Taxi frei. Bitte stellen Sie eine neue Anfrage oder rufen Sie unsere Zentrale an: ${hotline} – wir beauftragen dann direkt einen Fahrer für Sie.`

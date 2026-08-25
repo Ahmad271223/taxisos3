@@ -362,6 +362,30 @@ die tote Fahrgast-Verfolgung, Rechnungen je Unternehmen fuer die
 Firmenmobilitaet, Mengenbegrenzung der Zeitgeber und eine CI
 (`.github/workflows/ci.yml`).
 
+Ebenfalls am 2026-08-25 – die Punkte aus "ohne das nicht live gehen":
+
+- **Ueberwachung** (`src/server/alarm.ts`): Alarme bei fehlgeschlagener
+  Zahlung, SMS-Ausfall und verfallenen Auftraegen. Wege: Protokoll (immer),
+  Webhook, E-Mail, optional Sentry. Gleiche Meldungen werden zusammengefasst,
+  ein Alarm kann den Aufrufer nie stoeren. Beim Start meldet der Server
+  ausdruecklich, wenn KEIN Weg eingerichtet ist.
+- **Zustandspruefung** `/api/health` inklusive Datenbankverbindung.
+- **Loeschkonzept technisch umgesetzt** (`src/server/retention.ts`), taeglich
+  um 03:00 mit Protokoll. Fahrten und Fahrgastkonten sind standardmaessig
+  ausgenommen, weil beides unumkehrbar ist; der Trockenlauf zeigt trotzdem an,
+  wie viele Datensaetze betroffen waeren.
+- **DSGVO-Papiere** unter `memory/DSGVO/`: Verarbeitungsverzeichnis,
+  Loeschkonzept, TOM und die Liste der Auftragsverarbeiter mit dem, was
+  abzuschliessen ist. Entwuerfe – anwaltlich pruefen lassen.
+- **SMS-Sparprofil** (`SMS_PROFIL`): der Kostentreiber sind DREI Erinnerungen
+  je Vorbestellung. `sparsam` (neuer Standard) laesst nur die 2-Stunden-
+  Erinnerung uebrig und senkt eine Vorbestellung von ~6 auf ~4 SMS.
+- **Marktplatz-Liste bereinigt**: die Liste offener Vorbestellungen ging mit
+  vollem Datensatz an JEDEN Fahrer JEDER Firma – Name, Rufnummer, Adresse,
+  auch fuer Fahrten, die niemand angenommen hatte. Jetzt nur noch Zeitpunkt,
+  Strecke, Fahrzeugklasse und Preis.
+- **Betriebshandbuch** `memory/BETRIEBSHANDBUCH.md`.
+
 - **P1** Kunden können Name, E-Mail und Telefonnummer nicht selbst ändern
   (nur den Notfallkontakt). Für den Echtbetrieb nötig, auch wegen des Rechts
   auf Berichtigung.

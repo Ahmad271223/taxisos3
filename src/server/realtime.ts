@@ -11,7 +11,7 @@ import {
   bookingRefWhereCustomer,
   bookingRefWhereDriver,
 } from "../lib/bookingRef";
-import { bookingDTO, driverAdmin, messageDTO } from "./serialize";
+import { bookingDTO, driverAdmin, messageDTO, offeneFahrtDTO } from "./serialize";
 
 function parseCookie(header: string | undefined, name: string): string | null {
   if (!header) return null;
@@ -106,7 +106,7 @@ async function driverState(driverId: string) {
     // erscheinen NICHT bei den Fahrern – sie werden von einer Zentrale zugewiesen.
     where: { isScheduled: true, driverId: null, status: "OFFEN", dispatchMode: "AUTO" },
     orderBy: { scheduledAt: "asc" },
-    take: 50,
+    take: OFFENE_VORBESTELLUNGEN_MAX,
   });
   // Vorgemerkte Folgefahrt: waehrend der laufenden Fahrt angenommen, startet
   // automatisch nach deren Abschluss. Wird separat ausgewiesen, damit sie den
@@ -125,6 +125,16 @@ async function driverState(driverId: string) {
     nextPromise,
   ]);
 
+  // Deckel erreicht -> aeltere Vorbestellungen sind fuer Fahrer unsichtbar.
+  // Hoechstens einmal je Stunde melden, sonst flutet es das Protokoll.
+  if (openScheduled.length === OFFENE_VORBESTELLUNGEN_MAX && Date.now() - deckelGemeldet > 3_600_000) {
+    deckelGemeldet = Date.now();
+    console.warn(
+      `Marktplatz: Obergrenze von ${OFFENE_VORBESTELLUNGEN_MAX} offenen Vorbestellungen erreicht – ` +
+        "weitere sind fuer Fahrer nicht sichtbar (OPEN_SCHEDULED_MAX erhoehen).",
+    );
+  }
+
   return {
     status: me?.status ?? "PAUSE",
     name: me?.name ?? "",
@@ -132,7 +142,9 @@ async function driverState(driverId: string) {
     // Vorgemerkte Folgefahrt (startet nach der aktuellen Fahrt automatisch).
     nextBooking: next ? bookingDTO(next) : null,
     myScheduled: myScheduled.map((b) => bookingDTO(b)),
-    openScheduled: openScheduled.map((b) => bookingDTO(b)),
+    // Reduzierte Darstellung: die Liste geht an alle Fahrer aller Firmen,
+    // auch fuer Fahrten, die noch niemand angenommen hat.
+    openScheduled: openScheduled.map((b) => offeneFahrtDTO(b)),
   };
 }
 
@@ -142,6 +154,13 @@ async function driverState(driverId: string) {
 // duerfen zusaetzlich die interne ID nutzen – aber nur fuer ihre eigenen
 // Fahrten. Frueher galt die ID fuer JEDEN, damit konnte ein Fremder fremde
 // Fahrten mitlesen und in deren Chat schreiben.
+// Obergrenze der Marktplatz-Liste. Sie ist noetig (die Liste geht bei jedem
+// Zustandsabruf an jeden Fahrer), aber sie darf nicht stillschweigend Fahrten
+// verschlucken: wird sie erreicht, sind aeltere Vorbestellungen fuer Fahrer
+// unsichtbar. Deshalb ein Hinweis im Protokoll.
+const OFFENE_VORBESTELLUNGEN_MAX = Number(process.env.OPEN_SCHEDULED_MAX ?? 50);
+let deckelGemeldet = 0;
+
 function fahrtZugriff(socket: Socket, ref: string) {
   if (socket.data.role === "DRIVER") return bookingRefWhereDriver(ref, socket.data.driverId);
   if (socket.data.role === "ADMIN") return bookingRefWhereCompany(ref, socket.data.companyId);

@@ -308,6 +308,34 @@ async function main() {
     check(`${name}-Login bremst nach vielen Fehlversuchen`, status === 429, `letzter Status ${status}`);
   }
 
+
+  section("M) Offene Vorbestellungen verraten keine Fahrgastdaten");
+  // Die Marktplatz-Liste geht an JEDEN Fahrer JEDER Firma – auch fuer Fahrten,
+  // die noch niemand angenommen hat. Frueher stand darin der volle Datensatz.
+  const mCo = await H.registerCompany("SECM");
+  await prisma.company.update({ where: { slug: mCo.slug }, data: { plan: "P20", subscriptionStatus: "AKTIV" } });
+  const mDrv = await H.createDriver(mCo.admin, "M", H.HBF);
+
+  const spaeter = new Date(Date.now() + 6 * 60 * 60_000).toISOString();
+  const vorbestellung = await post("/api/bookings", {
+    company: mCo.slug, customerName: "Geheim Person", customerPhone: "+4915100000777",
+    pickupAddress: "Hauptbahnhof", pickup: H.HBF, destAddress: "List", dest: H.LIST,
+    paymentMethod: "CASH", scheduledAt: spaeter,
+  });
+  check("Vorbestellung angelegt", vorbestellung.status === 201, vorbestellung.body?.error);
+
+  const mSock = H.connectSocket(mDrv.cookie, "driver");
+  const zustand = await H.waitFor(mSock, "driver:state", 12000).catch(() => null);
+  check("Fahrerzustand erhalten", !!zustand, zustand ? "ok" : "ausgeblieben");
+  const offene = zustand?.openScheduled ?? [];
+  const alsText = JSON.stringify(offene);
+  check("Liste enthaelt offene Vorbestellungen", Array.isArray(offene) && offene.length > 0, `${offene.length} Eintraege`);
+  check("KEINE Telefonnummer in der Liste", !/customerPhone/.test(alsText) && !alsText.includes("+4915100000777"));
+  check("KEIN Fahrgastname in der Liste", !/customerName/.test(alsText) && !alsText.includes("Geheim Person"));
+  check("Keine medizinischen Angaben", !/patientName|medicalType|medicalLabel/.test(alsText));
+  check("Zeit und Strecke bleiben sichtbar", /scheduledAt/.test(alsText) && /pickupAddress/.test(alsText));
+  mSock.close();
+
   gast.close(); kSock.close(); fremdSock.close(); adminSock.close(); fSock?.close();
 
   await prisma.$disconnect();

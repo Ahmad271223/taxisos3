@@ -3,14 +3,36 @@
 // Erinnerung wird genau einmal verschickt (Booking.remindersSent, CSV).
 
 import { prisma } from "@/lib/prisma";
-import { sendSms } from "@/lib/notify";
+import { smsProfil, sendSms } from "@/lib/notify";
 import { medicalLabel } from "@/lib/medical";
 
-const OFFSETS = [
+const ALLE_OFFSETS = [
   { key: "24h", minutes: 1440 },
   { key: "2h", minutes: 120 },
   { key: "30m", minutes: 30 },
 ] as const;
+
+// Hier entstehen die Kosten: DREI Erinnerungen je Vorbestellung. Zusammen mit
+// Bestaetigung, "Fahrer unterwegs" und "Fahrer da" kommt eine Vorbestellung so
+// auf rund sechs SMS (~0,49 EUR). Das Sparprofil kuerzt genau hier.
+//
+//   voll     24 h, 2 h, 30 min   – wie bisher
+//   sparsam  2 h                 – Standard; eine Erinnerung reicht in der Praxis
+//   minimal  keine               – der Fahrgast sieht alles auf der Verfolgungsseite
+//
+// Mit REMINDER_OFFSETS laesst sich die Auswahl unabhaengig vom Profil setzen,
+// z. B. REMINDER_OFFSETS="24h,30m".
+function aktiveOffsets(): typeof ALLE_OFFSETS[number][] {
+  const eigene = (process.env.REMINDER_OFFSETS ?? "").trim();
+  if (eigene) {
+    const gewuenscht = new Set(eigene.split(",").map((s) => s.trim()));
+    return ALLE_OFFSETS.filter((o) => gewuenscht.has(o.key));
+  }
+  const profil = smsProfil();
+  if (profil === "voll") return [...ALLE_OFFSETS];
+  if (profil === "minimal") return [];
+  return ALLE_OFFSETS.filter((o) => o.key === "2h");
+}
 
 // Fenster nach der Triggerzeit, in dem die Erinnerung noch ausgelöst wird
 // (deckt das Poll-Intervall ab; verhindert „verpasste" Nachzügler-Bursts).
@@ -53,7 +75,7 @@ export async function sendDueReminders(): Promise<number> {
     const already = new Set((b.remindersSent ?? "").split(",").filter(Boolean));
 
     // Größtes fälliges Offset (OFFSETS ist absteigend) – max. eine Erinnerung pro Lauf.
-    const due = OFFSETS.find(
+    const due = aktiveOffsets().find(
       (o) => !already.has(o.key) && minutesUntil <= o.minutes && minutesUntil >= o.minutes - GRACE_MIN,
     );
     if (!due) continue;
