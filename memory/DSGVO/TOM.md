@@ -88,8 +88,8 @@ Siehe `Loeschkonzept.md`. Umgesetzt als täglicher Lauf mit Protokoll.
 
 | Lücke | Wirkung | Zustand |
 |---|---|---|
-| `Company → Driver → Booking` löscht kaskadierend | Löschen eines Unternehmens entfernt abgerechnete Fahrten | Betrieblich abgesichert (nicht löschen, nur deaktivieren), technisch offen |
-| Fahrgäste können Name, E-Mail, Telefon nicht selbst ändern | Recht auf Berichtigung nur manuell erfüllbar | Offen |
+| Löschen einer Firma entfernt ihre Fahrer (Cascade) | Fahrten bleiben erhalten (SetNull) und behalten Fahrer- und Ausstellerdaten als Schnappschuss | Geprüft, kein offener Punkt |
+| ~~Fahrgäste können Stammdaten nicht selbst ändern~~ | Seit 26.08.2026 im Konto änderbar: Name frei, E-Mail und Rufnummer mit Passwort, neue Nummer mit SMS-Bestätigung | Erledigt |
 | Kein Datenexport für Betroffene | Art. 15/20 nur manuell | Offen |
 | Keine Verschlüsselung einzelner Felder | Medizinische Dokumente liegen als Base64 in der Datenbank; geschützt ist die Datenbank als Ganzes | Bewusst, mit dem Anwalt zu bewerten |
 | Unterschriften speichern Koordinaten | Standortdatum der unterschreibenden Person | Zu entscheiden, ob nötig |

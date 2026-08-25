@@ -18,7 +18,7 @@ REIHEN=(
   frontend_walk dashboards security_refs pdf_names pdf_invoices driver_sync tracking_eta funds_check settle_race no_fake_success
   live_ready invoice_retired flights account_group payment_flow subscription
   plans_connect driver_confirm_replace chat_offline scheduled_freeze
-  freeze_deadlock loadtest loadtest_heavy betrieb
+  freeze_deadlock loadtest loadtest_heavy betrieb profil_aendern beleg_schnappschuss
 )
 if [ -n "${QA_REIHEN:-}" ]; then REIHEN=($QA_REIHEN); fi
 
@@ -37,9 +37,13 @@ starte_server() {
   rm -f "$LOG"
   # Ein beschaedigter .next-Cache laesst die Next-Worker mit EPIPE sterben.
   # Betroffene Routen antworten dann mit 500 statt mit ihrem echten Ergebnis –
-  # der Testlauf meldet Dutzende Fehler, die keine sind. Deshalb vor dem
-  # ersten Start einmal aufraeumen.
-  if [ "${QA_CLEAN_NEXT:-1}" = "1" ] && [ -z "${QA_NEXT_BEREINIGT:-}" ]; then
+  # der Testlauf meldet Dutzende Fehler, die keine sind.
+  #
+  # BEWUSST nicht standardmaessig: das Loeschen erzwingt einen vollstaendigen
+  # Neuaufbau und kostet mehrere Minuten. Erst einschalten, wenn im Protokoll
+  # tatsaechlich "WorkerError" steht (die Pruefung weiter unten meldet das):
+  #   QA_CLEAN_NEXT=1 bash scripts/qa/run-all.sh
+  if [ "${QA_CLEAN_NEXT:-0}" = "1" ] && [ -z "${QA_NEXT_BEREINIGT:-}" ]; then
     rm -rf .next
     QA_NEXT_BEREINIGT=1
   fi

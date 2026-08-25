@@ -132,8 +132,9 @@ schriftlich nachzuhalten (siehe `Auftragsverarbeiter.md`).
 ## Betroffenenrechte — ehrlicher Stand
 
 - **Auskunft (Art. 15):** nur manuell aus der Datenbank. Kein Selbstbedienungs-Export.
-- **Berichtigung (Art. 16):** Fahrgäste können Name, E-Mail und Telefonnummer
-  derzeit **nicht selbst ändern**. Das ist eine offene Lücke und sollte vor dem
-  Livegang geschlossen werden.
+- **Berichtigung (Art. 16):** Seit dem 26.08.2026 können Fahrgäste Name,
+  E-Mail und Telefonnummer selbst ändern (Konto → „Meine Daten"). E-Mail und
+  Rufnummer verlangen das Passwort; eine neue Rufnummer wird per SMS bestätigt.
+  Alte Fahrten und Belege bleiben unverändert (Schnappschussfelder).
 - **Löschung (Art. 17):** siehe `Loeschkonzept.md`; derzeit manuell.
 - **Datenübertragbarkeit (Art. 20):** nicht umgesetzt.

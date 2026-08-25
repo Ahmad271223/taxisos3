@@ -69,6 +69,25 @@ export function CustomerAccount() {
     await fetch(`/api/favorites?driverId=${driverId}`, { method: "DELETE" });
     loadFavorites();
   }
+  // Aenderung der Stammdaten. Gibt den Fehler ZURUECK statt ihn zu schlucken:
+  // "E-Mail vergeben", "Passwort falsch" und "Nummer nicht bestaetigt" muessen
+  // beim Fahrgast ankommen, sonst klickt er ins Leere.
+  async function saveStammdaten(daten: Record<string, unknown>): Promise<string | null> {
+    try {
+      const r = await fetch("/api/customer/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(daten),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return d.error ?? "Speichern fehlgeschlagen.";
+      setProfile(d.profile);
+      return null;
+    } catch {
+      return "Netzwerkfehler.";
+    }
+  }
+
   async function saveEmergency(name: string, phone: string) {
     const r = await fetch("/api/customer/profile", {
       method: "PATCH",
@@ -116,6 +135,7 @@ export function CustomerAccount() {
             onAddFavorite={addFavorite}
             onRemoveFavorite={removeFavorite}
             onSaveEmergency={saveEmergency}
+            onSaveStammdaten={saveStammdaten}
           />
         ) : (
           <div className="card p-6" data-testid="customer-auth">
@@ -292,6 +312,7 @@ function LoggedIn({
   onAddFavorite,
   onRemoveFavorite,
   onSaveEmergency,
+  onSaveStammdaten,
 }: {
   name: string;
   bookings: any[];
@@ -303,6 +324,7 @@ function LoggedIn({
   onAddFavorite: (driverId: string) => void;
   onRemoveFavorite: (driverId: string) => void;
   onSaveEmergency: (name: string, phone: string) => void;
+  onSaveStammdaten: (daten: Record<string, unknown>) => Promise<string | null>;
 }) {
   const points = profile?.points ?? 0;
   const favIds = new Set(favorites.map((f) => f.driverId));
@@ -477,7 +499,12 @@ function LoggedIn({
 
       {/* Tab: Profil (Notfallkontakt) */}
       {tab === "payment" && <PaymentMethods />}
-      {tab === "profile" && <EmergencyCard profile={profile} onSave={onSaveEmergency} />}
+      {tab === "profile" && (
+        <div className="grid gap-4">
+          <StammdatenCard profile={profile} onSave={onSaveStammdaten} />
+          <EmergencyCard profile={profile} onSave={onSaveEmergency} />
+        </div>
+      )}
     </div>
   );
 }
@@ -487,6 +514,188 @@ function Stat({ value, label, testid }: { value: string; label: string; testid?:
     <div className="px-3 py-3 text-center">
       <p className="font-display text-2xl font-extrabold text-ink-900" data-testid={testid}>{value}</p>
       <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">{label}</p>
+    </div>
+  );
+}
+
+/**
+ * Stammdaten aendern (Recht auf Berichtigung, Art. 16 DSGVO).
+ *
+ * Vorher gab es diese Moeglichkeit gar nicht - Name, E-Mail und Rufnummer
+ * liessen sich nur durch einen Eingriff in der Datenbank korrigieren.
+ *
+ * Zwei Dinge sind hier bewusst unbequem:
+ *   - Fuer E-Mail und Rufnummer wird das aktuelle Passwort verlangt. Beides
+ *     ist anmelde- bzw. zustellrelevant; ein fremder Zugriff auf ein offenes
+ *     Geraet koennte sonst das Konto uebernehmen.
+ *   - Eine neue Rufnummer muss per SMS bestaetigt werden, genau wie bei der
+ *     Registrierung. Ohne das liesse sich die Verifizierung umgehen.
+ */
+function StammdatenCard({
+  profile,
+  onSave,
+}: {
+  profile: any | null;
+  onSave: (daten: Record<string, unknown>) => Promise<string | null>;
+}) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [passwort, setPasswort] = useState("");
+  const [code, setCode] = useState("");
+  const [token, setToken] = useState<string | null>(null);
+  const [codeStand, setCodeStand] = useState<"leer" | "gesendet" | "ok">("leer");
+  const [devCode, setDevCode] = useState<string | null>(null);
+  const [fehler, setFehler] = useState<string | null>(null);
+  const [gespeichert, setGespeichert] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (profile) {
+      setName(profile.name ?? "");
+      setEmail(profile.email ?? "");
+      setPhone(profile.phone ?? "");
+      setToken(null);
+      setCodeStand("leer");
+      setPasswort("");
+    }
+  }, [profile]);
+
+  const mailNeu = !!profile && email.trim().toLowerCase() !== (profile.email ?? "").toLowerCase();
+  const telNeu = !!profile && phone.trim() !== (profile.phone ?? "");
+  const passwortNoetig = mailNeu || telNeu;
+  const etwasGeaendert = mailNeu || telNeu || (!!profile && name.trim() !== (profile.name ?? ""));
+
+  async function codeSenden() {
+    setBusy(true); setFehler(null); setDevCode(null);
+    try {
+      const r = await fetch("/api/verify/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel: "SMS", target: phone.trim() }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) setFehler(d.error ?? "Code konnte nicht gesendet werden.");
+      else { setCodeStand("gesendet"); if (d.devCode) setDevCode(d.devCode); }
+    } catch { setFehler("Netzwerkfehler."); } finally { setBusy(false); }
+  }
+
+  async function codePruefen() {
+    setBusy(true); setFehler(null);
+    try {
+      const r = await fetch("/api/verify/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel: "SMS", target: phone.trim(), code: code.trim() }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.token) setFehler(d.error ?? "Code falsch.");
+      else { setToken(d.token); setCodeStand("ok"); }
+    } catch { setFehler("Netzwerkfehler."); } finally { setBusy(false); }
+  }
+
+  async function speichern() {
+    setBusy(true); setFehler(null); setGespeichert(false);
+    const daten: Record<string, unknown> = { name: name.trim() };
+    if (mailNeu) daten.email = email.trim();
+    if (telNeu) { daten.phone = phone.trim(); if (token) daten.verificationToken = token; }
+    if (passwortNoetig) daten.currentPassword = passwort;
+    const fehlerText = await onSave(daten);
+    setBusy(false);
+    if (fehlerText) { setFehler(fehlerText); return; }
+    setGespeichert(true);
+    setPasswort("");
+  }
+
+  return (
+    <div className="card p-5" data-testid="account-stammdaten">
+      <h2 className="mb-1 eyebrow text-ink-500">Meine Daten</h2>
+      <p className="mb-3 text-xs text-ink-400">
+        Name, E-Mail und Telefonnummer korrigieren. Bereits gefahrene Fahrten und
+        deren Belege bleiben unveraendert.
+      </p>
+
+      <div className="grid gap-3">
+        <div>
+          <label className="label" htmlFor="stamm-name">Name</label>
+          <input
+            id="stamm-name" className="field" data-testid="stamm-name" value={name}
+            onChange={(e) => { setName(e.target.value); setGespeichert(false); }}
+          />
+        </div>
+        <div>
+          <label className="label" htmlFor="stamm-email">E-Mail (Anmeldung)</label>
+          <input
+            id="stamm-email" className="field" data-testid="stamm-email" type="email" value={email}
+            onChange={(e) => { setEmail(e.target.value); setGespeichert(false); }}
+          />
+        </div>
+        <div>
+          <label className="label" htmlFor="stamm-phone">Telefon</label>
+          <input
+            id="stamm-phone" className="field" data-testid="stamm-phone" type="tel" value={phone}
+            onChange={(e) => { setPhone(e.target.value); setGespeichert(false); setToken(null); setCodeStand("leer"); }}
+          />
+          {profile && !telNeu && (
+            <p className="mt-1 text-[11px] text-ink-400">
+              {profile.phoneVerified ? "Bestaetigt" : "Nicht bestaetigt"}
+            </p>
+          )}
+        </div>
+
+        {telNeu && codeStand !== "ok" && (
+          <div className="rounded-xl bg-ink-50 p-3">
+            <p className="mb-2 text-xs text-ink-500">
+              Neue Nummer bitte per SMS bestaetigen - sonst erreichen dich keine
+              Fahrtmeldungen.
+            </p>
+            {codeStand === "leer" ? (
+              <button type="button" onClick={codeSenden} disabled={busy} className="btn-ghost text-sm" data-testid="stamm-code-senden">
+                Code senden
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  className="field" data-testid="stamm-code" placeholder="6-stelliger Code"
+                  value={code} onChange={(e) => setCode(e.target.value)}
+                />
+                <button type="button" onClick={codePruefen} disabled={busy} className="btn-ghost shrink-0 text-sm" data-testid="stamm-code-pruefen">
+                  Pruefen
+                </button>
+              </div>
+            )}
+            {devCode && <p className="mt-2 text-[11px] text-ink-400">Testcode: {devCode}</p>}
+          </div>
+        )}
+        {telNeu && codeStand === "ok" && (
+          <p className="text-xs font-semibold text-green-700" data-testid="stamm-code-ok">Neue Nummer bestaetigt</p>
+        )}
+
+        {passwortNoetig && (
+          <div>
+            <label className="label" htmlFor="stamm-passwort">Aktuelles Passwort</label>
+            <input
+              id="stamm-passwort" className="field" data-testid="stamm-passwort" type="password"
+              value={passwort} onChange={(e) => setPasswort(e.target.value)}
+              placeholder="Zur Bestaetigung der Aenderung"
+            />
+            <p className="mt-1 text-[11px] text-ink-400">
+              Wird nur bei Aenderung von E-Mail oder Telefonnummer verlangt.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {fehler && <p className="mt-3 text-sm text-red-600" data-testid="stamm-fehler">{fehler}</p>}
+
+      <button
+        onClick={speichern}
+        disabled={busy || !etwasGeaendert || (passwortNoetig && !passwort)}
+        data-testid="stamm-speichern"
+        className="btn-primary mt-4 disabled:opacity-50"
+      >
+        {gespeichert ? "Gespeichert" : "Aenderungen speichern"}
+      </button>
     </div>
   );
 }

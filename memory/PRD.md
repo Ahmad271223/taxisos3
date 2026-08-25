@@ -414,8 +414,11 @@ Ebenfalls am 2026-08-25 – die Punkte aus "ohne das nicht live gehen":
 - **P1** Loeschkonzept, Verzeichnis der Verarbeitungstaetigkeiten und
   Auftragsverarbeitungsvertraege (Stripe, Twilio, Hoster, Kartendienst).
   Bei Krankenfahrten sind das Gesundheitsdaten.
-- **P2** Kaskadenloeschung: `Company -> Driver -> Booking` loescht auch
-  abgerechnete Fahrten. Fuer die Buchhaltung braucht es ein Soft-Delete.
+- ~~**P2** Kaskadenloeschung~~ **berichtigt am 26.08.2026:** `Booking.company`
+  und `Booking.driver` stehen auf SetNull, Fahrten bleiben also erhalten. Nur
+  Fahrer haengen per Cascade an der Firma – und die sind ueber die
+  Schnappschuesse auf der Fahrt weiterhin nachvollziehbar. Die frueher hier
+  notierte Warnung war falsch.
 - **P2** Preisaenderungen sind nicht nachvollziehbar protokolliert (wer hat
   wann welchen Tarif geaendert).
 - **P2** Betriebshandbuch: was tun bei Stripe-Ausfall, Twilio-Ausfall,

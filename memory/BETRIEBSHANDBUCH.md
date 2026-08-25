@@ -277,9 +277,10 @@ umgehen" – jeder dieser Punkte hat einen konkreten Schaden dahinter.
 ## 9. Was niemals passieren darf
 
 - **Fahrten löschen**, um Platz oder Ordnung zu schaffen. Sie sind
-  Rechnungsgrundlage. (Offener Punkt: `Company → Driver → Booking` löscht
-  derzeit kaskadierend mit; bis das auf Soft-Delete umgestellt ist, kein
-  Unternehmen und keinen Fahrer löschen, für die es abgerechnete Fahrten gibt.)
+  Rechnungsgrundlage. (Zur Beruhigung: das Löschen einer Firma entfernt zwar
+  ihre Fahrer, die Fahrten selbst bleiben erhalten und behalten Fahrer- und
+  Ausstellerdaten als Schnappschuss. Hier stand zuvor, Fahrten würden
+  mitgelöscht — das war falsch.)
 - **Zahlungsstatus von Hand in der Datenbank umschreiben.** Die Sperre gegen
   Doppelbuchungen greift nur über den regulären Weg.
 - **`AUTH_SECRET` im laufenden Betrieb ändern.** Alle Anmeldungen fliegen

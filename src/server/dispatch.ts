@@ -898,11 +898,16 @@ export class Dispatcher {
       let platformFeeRate: number | null = null;
       let platformFee: number | null = null;
       let companyNet: number | null = null;
+      // Firmendaten EINMAL laden: fuer die Provision und fuer den
+      // Aussteller-Schnappschuss auf dem Beleg (siehe Schema-Kommentar).
+      const firma = b.companyId
+        ? await prisma.company.findUnique({
+            where: { id: b.companyId },
+            select: { cityTier: true, name: true, address: true, phone: true, taxId: true, vatId: true },
+          })
+        : null;
       if (fare > 0) {
-        const company = b.companyId
-          ? await prisma.company.findUnique({ where: { id: b.companyId }, select: { cityTier: true } })
-          : null;
-        const c = computeCommission(fare, company?.cityTier);
+        const c = computeCommission(fare, firma?.cityTier);
         platformFeeRate = c.rate;
         platformFee = c.platformFee;
         companyNet = c.companyNet;
@@ -928,6 +933,13 @@ export class Dispatcher {
           tip: 0,
           waitMinutes: wait.minutes || null,
           waitFee: wait.fee || null,
+          // Ausstellerdaten zum Fahrtzeitpunkt einfrieren: ein spaeterer Umzug
+          // oder eine neue Steuernummer darf alte Belege nicht veraendern.
+          companyNameSnap: firma?.name ?? undefined,
+          companyAddressSnap: firma?.address ?? undefined,
+          companyPhoneSnap: firma?.phone ?? undefined,
+          companyTaxIdSnap: firma?.taxId ?? undefined,
+          companyVatIdSnap: firma?.vatId ?? undefined,
           platformFeeRate,
           platformFee,
           companyNet,

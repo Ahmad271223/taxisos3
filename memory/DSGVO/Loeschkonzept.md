@@ -54,17 +54,30 @@ Konto selbst aufbewahrt werden müsste. Genau dafür ist es da.
 
 ---
 
-## Offener Punkt: Kaskadenlöschung
+## Löschen von Unternehmen und Fahrern — der tatsächliche Stand
 
-Heute gilt in der Datenbank `Company → Driver → Booking` mit `onDelete:
-Cascade`. Wird ein Unternehmen gelöscht, verschwinden **auch abgerechnete
-Fahrten**. Das verletzt die steuerliche Aufbewahrungspflicht und macht
-Rechnungen unbelegbar.
+**Berichtigung vom 26.08.2026.** Hier stand zuvor, `Company → Driver →
+Booking` lösche kaskadierend und das Entfernen eines Unternehmens vernichte
+abgerechnete Fahrten. Das war falsch. Der geprüfte Stand im Schema:
 
-**Bis das auf ein Soft-Delete umgestellt ist, gilt betrieblich:** kein
-Unternehmen und keinen Fahrer löschen, für die es abgerechnete Fahrten gibt.
-Stattdessen deaktivieren (`active = false`). Der Punkt steht auch im
-Betriebshandbuch unter „Was niemals passieren darf".
+| Beziehung | Verhalten |
+|---|---|
+| `Driver.company` | **Cascade** — mit der Firma verschwinden ihre Fahrer |
+| `Booking.company` | **SetNull** — die Fahrt bleibt, verliert nur die Firma |
+| `Booking.driver` | **SetNull** — die Fahrt bleibt, verliert nur den Fahrer |
+
+Fahrten werden also **nicht** gelöscht. Und im Produkt gibt es überhaupt keine
+Funktion, ein Unternehmen zu löschen — nur das QA-Aufräumskript tut das gegen
+die Testdatenbank.
+
+Was bleibt, ist kleiner, aber echt: Nach einer Löschung von Hand in der
+Datenbank hat die Fahrt keine Firma mehr — und die Firma ist der **Aussteller
+des Belegs**. Der Beleg fiele auf „Taxiunternehmen" ohne Anschrift und
+Steuernummer zurück. Deshalb hält die Fahrt seit dem 26.08.2026 einen
+Schnappschuss der Ausstellerdaten (siehe unten).
+
+Fahrer **können** über die Oberfläche gelöscht werden. Das ist unproblematisch,
+weil Name und Kennzeichen als Kopie auf der Fahrt liegen.
 
 ---
 

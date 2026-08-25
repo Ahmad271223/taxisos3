@@ -37,6 +37,7 @@ export async function POST(req: Request) {
   const email = d.email.toLowerCase();
 
   // Telefon-Verifizierung (wie bei der Buchung), damit das Konto eine bestätigte Nummer hat.
+  let telBestaetigt: Date | null = null;
   if (phoneVerificationRequired()) {
     const proof = verifyVerifyToken(d.verificationToken, { channel: "SMS", target: normalizeTarget("SMS", d.phone) });
     if (!proof) {
@@ -45,6 +46,10 @@ export async function POST(req: Request) {
         { status: 403 },
       );
     }
+    // Das Feld phoneVerifiedAt wurde bisher NIRGENDS geschrieben – es stand im
+    // Schema als "Voraussetzung fuer Buchungen", war aber immer leer und hat
+    // damit eine Zusicherung vorgetaeuscht, die es nicht gab.
+    telBestaetigt = new Date();
   }
 
   if (await prisma.customer.findUnique({ where: { email } })) {
@@ -52,7 +57,13 @@ export async function POST(req: Request) {
   }
 
   const customer = await prisma.customer.create({
-    data: { name: d.name, email, phone: d.phone, passwordHash: await hashPassword(d.password) },
+    data: {
+      name: d.name,
+      email,
+      phone: d.phone,
+      passwordHash: await hashPassword(d.password),
+      phoneVerifiedAt: telBestaetigt,
+    },
   });
 
   const token = signSession({ sub: customer.id, role: "CUSTOMER", name: customer.name, username: customer.email, companyId: "", phone: customer.phone });

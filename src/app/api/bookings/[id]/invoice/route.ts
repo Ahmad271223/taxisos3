@@ -38,14 +38,17 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     tip: b.tip ?? 0,
     paymentMethod: b.paymentMethod,
     paymentStatus: b.paymentStatus,
-    carrier: b.company?.name ?? null,
-    carrierAddress: b.company?.address ?? null,
-    carrierPhone: b.company?.phone ?? null,
+    // Schnappschuss zuerst: der Beleg zeigt den Aussteller zum FAHRTZEITPUNKT.
+    // Die aktuellen Firmendaten sind nur der Rueckfall fuer Altfahrten, die
+    // vor Einfuehrung des Schnappschusses abgeschlossen wurden – zieht das
+    // Unternehmen spaeter um, aenderten sich sonst rueckwirkend alle Belege.
+    carrier: b.companyNameSnap ?? b.company?.name ?? null,
+    carrierAddress: b.companyAddressSnap ?? b.company?.address ?? null,
+    carrierPhone: b.companyPhoneSnap ?? b.company?.phone ?? null,
     carrierEmail: b.company?.email ?? null,
-    carrierTaxId: b.company?.taxId ?? null,
-    carrierVatId: b.company?.vatId ?? null,
-    // Schnappschuss zuerst: der Beleg muss auch dann stimmen, wenn der Fahrer
-    // spaeter geloescht wird (Company->Driver ist eine Cascade-Loeschung).
+    carrierTaxId: b.companyTaxIdSnap ?? b.company?.taxId ?? null,
+    carrierVatId: b.companyVatIdSnap ?? b.company?.vatId ?? null,
+    // Fahrer ebenso: der Schnappschuss ueberlebt die Loeschung des Kontos.
     driverName: b.driverNameSnap ?? b.driver?.name ?? null,
     plate: b.driverPlateSnap ?? b.driver?.vehiclePlate ?? null,
   });

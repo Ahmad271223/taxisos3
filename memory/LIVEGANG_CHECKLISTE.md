@@ -107,11 +107,13 @@ Umsetzung.
 Keine dieser Baustellen hindert dich am Start, aber jede wird mit der Zeit
 teurer:
 
-- **Kaskadenlöschung entschärfen.** Heute löscht das Entfernen eines
-  Unternehmens auch dessen abgerechnete Fahrten. Bis das auf Soft-Delete
-  umgestellt ist: Unternehmen und Fahrer **deaktivieren**, nicht löschen.
-- **Fahrgäste können Name, E-Mail und Telefon nicht selbst ändern.** Das Recht
-  auf Berichtigung ist derzeit nur manuell erfüllbar.
+- ~~Kaskadenlöschung entschärfen.~~ **Geprüft am 26.08.2026: kein Problem.**
+  Fahrten hängen mit `SetNull` an Firma und Fahrer und bleiben beim Löschen
+  erhalten; im Produkt gibt es ohnehin keine Funktion, eine Firma zu löschen.
+  Die frühere Warnung an dieser Stelle war falsch.
+- ~~Fahrgäste können Stammdaten nicht selbst ändern.~~ **Erledigt am
+  26.08.2026:** im Konto unter „Meine Daten" — Name frei, E-Mail und
+  Rufnummer nur mit Passwort, neue Nummer mit SMS-Bestätigung.
 - **Kein Prüfpfad für Preisänderungen** — wer wann welchen Tarif geändert hat,
   lässt sich nicht nachvollziehen.
 - **Zweite Instanz ab ~60 gleichzeitig fahrenden Fahrern**, dann mit

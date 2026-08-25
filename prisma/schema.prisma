@@ -406,6 +406,20 @@ model Booking {
   // noch zeigen, WER gefahren ist – sonst faellt die Nachpruefbarkeit weg.
   driverNameSnap String?
   driverPlateSnap String?
+
+  // Schnappschuss der AUSSTELLERDATEN zum Zeitpunkt der Fahrt.
+  //
+  // Der Beleg wird im Namen des Taxiunternehmens ausgestellt. Ohne diese Kopie
+  // liest er die AKTUELLEN Firmendaten – zieht das Unternehmen um oder bekommt
+  // eine neue Steuernummer, aenderten sich damit rueckwirkend ALLE alten
+  // Belege, und ein erneut geladener Beleg wiche von dem ab, den der Fahrgast
+  // erhalten hat. Eine Rechnung muss den Aussteller zum Leistungszeitpunkt
+  // zeigen.
+  companyNameSnap    String?
+  companyAddressSnap String?
+  companyPhoneSnap   String?
+  companyTaxIdSnap   String?
+  companyVatIdSnap   String?
   declinedDriverIds String @default("")
 
   // Bewertung
