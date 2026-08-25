@@ -4,6 +4,10 @@ import time
 import pytest
 import requests
 
+# Testpasswort NICHT im Repository hinterlegen – es landet sonst dauerhaft
+# im Git-Verlauf. Ueber die Umgebung setzen.
+TEST_PASSWORT = os.environ.get("QA_TEST_PASSWORT", "Pass!QA-2026")
+
 BASE_URL = (os.environ.get("REACT_APP_BACKEND_URL") or
             "https://taxios-dispatch.preview.emergentagent.com").rstrip("/")
 
@@ -88,7 +92,7 @@ class TestBackwardCompatWithCompany:
         payload = {
             "name": f"TEST_Compat_{ts}",
             "email": f"compat+{ts}@test.com",
-            "password": "Pass1234",
+            "password": TEST_PASSWORT,
             "address": "Teststraße 1",
             "phone": "0511 1",
         }
@@ -123,7 +127,7 @@ class TestSuperAdminLogin:
         s = requests.Session()
         r = s.post(
             f"{BASE_URL}/api/auth/login",
-            json={"email": "super@taxios.app", "password": "SuperAdmin2026!", "role": "ADMIN"},
+            json={"email": "super@taxios.app", "password": os.environ.get("SUPER_ADMIN_PASSWORD", ""), "role": "ADMIN"},
             timeout=20,
         )
         assert r.status_code == 200

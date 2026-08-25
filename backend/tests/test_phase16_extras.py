@@ -6,6 +6,10 @@ import time
 from datetime import datetime, timedelta, timezone
 import requests
 
+# Testpasswort NICHT im Repository hinterlegen – es landet sonst dauerhaft
+# im Git-Verlauf. Ueber die Umgebung setzen.
+TEST_PASSWORT = os.environ.get("QA_TEST_PASSWORT", "Pass!QA-2026")
+
 BASE_URL = (
     os.environ.get("REACT_APP_BACKEND_URL")
     or "https://taxios-dispatch.preview.emergentagent.com"
@@ -30,7 +34,7 @@ def _account(ts):
     s = requests.Session()
     r = s.post(
         f"{BASE_URL}/api/customer/register",
-        json={"name": "Extra Kunde", "email": email, "phone": phone, "password": "Pass1234", "verificationToken": _verify_token(phone)},
+        json={"name": "Extra Kunde", "email": email, "phone": phone, "password": TEST_PASSWORT, "verificationToken": _verify_token(phone)},
         timeout=20,
     )
     assert r.status_code in (200, 201), r.text
@@ -75,12 +79,12 @@ class TestFavoritesPoints:
         adm = requests.Session()
         adm.post(
             f"{BASE_URL}/api/companies/register",
-            json={"name": f"FAV_{ts}", "email": f"fav{ts}@test.com", "password": "Pass1234", "cityTier": "SMALL"},
+            json={"name": f"FAV_{ts}", "email": f"fav{ts}@test.com", "password": TEST_PASSWORT, "cityTier": "SMALL"},
             timeout=25,
         )
         drv = adm.post(
             f"{BASE_URL}/api/admin/drivers",
-            json={"name": "Fav Fahrer", "username": f"favdrv{ts}", "password": "Pass1234", "vehiclePlate": "H-FV 1", "vehicleClass": "STANDARD"},
+            json={"name": "Fav Fahrer", "username": f"favdrv{ts}", "password": TEST_PASSWORT, "vehiclePlate": "H-FV 1", "vehicleClass": "STANDARD"},
             timeout=15,
         )
         did = drv.json()["driver"]["id"]

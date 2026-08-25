@@ -19,11 +19,17 @@ export async function POST(req: Request) {
   }
 
   // Rate-Limit (nur hinter Proxy/Ingress): Brute-Force bremsen.
+  // Das Limit pro Benutzername greift IMMER – auch wenn keine IP feststellbar
+  // ist. Sonst liesse sich der Bruteforce-Schutz dadurch aushebeln, dass man
+  // die eigene IP unkenntlich macht.
+  const perId = rateLimit(`login:id:${identifier.toLowerCase()}`, 20, 5 * 60_000);
+  if (!perId.ok) {
+    return NextResponse.json({ error: "Zu viele Anmeldeversuche. Bitte später erneut." }, { status: 429 });
+  }
   const ip = clientIp(req);
   if (ip) {
     const perIp = rateLimit(`login:ip:${ip}`, 20, 5 * 60_000);
-    const perId = rateLimit(`login:id:${identifier.toLowerCase()}`, 20, 5 * 60_000);
-    if (!perIp.ok || !perId.ok) {
+    if (!perIp.ok) {
       return NextResponse.json({ error: "Zu viele Anmeldeversuche. Bitte später erneut." }, { status: 429 });
     }
   }

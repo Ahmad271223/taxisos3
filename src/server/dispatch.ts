@@ -713,6 +713,13 @@ export class Dispatcher {
 
     const trackingStatus = isReservation ? "RESERVIERT_FAHRER" : "FAHRER_UNTERWEGS";
 
+    // Kennzeichen fuer den Schnappschuss: der Live-Zustand im Speicher fuehrt
+    // es nicht mit, deshalb einmal aus der Datenbank holen.
+    const kennzeichenSnap = (await prisma.driver.findUnique({
+      where: { id: driverId },
+      select: { vehiclePlate: true },
+    }))?.vehiclePlate ?? undefined;
+
     const updated = await prisma.booking.update({
       where: { id: bookingId },
       data: {
@@ -724,6 +731,11 @@ export class Dispatcher {
         priceExact,
         priceIsFixed,
         isReserved: isReservation,
+        // Schnappschuss fuer den spaeteren Beleg: wird der Fahrer geloescht
+        // (Company->Driver ist Cascade), muss trotzdem nachvollziehbar
+        // bleiben, wer gefahren ist.
+        driverNameSnap: live?.name ?? undefined,
+        driverPlateSnap: kennzeichenSnap,
       },
       include: { driver: true, card: true },
     });

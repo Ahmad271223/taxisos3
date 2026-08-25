@@ -47,7 +47,7 @@
     ".env.example (+STRIPE_SECRET_KEY)"
   ],
   "success_rate": {"backend": "100% (49/49 pytest incl. 13 new Phase-2 tests) + 21/21 driver-socket E2E (scripts/e2e_driver_socket.js)", "frontend": "SSR smokes 100% (/buchen add-stop, /verfolgen payment-card+stops, /fahrer). Browser-level interaction E2E (clicking add-stop, change-dest dialog) not run, but the same backend endpoints are fully covered by the socket E2E."},
-  "test_credentials": "Super-Admin: super@taxios.app / SuperAdmin2026! (role='ADMIN' MUST be in /api/auth/login JSON body).",
+  "test_credentials": "Super-Admin: super@taxios.app / <PASSWORT-ENTFERNT> (role='ADMIN' MUST be in /api/auth/login JSON body).",
   "seed_data_creation": "Local SQLite (prisma db push + seed). ~20 TEST_ bookings created by the Phase-2 pytest run incl. CARD bookings with mock authorizations (paymentRef mock_auth_*).",
   "retest_needed": false,
   "main_agent_can_self_test": true,

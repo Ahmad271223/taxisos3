@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { bookingDTO } from "@/server/serialize";
-import { bookingRefWhere } from "@/lib/bookingRef";
+import { getSession } from "@/lib/session";
+import { bookingRefWhereCustomer } from "@/lib/bookingRef";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const booking = await prisma.booking.findFirst({
-    where: bookingRefWhere(params.id),
+    where: bookingRefWhereCustomer(params.id, getSession("customer")?.sub),
     include: { driver: true, card: true, signature: { select: { signedAt: true } } },
   });
   if (!booking) {

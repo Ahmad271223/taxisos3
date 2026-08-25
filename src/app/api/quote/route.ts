@@ -65,7 +65,14 @@ export async function POST(req: Request) {
   const pickupPt = { lat: Number(from.lat), lng: Number(from.lng) };
   const destPt = { lat: Number(to.lat), lng: Number(to.lng) };
   const hasStops = normalizeStops(stops).length > 0;
-  const fixedRules = hasStops ? [] : await prisma.fixedPriceRule.findMany({ where: { active: true } });
+  // Steht die Firma bereits fest (Buchung ueber /c/<slug>), duerfen NUR
+  // deren Regeln einfliessen – sonst wuerde der Preis fremder Unternehmen
+  // die Spanne verschieben und deren Kalkulation nach aussen sichtbar.
+  // Ohne Firma ist die plattformweite Sicht dagegen richtig: jede Firma
+  // koennte die Fahrt uebernehmen.
+  const fixedRules = hasStops
+    ? []
+    : await prisma.fixedPriceRule.findMany({ where: { active: true, ...(companyId ? { companyId } : {}) } });
 
   // Preisvergleich über alle Klassen (Phase 12 Fahrzeug-Marktplatz).
   const classes = await Promise.all(

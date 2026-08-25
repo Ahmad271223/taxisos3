@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SignaturePad } from "@/components/SignaturePad";
 import { PickupZoneCard } from "@/components/PickupZoneCard";
 import dynamic from "next/dynamic";
@@ -201,17 +201,32 @@ export function TrackingView({ id }: { id: string }) {
     }
   }
 
+  // In der Adresszeile steht bei Gaesten der Verfolgungs-TOKEN, der Server
+  // sendet in seinen Ereignissen aber immer die Auftrags-ID. Wer stur gegen
+  // den URL-Wert vergleicht, verwirft daher JEDES Ereignis – die Karte blieb
+  // stehen und der Status aktualisierte sich nie. Deshalb: sobald der Auftrag
+  // geladen ist, seine echte ID merken und beide Formen gelten lassen.
+  const fahrtIdRef = useRef<string>(id);
+
   useEffect(() => {
     let mounted = true;
+    fahrtIdRef.current = id;
     fetch(`/api/bookings/${id}`)
       .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((d) => mounted && setBooking(d.booking))
+      .then((d) => {
+        if (!mounted) return;
+        if (d?.booking?.id) fahrtIdRef.current = d.booking.id;
+        setBooking(d.booking);
+      })
       .catch(() => mounted && setNotFound(true));
+
+    const gehoertHierher = (kandidat?: string | null) =>
+      !!kandidat && (kandidat === fahrtIdRef.current || kandidat === id);
 
     const socket = getSocket();
     socket.emit("track:join", { bookingId: id });
     const onUpdate = (b: any) => {
-      if (b?.id === id) {
+      if (gehoertHierher(b?.id)) {
         setBooking(b);
         if (b.driver?.lat != null && b.driver?.lng != null) {
           setDriverLoc({ lat: b.driver.lat, lng: b.driver.lng });
@@ -219,12 +234,12 @@ export function TrackingView({ id }: { id: string }) {
       }
     };
     const onDriverLoc = (p: { bookingId: string; lat: number; lng: number }) => {
-      if (p.bookingId === id) setDriverLoc({ lat: p.lat, lng: p.lng });
+      if (gehoertHierher(p.bookingId)) setDriverLoc({ lat: p.lat, lng: p.lng });
     };
     // Die Ankunftszeit kommt waehrend der Anfahrt laufend nach, damit sie sich
     // mit dem Wagen mitbewegt statt beim Wert der Annahme stehen zu bleiben.
     const onEta = (p: { bookingId: string; etaSeconds: number }) => {
-      if (p.bookingId !== id) return;
+      if (!gehoertHierher(p.bookingId)) return;
       setBooking((b: any) => (b ? { ...b, etaSeconds: p.etaSeconds } : b));
     };
     socket.on("booking:update", onUpdate);

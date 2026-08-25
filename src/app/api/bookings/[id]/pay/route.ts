@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
-import { bookingRefWhere } from "@/lib/bookingRef";
+import { bookingRefWhereCustomer } from "@/lib/bookingRef";
 import { settleRide, prepareRidePayment, TIP_WINDOW_MS, capTip } from "@/lib/settle";
 import { cardIsExpired } from "@/lib/customerCards";
 import { getDispatcher } from "@/server/runtime";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 // verfuegbare Karten und ggf. der Fehler einer misslungenen Belastung.
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const b = await prisma.booking.findFirst({
-    where: bookingRefWhere(params.id),
+    where: bookingRefWhereCustomer(params.id, getSession("customer")?.sub),
     include: { card: true },
   });
   if (!b) return NextResponse.json({ error: "Fahrt nicht gefunden" }, { status: 404 });
@@ -78,7 +78,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   const b = await prisma.booking.findFirst({
-    where: bookingRefWhere(params.id),
+    where: bookingRefWhereCustomer(params.id, getSession("customer")?.sub),
     select: {
       id: true,
       customerId: true,

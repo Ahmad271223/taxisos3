@@ -37,13 +37,21 @@ export async function POST(req: Request) {
   }
 
   // Rate-Limit (nur hinter Proxy/Ingress): SMS-Bombing + Twilio-Kosten verhindern.
+  // Jede SMS kostet echtes Geld. Das Limit pro ZIELNUMMER greift deshalb
+  // immer – unabhaengig davon, ob eine IP feststellbar ist.
+  const perTarget = rateLimit(`verify:t:${target}`, 5, 10 * 60_000);
+  if (!perTarget.ok) {
+    return NextResponse.json(
+      { error: "Zu viele Anfragen. Bitte später erneut versuchen.", retryAfter: perTarget.retryAfter },
+      { status: 429 },
+    );
+  }
   const ip = clientIp(req);
   if (ip) {
-    const perTarget = rateLimit(`verify:t:${target}`, 5, 10 * 60_000);
     const perIp = rateLimit(`verify:ip:${ip}`, 50, 10 * 60_000);
-    if (!perTarget.ok || !perIp.ok) {
+    if (!perIp.ok) {
       return NextResponse.json(
-        { error: "Zu viele Anfragen. Bitte später erneut versuchen.", retryAfter: Math.max(perTarget.retryAfter, perIp.retryAfter) },
+        { error: "Zu viele Anfragen. Bitte später erneut versuchen.", retryAfter: perIp.retryAfter },
         { status: 429 },
       );
     }

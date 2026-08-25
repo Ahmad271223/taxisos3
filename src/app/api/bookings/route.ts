@@ -148,6 +148,10 @@ export async function POST(req: Request) {
 
   // Fahrzeugklassen-Faktor (Phase 12): skaliert den Preis je gewählter Klasse.
   // Plattform-Buchung -> Plattform-Standardfaktor; explizite Firma -> Firmenfaktor.
+  // Nur eine angemeldete Einrichtung darf eine Fahrt auf ihren Namen anlegen.
+  const einrichtungsSitzung = getSession("institution");
+  const eigeneEinrichtung = einrichtungsSitzung?.sub ?? null;
+
   const vehicleClass = normalizeClass(d.vehicleClass);
   const classF = await classFactorForSlug(d.company ?? undefined, vehicleClass);
   // Meet & Greet Aufschlag (Airport): flughafenabhängig, in den Preis einrechnen.
@@ -158,7 +162,14 @@ export async function POST(req: Request) {
   // Festpreis-Engine: bei Direktfahrten (ohne Zwischenstopps) die Spanne – und
   // damit den Karten-Hold – um passende Festpreis-Regeln aller Firmen weiten.
   if ((d.stops ?? []).length === 0) {
-    const fixedRules = await prisma.fixedPriceRule.findMany({ where: { active: true } });
+      // Steht die Firma bereits fest (Buchung ueber /c/<slug>), duerfen NUR
+      // deren Regeln einfliessen – sonst wuerde der Preis fremder Unternehmen
+      // die Spanne verschieben und deren Kalkulation nach aussen sichtbar.
+      // Ohne Firma ist die plattformweite Sicht dagegen richtig: jede Firma
+      // koennte die Fahrt uebernehmen.
+    const fixedRules = await prisma.fixedPriceRule.findMany({
+      where: { active: true, ...(companyId ? { companyId } : {}) },
+    });
     const fx = fixedPriceRange(fixedRules, { lat: d.pickup.lat, lng: d.pickup.lng }, { lat: d.dest.lat, lng: d.dest.lng }, vehicleClass);
     if (fx) {
       priceMin = Math.min(priceMin, fx.min + mgFee);
@@ -295,7 +306,11 @@ export async function POST(req: Request) {
       corporatePayer,
       corporateSettledCents: corporateActive ? corporateFareCents : null,
       returnAt: d.returnAt ? new Date(d.returnAt) : null,
-      institutionId: d.institutionId ?? null,
+      // SICHERHEIT: institutionId kommt AUSSCHLIESSLICH aus der Anmeldung.
+      // Frueher wurde der Wert ungeprueft aus dem Request-Body uebernommen –
+      // damit liessen sich fremde Fahrten in die Dispositionsliste UND die
+      // Monatsrechnung einer Pflegeeinrichtung einschleusen.
+      institutionId: eigeneEinrichtung,
       requestedDriverId: d.requestedDriverId ?? null,
       notes: d.notes ?? null,
       isScheduled,
@@ -374,7 +389,7 @@ export async function POST(req: Request) {
           vehicleClass,
           medicalType: normalizeMedicalType(d.medicalType),
           ...medicalDetailsData(d),
-          institutionId: d.institutionId ?? null,
+          institutionId: eigeneEinrichtung,
           notes: d.notes ?? null,
           isScheduled: true,
           scheduledAt: retAt,

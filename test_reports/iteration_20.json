@@ -41,7 +41,7 @@
     "frontend": "Live-Karte /taxis, 10 Fahrer (9+1), Marker klickbar, Detail-Sheets ok",
     "watchdog": "Verifiziert: Stuck-ZUGEWIESEN nach 7.5s zurückgesetzt + Fahrer FREI"
   },
-  "test_credentials": "anna@kunde.test/demo1234 (CUSTOMER), murat/demo1234 (DRIVER role:DRIVER), demo@citytaxi.test/demo1234 (ADMIN), super@taxios.app/SuperAdmin2026! (role:'ADMIN' → erkennt SUPER_ADMIN). Stripe-Testkarte 4242 4242 4242 4242 12/30 123 – nicht im Backend-Test verwendet (nur PaymentIntent verifiziert).",
+  "test_credentials": "anna@kunde.test/<PASSWORT-ENTFERNT> (CUSTOMER), murat/<PASSWORT-ENTFERNT> (DRIVER role:DRIVER), demo@citytaxi.test/<PASSWORT-ENTFERNT> (ADMIN), super@taxios.app/<PASSWORT-ENTFERNT> (role:'ADMIN' → erkennt SUPER_ADMIN). Stripe-Testkarte 4242 4242 4242 4242 12/30 123 – nicht im Backend-Test verwendet (nur PaymentIntent verifiziert).",
   "seed_data_creation": "1 STANDARD-CASH-Booking durch Anna (sofort dispatched zu Murat, Status ZUGEWIESEN/FAHRER_UNTERWEGS). 1 Vorbestellung (+30min). 1 Flughafen-Booking (VAN, LH441, +2h). 1 Krankenfahrt (WHEELCHAIR). 1 Gruppe via /api/groups (12 Pax). 1 Stuck-Booking via Watchdog-Test (gleich danach automatisch zurückgesetzt + cleanup).",
   "retest_needed": false,
   "main_agent_can_self_test": true,

@@ -101,6 +101,11 @@ function main() {
   check("Start trotz Testmodus freigegeben", probe.out.includes("START-FREIGEGEBEN"), probe.code);
   check("Deutliche Warnung erscheint trotzdem", /NIEMALS mit echten Kunden/i.test(probe.out));
 
+  section("8b) Offene Live-Verbindung wird verweigert");
+  const offen = startServer({ ...ECHT, ALLOWED_ORIGINS: "" });
+  check("Start abgebrochen", offen.code === 1, offen.code);
+  check("Grund wird genannt", /JEDER Website/i.test(offen.out));
+
   section("9) Reine Hinweise blockieren nicht");
   const nurWarnung = startServer({ ...ECHT, STRIPE_WEBHOOK_SECRET: "", AVIATIONSTACK_KEY: "" });
   check("Start freigegeben", nurWarnung.out.includes("START-FREIGEGEBEN"), nurWarnung.code);

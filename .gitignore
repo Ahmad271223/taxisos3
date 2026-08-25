@@ -36,3 +36,7 @@ memory/test_credentials.md
 
 # Zwischenstand aus Testlaeufen (enthaelt Sitzungs-Token).
 scripts/qa/.freeze_state.json
+
+# Kompilierte Python-Dateien gehoeren nicht ins Repository.
+__pycache__/
+*.pyc

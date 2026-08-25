@@ -18,7 +18,7 @@ BASE_URL = (
 ).rstrip("/")
 
 SUPER_EMAIL = "super@taxios.app"
-SUPER_PASS = "SuperAdmin2026!"
+SUPER_PASS = os.environ.get("SUPER_ADMIN_PASSWORD", "")
 HBF = {"lat": 52.3759, "lng": 9.7320}
 AIRPORT = {"lat": 52.4611, "lng": 9.6850}
 

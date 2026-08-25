@@ -37,7 +37,7 @@
     "package.json (+twilio,+resend)", ".env.example (verify/twilio/resend/hotline)"
   ],
   "success_rate": {"backend": "100% (58/58 pytest)", "e2e": "100% (e2e_driver_socket.js all checks + e2e_parallel_drivers.js all checks incl. ONLINE_RESERVED_NEXT_TRIP)", "frontend": "tsc clean; SSR smokes 200 (/buchen add-stop, /fahrer). Verify-card + chat are client-interaction features fully covered by the socket E2E."},
-  "test_credentials": "Super-Admin: super@taxios.app / SuperAdmin2026! (role='ADMIN' in login body).",
+  "test_credentials": "Super-Admin: super@taxios.app / <PASSWORT-ENTFERNT> (role='ADMIN' in login body).",
   "retest_needed": false,
   "main_agent_can_self_test": true,
   "context_for_next_testing_agent": "Phases 1-3 all green. Booking now requires a verificationToken (mock devCode flow: POST /api/verify/request -> devCode -> /api/verify/confirm -> token -> include in /api/bookings). conftest.py handles this automatically for legacy tests; use _noverify:true to test the 403 gate. Chat: chat:send/chat:message over Socket.IO + GET /api/bookings/:id/messages. Run the two Node E2E scripts with `node scripts/e2e_driver_socket.js <url>` and `node scripts/e2e_parallel_drivers.js <url>` (need socket.io-client, present). Phase 4 ideas open: monthly commission invoice PDF (carried over from Phase 2), admin live-map, driver earnings export."

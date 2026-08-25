@@ -3,9 +3,14 @@
 
 import type { Server as IOServer, Socket } from "socket.io";
 import { prisma } from "../lib/prisma";
-import { verifySession, SESSION_COOKIE, ADMIN_COOKIE, DRIVER_COOKIE } from "../lib/auth";
+import { verifySession, SESSION_COOKIE, ADMIN_COOKIE, DRIVER_COOKIE, CUSTOMER_COOKIE } from "../lib/auth";
 import type { Dispatcher } from "./dispatch";
-import { bookingRefWhere } from "../lib/bookingRef";
+import {
+  bookingRefWhere,
+  bookingRefWhereCompany,
+  bookingRefWhereCustomer,
+  bookingRefWhereDriver,
+} from "../lib/bookingRef";
 import { bookingDTO, driverAdmin, messageDTO } from "./serialize";
 
 function parseCookie(header: string | undefined, name: string): string | null {
@@ -131,6 +136,21 @@ async function driverState(driverId: string) {
   };
 }
 
+// Auf welche Fahrten darf diese Verbindung zugreifen?
+//
+// Gaeste ausschliesslich ueber den Tracking-Token. Fahrer und Firmen-Admins
+// duerfen zusaetzlich die interne ID nutzen – aber nur fuer ihre eigenen
+// Fahrten. Frueher galt die ID fuer JEDEN, damit konnte ein Fremder fremde
+// Fahrten mitlesen und in deren Chat schreiben.
+function fahrtZugriff(socket: Socket, ref: string) {
+  if (socket.data.role === "DRIVER") return bookingRefWhereDriver(ref, socket.data.driverId);
+  if (socket.data.role === "ADMIN") return bookingRefWhereCompany(ref, socket.data.companyId);
+  // Angemeldeter Fahrgast darf zusaetzlich ueber die Auftrags-ID zugreifen –
+  // aber nur auf SEINE Fahrten. Gaeste weiterhin ausschliesslich per Token.
+  if (socket.data.customerId) return bookingRefWhereCustomer(ref, socket.data.customerId);
+  return bookingRefWhere(ref);
+}
+
 export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDrivers: Set<string>): void {
   // Dispatcher kann den Fahrer-State pushen (z. B. wenn eine reservierte
   // Vorbestellung fällig wird und live geschaltet werden muss).
@@ -182,6 +202,12 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
       wantRole === "admin"
         ? verifySession(parseCookie(cookieHeader, ADMIN_COOKIE)) ?? verifySession(parseCookie(cookieHeader, SESSION_COOKIE))
         : null;
+    // Angemeldeter Fahrgast: verfolgt er seine eigene Fahrt aus dem Konto
+    // heraus, nennt die Oberflaeche die Auftrags-ID statt des Link-Tokens.
+    // Ohne diese Zuordnung landete er im Gast-Zweig, wo nur der Token gilt –
+    // und sah dann gar keine Fahrzeugposition mehr.
+    const customerSession = verifySession(parseCookie(cookieHeader, CUSTOMER_COOKIE));
+
     const driverSession =
       wantRole === "driver"
         ? verifySession(parseCookie(cookieHeader, DRIVER_COOKIE)) ?? verifySession(parseCookie(cookieHeader, SESSION_COOKIE))
@@ -199,6 +225,10 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
       socket.emit("auth:required", { role: "admin", error: "Bitte erneut anmelden." });
     }
 
+
+    if (customerSession?.role === "CUSTOMER") {
+      socket.data.customerId = customerSession.sub;
+    }
 
     // ---- Administrator (Firma/Mandant) ----
     if (adminSession?.role === "ADMIN") {
@@ -337,7 +367,7 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
     socket.on("track:join", async (p: { bookingId: string }, ack?: (r: any) => void) => {
       if (!p?.bookingId) return ack?.({ ok: false });
       const b = await prisma.booking.findFirst({
-        where: bookingRefWhere(p.bookingId),
+        where: fahrtZugriff(socket, p.bookingId),
         include: { driver: true, card: true },
       });
       if (!b) return ack?.({ ok: false });
@@ -350,7 +380,7 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
     // ---- Chat Kunde <-> Fahrer (Phase 3i) ----
     socket.on("chat:history", async (p: { bookingId: string }, ack?: (r: any) => void) => {
       if (!p?.bookingId) return ack?.({ ok: false });
-      const b = await prisma.booking.findFirst({ where: bookingRefWhere(p.bookingId), select: { id: true } });
+      const b = await prisma.booking.findFirst({ where: fahrtZugriff(socket, p.bookingId), select: { id: true } });
       if (!b) return ack?.({ ok: false });
       const msgs = await prisma.chatMessage.findMany({
         where: { bookingId: b.id },
@@ -363,7 +393,7 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
     socket.on("chat:send", async (p: { bookingId: string; text: string }, ack?: (r: any) => void) => {
       const text = (p?.text ?? "").toString().trim().slice(0, 1000);
       if (!p?.bookingId || !text) return ack?.({ ok: false, error: "Leere Nachricht." });
-      const b = await prisma.booking.findFirst({ where: bookingRefWhere(p.bookingId) });
+      const b = await prisma.booking.findFirst({ where: fahrtZugriff(socket, p.bookingId) });
       if (!b) return ack?.({ ok: false, error: "Auftrag nicht gefunden." });
       if (b.status === "ABGESCHLOSSEN" || b.status === "STORNIERT") {
         return ack?.({ ok: false, error: "Chat geschlossen." });
@@ -374,6 +404,11 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
       if (socket.data.role === "DRIVER") {
         if (b.driverId !== socket.data.driverId) return ack?.({ ok: false, error: "Nicht berechtigt." });
         sender = "DRIVER";
+      } else if (socket.data.role === "ADMIN") {
+        // Frueher fiel die Zentrale in den Kunden-Zweig und konnte im Namen
+        // des Fahrgasts schreiben. Der Chat ist ausdruecklich zwischen
+        // Fahrgast und Fahrer – die Zentrale hat hier keine Stimme.
+        return ack?.({ ok: false, error: "Der Chat läuft zwischen Fahrgast und Fahrer." });
       } else {
         // Kunde muss dem Tracking-Raum dieser Buchung beigetreten sein
         // (Raumname ist immer die kanonische Buchungs-ID, siehe track:join).

@@ -16,20 +16,35 @@ const OFFSETS = [
 // (deckt das Poll-Intervall ab; verhindert „verpasste" Nachzügler-Bursts).
 const GRACE_MIN = 20;
 
+const ERINNERUNGS_DECKEL = Number(process.env.REMINDER_BATCH ?? 500);
+
 export async function sendDueReminders(): Promise<number> {
   const now = Date.now();
   const horizon = new Date(now + (1440 + GRACE_MIN) * 60_000);
+  // Ohne Obergrenze zieht dieser Lauf ALLE faelligen Vorbestellungen auf
+  // einmal in den Speicher. Bei einer Grossveranstaltung sind das schnell
+  // Tausende – der Prozess blockiert dann minutenlang. Der Lauf wiederholt
+  // sich alle 5 Minuten und markiert verschickte Erinnerungen, der Rest kommt
+  // also im naechsten Durchgang dran. Die faelligsten zuerst.
   const bookings = await prisma.booking.findMany({
     where: {
       isScheduled: true,
       scheduledAt: { gt: new Date(now), lt: horizon },
       status: { in: ["OFFEN", "ZUGEWIESEN"] },
     },
+    orderBy: { scheduledAt: "asc" },
+    take: ERINNERUNGS_DECKEL,
     select: {
       id: true, scheduledAt: true, customerPhone: true, customerName: true,
       patientName: true, pickupAddress: true, medicalType: true, remindersSent: true,
     },
   });
+
+  if (bookings.length === ERINNERUNGS_DECKEL) {
+    console.warn(
+      `Erinnerungen: Obergrenze von ${ERINNERUNGS_DECKEL} erreicht – der Rest folgt im naechsten Lauf.`,
+    );
+  }
 
   let sent = 0;
   for (const b of bookings) {

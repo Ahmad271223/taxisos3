@@ -22,8 +22,16 @@ export function ChatPanel({ bookingId, me }: { bookingId: string; me: "CUSTOMER"
   const [offline, setOffline] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
+  // In der Adresszeile steht bei Gaesten der Verfolgungs-TOKEN, waehrend der
+  // Server in seinen Ereignissen immer die Auftrags-ID nennt. Ein stumpfer
+  // Vergleich verwarf deshalb JEDE eingehende Nachricht – der Fahrgast sah
+  // den Chat leer, obwohl der Fahrer schrieb. Die echte ID kommt jetzt aus
+  // der Verlaufsantwort.
+  const fahrtIdRef = useRef<string>(bookingId);
+
   useEffect(() => {
     let mounted = true;
+    fahrtIdRef.current = bookingId;
 
     // Verlauf laden bzw. nachladen. Wird auch nach jedem Reconnect und beim
     // Zurueckkehren aus dem Hintergrund aufgerufen: waehrend einer getrennten
@@ -34,6 +42,7 @@ export function ChatPanel({ bookingId, me }: { bookingId: string; me: "CUSTOMER"
         .then((r) => (r.ok ? r.json() : { messages: [] }))
         .then((d) => {
           if (!mounted) return;
+          if (d?.bookingId) fahrtIdRef.current = d.bookingId;
           const fresh: Msg[] = d.messages ?? [];
           // Serverstand mit evtl. schon lokal eingetroffenen Nachrichten mischen.
           setMessages((cur) => {
@@ -50,7 +59,7 @@ export function ChatPanel({ bookingId, me }: { bookingId: string; me: "CUSTOMER"
 
     const socket = getSocket();
     const onMsg = (m: Msg) => {
-      if (m.bookingId !== bookingId) return;
+      if (m.bookingId !== fahrtIdRef.current && m.bookingId !== bookingId) return;
       setMessages((cur) => (cur.some((x) => x.id === m.id) ? cur : [...cur, m]));
     };
     const onConnect = () => {

@@ -1,3 +1,4 @@
+import { randomInt } from "crypto";
 // QR-Firmenmobilität: Helfer für Mobilitäts-Codes (Firmenkonto übernimmt Fahrten).
 // Ein Code wird als QR ausgegeben; Gäste/Mitarbeiter scannen ihn und buchen
 // Fahrten, die das Firmenkonto deckt – begrenzt über Budget, Anzahl und Max-Betrag.
@@ -18,7 +19,9 @@ export interface CorporateCodeLike {
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 export function generateCorporateCode(len = 8): string {
   let out = "";
-  for (let i = 0; i < len; i++) out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+  // crypto.randomInt: der Code berechtigt zu Firmenfahrten auf fremde Rechnung
+  // und darf nicht erratbar sein.
+  for (let i = 0; i < len; i++) out += ALPHABET[randomInt(0, ALPHABET.length)];
   return out;
 }
 

@@ -29,7 +29,7 @@
     "package.json (+pdf-lib)", ".env.example (VAT_RATE + PLATFORM_* issuer)"
   ],
   "success_rate": {"backend": "100% (64/64 pytest)", "e2e": "100% (e2e_invoice.js + e2e_driver_socket.js + e2e_parallel_drivers.js, je 2x deterministisch grün)", "frontend": "tsc clean; /admin/abrechnung SSR 200 (invoice-month + invoice-download); PDF visuell verifiziert (1 Zeile, Summen, USt, Umlaute)."},
-  "test_credentials": "Super-Admin: super@taxios.app / SuperAdmin2026! (role='ADMIN' im Login-Body).",
+  "test_credentials": "Super-Admin: super@taxios.app / <PASSWORT-ENTFERNT> (role='ADMIN' im Login-Body).",
   "retest_needed": false,
   "main_agent_can_self_test": true,
   "context_for_next_testing_agent": "Phasen 1-4 alle grün. Provisions-Rechnung: GET /api/admin/invoices/<YYYY-MM> (PDF) bzw. ?format=json (Vorschau). Firmen-Admin nur eigene Firma; Super-Admin via ?companyId=. PDF mit pdf-lib (kein db push, nur npm install pdf-lib). Lokaler Hinweis: die geteilte dev.db sammelt OFFEN-Buchungen über Läufe an; die E2E-Skripte filtern Angebote per bookingId und sind dadurch robust. Offene Ideen für Phase 5: Sammel-Rechnungslauf für ALLE Firmen (Super-Admin, ZIP), E-Mail-Versand der Rechnung via Resend, Live-Karte-Verbesserungen."

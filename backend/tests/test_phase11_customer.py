@@ -9,6 +9,10 @@ import random
 import string
 import requests
 
+# Testpasswort NICHT im Repository hinterlegen – es landet sonst dauerhaft
+# im Git-Verlauf. Ueber die Umgebung setzen.
+TEST_PASSWORT = os.environ.get("QA_TEST_PASSWORT", "Pass!QA-2026")
+
 BASE_URL = (
     os.environ.get("REACT_APP_BACKEND_URL")
     or "https://taxios-dispatch.preview.emergentagent.com"
@@ -44,7 +48,7 @@ class TestCustomerAccount:
         # Registrieren (Telefon bestätigt) -> setzt tc_customer
         r = s.post(
             f"{BASE_URL}/api/customer/register",
-            json={"name": "Test Kunde", "email": email, "phone": phone, "password": "Pass1234", "verificationToken": token},
+            json={"name": "Test Kunde", "email": email, "phone": phone, "password": TEST_PASSWORT, "verificationToken": token},
             timeout=20,
         )
         assert r.status_code in (200, 201), r.text
@@ -86,7 +90,7 @@ class TestCustomerAccount:
         # Erneut anmelden mit E-Mail + Passwort
         rlogin = s.post(
             f"{BASE_URL}/api/auth/login",
-            json={"email": email, "password": "Pass1234", "role": "CUSTOMER"},
+            json={"email": email, "password": TEST_PASSWORT, "role": "CUSTOMER"},
             timeout=15,
         )
         assert rlogin.status_code == 200 and rlogin.json().get("role") == "CUSTOMER", rlogin.text
@@ -96,7 +100,7 @@ class TestCustomerAccount:
         ts = int(time.time() * 1000)
         email = f"dup+{ts}@test.com"
         phone = f"0152{ts % 10_000_000:07d}"
-        body = {"name": "Dup", "email": email, "phone": phone, "password": "Pass1234", "verificationToken": _verify_token(phone)}
+        body = {"name": "Dup", "email": email, "phone": phone, "password": TEST_PASSWORT, "verificationToken": _verify_token(phone)}
         r1 = requests.post(f"{BASE_URL}/api/customer/register", json=body, timeout=20)
         assert r1.status_code in (200, 201), r1.text
         body2 = dict(body, verificationToken=_verify_token(phone))
@@ -109,7 +113,7 @@ class TestCustomerAccount:
         phone = f"0153{ts % 10_000_000:07d}"
         requests.post(
             f"{BASE_URL}/api/customer/register",
-            json={"name": "WP", "email": email, "phone": phone, "password": "Pass1234", "verificationToken": _verify_token(phone)},
+            json={"name": "WP", "email": email, "phone": phone, "password": TEST_PASSWORT, "verificationToken": _verify_token(phone)},
             timeout=20,
         )
         r = requests.post(

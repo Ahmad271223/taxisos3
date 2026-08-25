@@ -78,7 +78,7 @@ export async function GET(req: Request) {
       ].map(esc).join(";"),
     );
     const csv = "﻿" + [header, ...rows].join("\r\n"); // BOM -> Excel erkennt UTF-8
-    await logAccess({ actorType: "ADMIN", actorId: session.sub, action: "EXPORT", entity: "BOOKING", detail: `Kassen-CSV ${monthKey} (${lines.length})` });
+    await logAccess({ actorType: "ADMIN", companyId: session.companyId, actorId: session.sub, action: "EXPORT", entity: "BOOKING", detail: `Kassen-CSV ${monthKey} (${lines.length})` });
     return new NextResponse(csv, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
@@ -88,6 +88,6 @@ export async function GET(req: Request) {
     });
   }
 
-  await logAccess({ actorType: "ADMIN", actorId: session.sub, action: "EXPORT", entity: "BOOKING", detail: `Kassen-Abrechnung ${monthKey}` });
+  await logAccess({ actorType: "ADMIN", companyId: session.companyId, actorId: session.sub, action: "EXPORT", entity: "BOOKING", detail: `Kassen-Abrechnung ${monthKey}` });
   return NextResponse.json({ monthKey, periodLabel, groups, lines, total });
 }

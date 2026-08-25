@@ -7,6 +7,10 @@ import random
 import string
 import requests
 
+# Testpasswort NICHT im Repository hinterlegen – es landet sonst dauerhaft
+# im Git-Verlauf. Ueber die Umgebung setzen.
+TEST_PASSWORT = os.environ.get("QA_TEST_PASSWORT", "Pass!QA-2026")
+
 BASE_URL = (
     os.environ.get("REACT_APP_BACKEND_URL")
     or "https://taxios-dispatch.preview.emergentagent.com"
@@ -24,7 +28,7 @@ class TestMultiLogin:
         # Firma registrieren -> Admin-Login (tc_admin)
         r = s.post(
             f"{BASE_URL}/api/companies/register",
-            json={"name": f"TEST_ML_{ts}", "email": f"ml+{ts}@test.com", "password": "Pass1234"},
+            json={"name": f"TEST_ML_{ts}", "email": f"ml+{ts}@test.com", "password": TEST_PASSWORT},
             timeout=25,
         )
         assert r.status_code in (200, 201), r.text
@@ -32,13 +36,13 @@ class TestMultiLogin:
         uname = f"mldrv{ts}{_rand(3)}"
         rd = s.post(
             f"{BASE_URL}/api/admin/drivers",
-            json={"name": "ML Fahrer", "username": uname, "password": "Pass1234", "vehiclePlate": "H-ML 1"},
+            json={"name": "ML Fahrer", "username": uname, "password": TEST_PASSWORT, "vehiclePlate": "H-ML 1"},
             timeout=15,
         )
         assert rd.status_code in (200, 201), rd.text
 
         # Im SELBEN Session-Cookie-Jar zusätzlich als Fahrer einloggen (tc_driver)
-        rl = s.post(f"{BASE_URL}/api/auth/login", json={"username": uname, "password": "Pass1234"}, timeout=15)
+        rl = s.post(f"{BASE_URL}/api/auth/login", json={"username": uname, "password": TEST_PASSWORT}, timeout=15)
         assert rl.status_code == 200 and rl.json().get("role") == "DRIVER"
 
         # /api/auth/me liefert BEIDE Sessions
@@ -55,16 +59,16 @@ class TestMultiLogin:
         s = requests.Session()
         s.post(
             f"{BASE_URL}/api/companies/register",
-            json={"name": f"TEST_ML2_{ts}", "email": f"ml2+{ts}@test.com", "password": "Pass1234"},
+            json={"name": f"TEST_ML2_{ts}", "email": f"ml2+{ts}@test.com", "password": TEST_PASSWORT},
             timeout=25,
         )
         uname = f"ml2drv{ts}{_rand(3)}"
         s.post(
             f"{BASE_URL}/api/admin/drivers",
-            json={"name": "ML2", "username": uname, "password": "Pass1234", "vehiclePlate": "H-ML 2"},
+            json={"name": "ML2", "username": uname, "password": TEST_PASSWORT, "vehiclePlate": "H-ML 2"},
             timeout=15,
         )
-        s.post(f"{BASE_URL}/api/auth/login", json={"username": uname, "password": "Pass1234"}, timeout=15)
+        s.post(f"{BASE_URL}/api/auth/login", json={"username": uname, "password": TEST_PASSWORT}, timeout=15)
         # beide aktiv
         assert s.get(f"{BASE_URL}/api/admin/overview", timeout=15).status_code == 200
         assert s.get(f"{BASE_URL}/api/driver/summary", timeout=15).status_code == 200

@@ -3,7 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getDispatcher } from "@/server/runtime";
 import { bookingDTO } from "@/server/serialize";
-import { bookingRefWhere } from "@/lib/bookingRef";
+import { getSession } from "@/lib/session";
+import { bookingRefWhereCustomer } from "@/lib/bookingRef";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ const schema = z
  * über die komplette Route neu berechnet. Erlaubt bis zum Fahrtende.
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const booking = await prisma.booking.findFirst({ where: bookingRefWhere(params.id) });
+  const booking = await prisma.booking.findFirst({ where: bookingRefWhereCustomer(params.id, getSession("customer")?.sub) });
   if (!booking) {
     return NextResponse.json({ error: "Auftrag nicht gefunden" }, { status: 404 });
   }

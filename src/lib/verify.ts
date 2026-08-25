@@ -1,3 +1,4 @@
+import { randomInt } from "crypto";
 // Gast-Verifizierung (Phase 3h): Code-Erzeugung, Normalisierung und ein
 // kurzlebiges, signiertes "Verifizierungs-Token" als Buchungsnachweis.
 
@@ -40,7 +41,10 @@ export function normalizeTarget(channel: VerifyChannel, raw: string): string {
 }
 
 export function generateCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000)); // 6-stellig
+  // crypto.randomInt statt Math.random: Math.random ist vorhersagbar und
+  // eignet sich nicht fuer einen Bestaetigungscode, der eine Telefonnummer
+  // beweisen soll.
+  return String(randomInt(100000, 1000000)); // 6-stellig
 }
 
 interface VerifyTokenPayload {

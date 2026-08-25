@@ -13,8 +13,11 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   if (!booking) {
     return NextResponse.json({ error: "Auftrag nicht gefunden" }, { status: 404 });
   }
-  if (booking.companyId && booking.companyId !== session.companyId) {
-    return NextResponse.json({ error: "Nicht autorisiert" }, { status: 403 });
+  // Frueher stand hier `if (booking.companyId && ...)` – eine Fahrt OHNE Firma
+  // (plattformweit, noch nicht zugewiesen) rutschte damit durch und jedes
+  // Unternehmen konnte ihr Storno-Protokoll lesen.
+  if (booking.companyId !== session.companyId) {
+    return NextResponse.json({ error: "Auftrag nicht gefunden" }, { status: 404 });
   }
   const logs = await prisma.cancellationLog.findMany({
     where: { bookingId: params.id },

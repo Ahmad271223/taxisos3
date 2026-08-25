@@ -35,7 +35,7 @@ async function main() {
   });
   check("Fahrt gebucht", b.status === 201, b.body?.error);
   const bookingId = b.body?.id;
-  const token = b.body?.trackingToken ?? bookingId;
+  const token = b.body?.booking?.trackingToken ?? b.body?.trackingToken ?? bookingId;
 
   // Der Kunde verfolgt die Fahrt – genau wie im Browser auf /verfolgen/<token>.
   // Gast-Verbindung wie im Browser: OHNE Cookie-Header (H.connectSocket setzt

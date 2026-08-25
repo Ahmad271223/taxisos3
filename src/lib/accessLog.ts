@@ -14,12 +14,15 @@ export async function logAccess(e: {
   entity: AccessEntity;
   entityId?: string | null;
   detail?: string | null;
+  /** Mandant – ohne den ist der Eintrag fuer kein Unternehmen sichtbar. */
+  companyId?: string | null;
 }): Promise<void> {
   try {
     await prisma.accessLog.create({
       data: {
         actorType: e.actorType,
         actorId: e.actorId ?? null,
+        companyId: e.companyId ?? null,
         action: e.action,
         entity: e.entity,
         entityId: e.entityId ?? null,

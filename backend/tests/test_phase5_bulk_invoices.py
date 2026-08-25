@@ -16,13 +16,17 @@ import random
 import string
 import requests
 
+# Testpasswort NICHT im Repository hinterlegen – es landet sonst dauerhaft
+# im Git-Verlauf. Ueber die Umgebung setzen.
+TEST_PASSWORT = os.environ.get("QA_TEST_PASSWORT", "Pass!QA-2026")
+
 BASE_URL = (
     os.environ.get("REACT_APP_BACKEND_URL")
     or "https://taxios-dispatch.preview.emergentagent.com"
 ).rstrip("/")
 
 SUPER_EMAIL = "super@taxios.app"
-SUPER_PASS = "SuperAdmin2026!"
+SUPER_PASS = os.environ.get("SUPER_ADMIN_PASSWORD", "")
 CURRENT_MONTH = time.strftime("%Y-%m")
 EMPTY_PAST_MONTH = "2019-03"
 
@@ -47,7 +51,7 @@ def _company():
     s = requests.Session()
     r = s.post(
         f"{BASE_URL}/api/companies/register",
-        json={"name": f"TEST_Bulk_{ts}_{_rand()}", "email": f"bulk+{ts}{_rand()}@test.com", "password": "Pass1234"},
+        json={"name": f"TEST_Bulk_{ts}_{_rand()}", "email": f"bulk+{ts}{_rand()}@test.com", "password": TEST_PASSWORT},
         timeout=25,
     )
     assert r.status_code in (200, 201)

@@ -1,0 +1,116 @@
+# Durchgehende Pruefung bei jedem Push und jedem Pull Request.
+#
+# Warum es diese Datei gibt: bisher lief die gesamte Qualitaetssicherung nur
+# auf dem Rechner des Entwicklers. Ein Fehler fiel damit erst auf, wenn ihn
+# jemand zufaellig bemerkte – im schlechtesten Fall im Echtbetrieb.
+#
+# Alle hier verwendeten Werte sind BEWUSST Testwerte. Es werden keine echten
+# Schluessel benoetigt: SMS sind abgeschaltet, Stripe wird nicht angesprochen
+# (die Pruefreihen buchen bar), und die Datenbank ist ein Wegwerf-Container.
+name: Pruefung
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: pruefung-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pruefung:
+    name: Typen, Aufbau und Pruefreihen
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: taxios
+          POSTGRES_PASSWORD: taxios
+          POSTGRES_DB: taxios_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U taxios"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://taxios:taxios@localhost:5432/taxios_ci
+      # Nur fuer die Pruefung. Der Startschutz (liveGuard) verlangt ein
+      # ausreichend langes Geheimnis – kurze Werte brechen den Start ab.
+      AUTH_SECRET: ci-testgeheimnis-nur-fuer-die-pruefung-0123456789
+      ALLOWED_ORIGINS: http://localhost:3000
+      PORT: "3000"
+      NODE_ENV: development
+      SMS_DISABLED: "1"
+      ENABLE_SIMULATOR: "0"
+      DEFAULT_LAT: "52.3759"
+      DEFAULT_LNG: "9.7320"
+      TARIFF_BASE: "4.00"
+      TARIFF_PER_KM: "2.30"
+      TARIFF_PER_MIN: "0.50"
+      PLATFORM_NAME: CI Pruefbetrieb
+      PLATFORM_STREET: Teststrasse 1
+      PLATFORM_ZIP: "30159"
+      PLATFORM_CITY: Hannover
+      PLATFORM_VAT_ID: DE000000000
+      # Wegwerf-Zugang, damit auch der Super-Admin-Bereich geprueft wird.
+      # Diese Werte existieren nur im Pruefcontainer und nirgends sonst.
+      SUPER_ADMIN_EMAIL: ci-super@example.invalid
+      SUPER_ADMIN_PASSWORD: ci-super-nur-fuer-die-pruefung
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Pakete installieren
+        run: npm ci
+
+      - name: Prisma-Client erzeugen
+        run: npx prisma generate
+
+      - name: Datenbank aufbauen
+        run: npx prisma migrate deploy
+
+      - name: Grunddaten anlegen
+        run: npx tsx prisma/seed.ts
+
+      # Zuerst die billigste Pruefung: Typfehler brauchen keinen Server.
+      - name: Typen pruefen
+        run: npx tsc --noEmit
+
+      # Belege und Rechnungen laufen ohne Server – echte PDFs werden erzeugt
+      # und ihr Text nachgerechnet.
+      - name: Rechnungs-PDFs pruefen
+        run: node scripts/qa/pdf_invoices.js
+
+      # Bewusst ueber run-all.sh statt einzelner Aufrufe: das Skript startet
+      # den Server ZWISCHEN den Reihen neu. Ohne das bleiben Sockets einer
+      # vorherigen Reihe offen, waehrend das Aufraeumen ihre Fahrer loescht –
+      # die naechste Reihe laeuft dann gegen einen Dispatcher, der sich an
+      # geloeschte Fahrer erinnert, und liefert falsche Ergebnisse. Ausserdem
+      # erkennt es abgestuerzte Next-Worker und faellt darauf herein nicht
+      # gruen aus.
+      #
+      # Diese Reihen brauchen weder Stripe noch Twilio noch einen Kartendienst.
+      - name: Pruefreihen
+        env:
+          QA_REIHEN: security_refs tracking_eta frontend_walk dashboards driver_sync
+        run: bash scripts/qa/run-all.sh
+
+      - name: Serverprotokoll sichern
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: serverprotokoll
+          path: /tmp/qa_server.log
+          retention-days: 7

@@ -76,7 +76,24 @@ const KROEPCKE = { lat: 52.3719, lng: 9.7385 };
 const LIST = { lat: 52.3906, lng: 9.7554 };
 
 // ---- Sockets -------------------------------------------------------------
-const emitAck = (s, ev, p) => new Promise((res) => s.emit(ev, p, res));
+// Mit Frist: bleibt die Serverantwort aus, HING die Reihe frueher endlos und
+// lief in die Zeitgrenze des Gesamtlaufs – ohne zu verraten, wo. Jetzt kommt
+// nach der Frist eine klare Absage zurueck, die der Test melden kann.
+const emitAck = (s, ev, p, frist = 15000) =>
+  new Promise((res) => {
+    let fertig = false;
+    const t = setTimeout(() => {
+      if (fertig) return;
+      fertig = true;
+      res({ ok: false, error: `keine Antwort auf "${ev}" innerhalb von ${frist} ms` });
+    }, frist);
+    s.emit(ev, p, (r) => {
+      if (fertig) return;
+      fertig = true;
+      clearTimeout(t);
+      res(r);
+    });
+  });
 function waitFor(socket, event, ms = 15000) {
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("timeout " + event)), ms);

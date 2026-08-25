@@ -11,7 +11,11 @@ export async function GET(req: Request) {
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
   const url = new URL(req.url);
   const entity = url.searchParams.get("entity");
-  const where = entity ? { entity } : {};
+  // Mandantentrennung: ein Unternehmen sieht ausschliesslich die eigenen
+  // Zugriffe. Altdatensaetze ohne companyId bleiben bewusst unsichtbar –
+  // lieber eine Luecke im Protokoll als fremde Gesundheitsdaten.
+  const where: any = { companyId: session.companyId };
+  if (entity) where.entity = entity;
   const entries = await prisma.accessLog.findMany({
     where,
     orderBy: { at: "desc" },

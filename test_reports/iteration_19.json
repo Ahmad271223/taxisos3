@@ -35,7 +35,7 @@
     "frontend": "Live-Karte+ETA+Bottom-Sheet+Routing zu /buchen verifiziert (UI)",
     "stripe": "Echte Stripe-Test-API: pi_3TiWhWCYsJidk4Mw1A2JqkSK erfolgreich erzeugt"
   },
-  "test_credentials": "anna@kunde.test/demo1234 (CUSTOMER), murat/demo1234 (DRIVER), demo@citytaxi.test/demo1234 (ADMIN), super@taxios.app/SuperAdmin2026! (SUPER_ADMIN) – alle 200 OK",
+  "test_credentials": "anna@kunde.test/<PASSWORT-ENTFERNT> (CUSTOMER), murat/<PASSWORT-ENTFERNT> (DRIVER), demo@citytaxi.test/<PASSWORT-ENTFERNT> (ADMIN), super@taxios.app/<PASSWORT-ENTFERNT> (SUPER_ADMIN) – alle 200 OK",
   "seed_data_creation": "Zwei OFFEN-Buchungen (STANDARD, CASH) durch Anna erstellt: cmqf06tim... und cmqf081m... (beide warten auf Dispatch, da kein freier STANDARD-Fahrer).",
   "retest_needed": true,
   "main_agent_can_self_test": true,

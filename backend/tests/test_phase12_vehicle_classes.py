@@ -8,6 +8,10 @@ import random
 import string
 import requests
 
+# Testpasswort NICHT im Repository hinterlegen – es landet sonst dauerhaft
+# im Git-Verlauf. Ueber die Umgebung setzen.
+TEST_PASSWORT = os.environ.get("QA_TEST_PASSWORT", "Pass!QA-2026")
+
 BASE_URL = (
     os.environ.get("REACT_APP_BACKEND_URL")
     or "https://taxios-dispatch.preview.emergentagent.com"
@@ -101,7 +105,7 @@ class TestVehicleMarketplace:
         s = requests.Session()
         reg = s.post(
             f"{BASE_URL}/api/companies/register",
-            json={"name": f"TEST_VC_{ts}", "email": f"vc+{ts}@test.com", "password": "Pass1234", "cityTier": "SMALL"},
+            json={"name": f"TEST_VC_{ts}", "email": f"vc+{ts}@test.com", "password": TEST_PASSWORT, "cityTier": "SMALL"},
             timeout=25,
         )
         assert reg.status_code in (200, 201), reg.text
@@ -133,7 +137,7 @@ class TestVehicleMarketplace:
         uname = f"vcdrv{ts}{_rand(3)}"
         drv = s.post(
             f"{BASE_URL}/api/admin/drivers",
-            json={"name": "VC Fahrer", "username": uname, "password": "Pass1234", "vehiclePlate": "H-VC 1", "vehicleClass": "VAN"},
+            json={"name": "VC Fahrer", "username": uname, "password": TEST_PASSWORT, "vehiclePlate": "H-VC 1", "vehicleClass": "VAN"},
             timeout=15,
         )
         assert drv.status_code in (200, 201), drv.text

@@ -33,7 +33,7 @@
     "package.json (+jszip)"
   ],
   "success_rate": {"backend": "100% (72/72 pytest)", "e2e": "100% (e2e_bulk_invoice unzips ZIP + validates inner PDFs + email-send; e2e_invoice/driver/parallel weiterhin grün)", "frontend": "tsc clean; /super-admin SSR 200 (Dashboard inkl. SuperInvoiceRun lädt client-seitig nach Auth); ZIP-Inhalt + Versand per E2E verifiziert."},
-  "test_credentials": "Super-Admin: super@taxios.app / SuperAdmin2026! (role='ADMIN' im Login-Body).",
+  "test_credentials": "Super-Admin: super@taxios.app / <PASSWORT-ENTFERNT> (role='ADMIN' im Login-Body).",
   "retest_needed": false,
   "main_agent_can_self_test": true,
   "context_for_next_testing_agent": "Phasen 1-5 alle grün. Sammel-Abrechnung: GET /api/super/invoices/<YYYY-MM> (ZIP) bzw. ?format=json; POST .../send (Sammel-Mail); POST /api/admin/invoices/<month>/send (eigene Mail). ZIP=jszip, Mail=Resend mit PDF-Anhang (mock ohne RESEND_API_KEY). Nur npm install (jszip), kein db push. Node-E2E entpackt die ZIP und validiert die PDFs. Mögliche Phase 6: Rechnungs-Archiv/Historie (persistente Invoice-Tabelle mit Status bezahlt/offen), Mahnungen, Zahlungsabgleich (Stripe payout)."

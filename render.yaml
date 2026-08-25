@@ -4,7 +4,11 @@
 
 databases:
   - name: taxisos-db
-    plan: free
+    # ACHTUNG – KOSTENPFLICHTIG. Vorher stand hier "free".
+    # Eine kostenlose Render-Datenbank wird 30 Tage nach dem Anlegen GELOESCHT
+    # (danach 14 Tage Gnadenfrist), ohne Backup. Fuer eine Plattform, die
+    # Krankenfahrten disponiert und Rechnungen schreibt, ist das nicht tragbar.
+    plan: starter
     databaseName: taxios
     user: taxios
 
@@ -12,7 +16,14 @@ services:
   - type: web
     name: taxisos3
     runtime: node
-    plan: free
+    # ACHTUNG – KOSTENPFLICHTIG. Vorher stand hier "free".
+    # Ein kostenloser Webdienst wird nach 15 Minuten ohne Anfrage schlafen
+    # gelegt und braucht rund eine Minute zum Hochfahren. In dieser Zeit steht
+    # ALLES still: Fahrervermittlung, Fahrt-Erinnerungen, Flugverspaetungen,
+    # automatische Abrechnung und die Live-Verbindungen der Fahrer. Nachts
+    # bestellt selten jemand – genau deshalb wartet der erste Nachtgast eine
+    # Minute auf eine kalte Instanz.
+    plan: starter
     branch: main
     # devDependencies (tsx, prisma, build-tools) MÜSSEN installiert werden.
     buildCommand: npm install --include=dev && npx prisma generate && npm run build
@@ -36,6 +47,15 @@ services:
         value: "1"
       - key: SEARCH_MAX_MS
         value: "180000"
+      # Render setzt genau EINEN Proxy davor. Das Rate-Limit zaehlt die
+      # Client-IP deshalb vom rechten Ende der x-forwarded-for-Kette.
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
+      # Begrenzt die Datenbankverbindungen je Instanz. Ohne das oeffnet Prisma
+      # rund 17 Verbindungen – zwei Instanzen sprengen das Limit der
+      # Starter-Datenbank.
+      - key: DB_CONNECTION_LIMIT
+        value: "10"
       - key: NEXT_PUBLIC_PLATFORM_PHONE
         value: "+49 511 1234567"
       # ── Optionale Keys: leer = Mock-Modus. Im Render-Dashboard setzen. ──
@@ -71,4 +91,15 @@ services:
       - key: SUPER_ADMIN_EMAIL
         sync: false
       - key: SUPER_ADMIN_PASSWORD
+        sync: false
+      # Oeffentliche Adresse der Anwendung. Stripe springt nach der
+      # Karteneingabe hierher zurueck, und alle SMS-Links zeigen darauf.
+      - key: APP_BASE_URL
+        sync: false
+      # Erlaubte Herkunft fuer die Live-Verbindung. Leer = jede Website.
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: AVIATIONSTACK_KEY
+        sync: false
+      - key: MAPBOX_TOKEN
         sync: false

@@ -52,8 +52,40 @@ function isLoopback(ip: string): boolean {
   );
 }
 
+/**
+ * Client-IP aus dem Forwarded-Header.
+ *
+ * SICHERHEIT: Frueher wurde das ERSTE Element von `x-forwarded-for` genommen.
+ * Proxys haengen ihre Angaben aber HINTEN an – das erste Element stammt damit
+ * vom Aufrufer selbst und ist frei waehlbar. Mit `X-Forwarded-For: 127.0.0.1`
+ * lieferte diese Funktion `null`, und die Aufrufer uebersprangen daraufhin ihr
+ * Limit vollstaendig: Anmelde-Bruteforce, SMS-Versand (echte Twilio-Kosten),
+ * Buchungs- und SOS-Spam waren damit ungebremst.
+ *
+ * Deshalb wird jetzt von RECHTS gezaehlt: der letzte Eintrag stammt vom
+ * naechstgelegenen Proxy und ist vertrauenswuerdig. Stehen mehrere Proxys
+ * davor, gibt TRUSTED_PROXY_HOPS an, wie viele uebersprungen werden.
+ */
 export function clientIp(req: Request): string | null {
-  const raw = (req.headers.get("x-forwarded-for")?.split(",")[0] ?? req.headers.get("x-real-ip") ?? "").trim();
+  const kette = (req.headers.get("x-forwarded-for") ?? "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+  const hops = Math.max(1, Number(process.env.TRUSTED_PROXY_HOPS ?? 1));
+  // Von rechts: der letzte Eintrag ist der eigene Proxy, davor der Client.
+  const kandidat = kette.length ? kette[Math.max(0, kette.length - hops)] : "";
+
+  const raw = (kandidat || req.headers.get("x-real-ip") || "").trim();
   if (!raw || isLoopback(raw)) return null;
   return raw;
+}
+
+/**
+ * Schluessel fuer ein Limit, das IMMER greifen muss – auch wenn keine IP
+ * feststellbar ist. Ohne das liesse sich jedes IP-Limit dadurch aushebeln,
+ * dass man die IP unkenntlich macht.
+ */
+export function clientKey(req: Request): string {
+  return clientIp(req) ?? "ohne-ip";
 }

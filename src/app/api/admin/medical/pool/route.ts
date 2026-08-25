@@ -68,6 +68,6 @@ export async function POST(req: Request) {
   const res = await dispatcher.assignFromPool(parsed.data.bookingId, driver.id, session.companyId);
   if (!res.ok) return NextResponse.json({ error: res.reason ?? "Zuweisung fehlgeschlagen." }, { status: 409 });
 
-  await logAccess({ actorType: "ADMIN", actorId: session.companyId, action: "UPDATE", entity: "BOOKING", entityId: parsed.data.bookingId, detail: `Pool-Fahrt zugewiesen an ${driver.name}` });
+  await logAccess({ actorType: "ADMIN", companyId: session.companyId, actorId: session.companyId, action: "UPDATE", entity: "BOOKING", entityId: parsed.data.bookingId, detail: `Pool-Fahrt zugewiesen an ${driver.name}` });
   return NextResponse.json({ ok: true });
 }

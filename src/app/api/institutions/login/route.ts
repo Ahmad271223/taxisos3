@@ -3,11 +3,30 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { verifyPassword, signSession, INSTITUTION_COOKIE } from "@/lib/auth";
 
+import { rateLimit, clientIp } from "@/lib/ratelimit";
 export const dynamic = "force-dynamic";
 
 const schema = z.object({ email: z.string().email(), password: z.string().min(1) });
 
 export async function POST(req: Request) {
+  // Bruteforce-Schutz wie bei /api/auth/login. Das Limit pro Konto greift
+  // IMMER – auch ohne feststellbare IP, sonst liesse es sich durch
+  // Unkenntlichmachen der Herkunft aushebeln.
+  const koerper = await req.clone().json().catch(() => ({}));
+  const kennung = String(koerper?.email ?? "").toLowerCase().slice(0, 120);
+  if (kennung) {
+    const proKonto = rateLimit(`login-institutions:id:${kennung}`, 20, 5 * 60_000);
+    if (!proKonto.ok) {
+      return NextResponse.json({ error: "Zu viele Anmeldeversuche. Bitte später erneut." }, { status: 429 });
+    }
+  }
+  const ip = clientIp(req);
+  if (ip) {
+    const proIp = rateLimit(`login-institutions:ip:${ip}`, 20, 5 * 60_000);
+    if (!proIp.ok) {
+      return NextResponse.json({ error: "Zu viele Anmeldeversuche. Bitte später erneut." }, { status: 429 });
+    }
+  }
   let json: any;
   try {
     json = await req.json();

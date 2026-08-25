@@ -90,9 +90,12 @@ export function collectFindings(env = process.env): GuardFinding[] {
   }
   if (!has(env.ALLOWED_ORIGINS)) {
     f.push({
-      fatal: false, key: "ALLOWED_ORIGINS",
-      problem: "Die Live-Verbindung nimmt Anfragen von jeder Website an.",
-      fix: "ALLOWED_ORIGINS auf die eigene Domain setzen.",
+      // Ohne Einschraenkung kann jede fremde Website eine Live-Verbindung zu
+      // dieser Anwendung aufbauen und im Namen eines angemeldeten Nutzers
+      // mitlesen. Das ist keine Einschraenkung, sondern eine offene Tuer.
+      fatal: true, key: "ALLOWED_ORIGINS",
+      problem: "Die Live-Verbindung nimmt Anfragen von JEDER Website an.",
+      fix: "ALLOWED_ORIGINS auf die eigene Domain setzen, z. B. https://ihre-domain.de",
     });
   }
 

@@ -6,6 +6,10 @@ import os
 import time
 import requests
 
+# Testpasswort NICHT im Repository hinterlegen – es landet sonst dauerhaft
+# im Git-Verlauf. Ueber die Umgebung setzen.
+TEST_PASSWORT = os.environ.get("QA_TEST_PASSWORT", "Pass!QA-2026")
+
 BASE_URL = (
     os.environ.get("REACT_APP_BACKEND_URL")
     or "https://taxios-dispatch.preview.emergentagent.com"
@@ -28,7 +32,7 @@ class TestSosDispatch:
         s = requests.Session()
         s.post(
             f"{BASE_URL}/api/customer/register",
-            json={"name": "SOS HTTP", "email": f"soshttp+{ts}@test.com", "phone": phone, "password": "Pass1234", "verificationToken": _verify_token(phone)},
+            json={"name": "SOS HTTP", "email": f"soshttp+{ts}@test.com", "phone": phone, "password": TEST_PASSWORT, "verificationToken": _verify_token(phone)},
             timeout=20,
         )
         r = s.post(f"{BASE_URL}/api/sos", json={"lat": 52.3801, "lng": 9.7400, "message": "Test"}, timeout=20)
@@ -51,7 +55,7 @@ class TestSosDispatch:
         s = requests.Session()
         s.post(
             f"{BASE_URL}/api/customer/register",
-            json={"name": "SOS NoLoc", "email": f"sosnoloc+{ts}@test.com", "phone": phone, "password": "Pass1234", "verificationToken": _verify_token(phone)},
+            json={"name": "SOS NoLoc", "email": f"sosnoloc+{ts}@test.com", "phone": phone, "password": TEST_PASSWORT, "verificationToken": _verify_token(phone)},
             timeout=20,
         )
         r = s.post(f"{BASE_URL}/api/sos", json={"message": "ohne Standort"}, timeout=20)

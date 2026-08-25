@@ -143,8 +143,28 @@ Karte am Plattform-Kunden hängt und die Belastung als Destination-Charge
 - Der SMS-Bestätigungscode wird nur außerhalb der Produktion **und** nur bei
   lokaler `APP_BASE_URL` zurückgegeben.
 
-**Offen (geringes Risiko):** `GET /api/bookings/<id>` liefert Fahrtdaten auch
-ohne Anmeldung, wenn jemand die interne Kennung kennt (nicht durchprobierbar).
+**Zugriff auf eine Fahrt (behoben 2026-08-24):** Frueher galt die interne
+Buchungs-ID als gleichwertig zum Tracking-Token. Die ID steht aber in
+PDF-Dateinamen und API-Antworten – wer sie kannte, konnte OHNE Anmeldung
+Fahrtdaten lesen, stornieren, Ziel und Preis aendern, unterschreiben und ueber
+`/pay` ein Trinkgeld auf die gespeicherte Karte des Fahrgasts buchen. Jetzt gilt:
+nur der Token ist eine Capability (`bookingRefWhere`), die ID zaehlt
+ausschliesslich mit passender Anmeldung (`bookingRefWhereCustomer` /
+`...Company` / `...Driver`). Gilt auch fuer `track:join` und den Chat.
+
+**Rate-Limit (behoben):** `clientIp()` las das ERSTE Element von
+`x-forwarded-for` – das stammt vom Aufrufer. Mit `127.0.0.1` fiel der Schutz
+komplett weg (Anmelde-Bruteforce, SMS-Kosten, Buchungs- und SOS-Spam). Jetzt
+wird von RECHTS gezaehlt, gesteuert ueber `TRUSTED_PROXY_HOPS` (Render: 1).
+Die Limits pro Benutzername und pro Zielrufnummer greifen zusaetzlich
+**immer** – unabhaengig davon, ob eine IP feststellbar ist.
+
+**Zugriffsprotokoll (behoben):** `AccessLog` hatte keine Mandantenspalte; jeder
+Firmen-Admin las die letzten 200 Zugriffe ALLER Unternehmen auf Gesundheitsdaten
+samt Dokumentnamen. Jetzt mit `companyId` (Migration `accesslog_tenant`) und
+gefiltert. Altdatensaetze ohne Mandant bleiben bewusst unsichtbar.
+
+Abgesichert durch `scripts/qa/security_refs.js`.
 
 ---
 
@@ -187,6 +207,24 @@ Alles davon liegt außerhalb der Software – es braucht Konten und Verträge:
 
 ---
 
+## 8b. Hosting – nicht verhandelbar
+
+`render.yaml` stand zweimal auf `plan: free`. Das bedeutet:
+
+- Der **Webdienst** wird nach 15 Minuten ohne Anfrage schlafen gelegt und
+  braucht rund eine Minute zum Hochfahren. In dieser Zeit steht alles still:
+  Vermittlung, Fahrt-Erinnerungen, Flugverspaetungen, automatische Abrechnung
+  und die Live-Verbindungen der Fahrer. Nachts bestellt selten jemand – genau
+  deshalb wartet der erste Nachtgast eine Minute.
+- Die **Datenbank** wird 30 Tage nach dem Anlegen geloescht (danach 14 Tage
+  Gnadenfrist), ohne Backup.
+
+Beide stehen jetzt auf `starter`. **Das kostet Geld** – ohne ist ein
+Echtbetrieb aber nicht moeglich. Ebenfalls ergaenzt: `TRUSTED_PROXY_HOPS=1`,
+`DB_CONNECTION_LIMIT=10`, `APP_BASE_URL` und `ALLOWED_ORIGINS`.
+
+---
+
 ## 9. Kapazität (gemessen)
 
 | Last | Fahrer-Anmeldung | Bestellung | Bewertung |
@@ -222,6 +260,7 @@ node scripts/qa/cleanup.js      # Testdaten entfernen
 | `tracking_eta` | Fahrerposition und mitlaufende Ankunftszeit |
 | `live_ready` | Startsperre |
 | `driver_sync` | Fahrer-Dashboard bleibt nie ohne Auftragsstand |
+| `security_refs` | Fahrt-Zugriff, Rate-Limit, Mandantentrennung, mobile Navigation |
 | `loadtest` / `loadtest_heavy` | Grundlast und hohe Last |
 | `subscription`, `plans_connect` | Abo, Tarifgrenzen, Auszahlungen |
 | `driver_confirm_replace` | Rückfrage 30 Min vorher, Ersatzfahrer |
@@ -260,7 +299,20 @@ jetzt seinen Umsatz **ohne** Provisionsabzug.
   auf Berichtigung.
 - **P1** Push an Fahrer auf echten Geräten erproben (Schlüssel sind erzeugt).
 - **P1** Probelauf mit einem echten Fahrer und echtem GPS.
-- **P2** `GET /api/bookings/<id>` an eine Anmeldung binden.
+- **P2** Sweep-N+1: der Dispatch holt pro beschaeftigtem Fahrer einzeln
+  `booking.count` (dispatch.ts ~1514) – bei 100 Fahrern 100 serielle Abfragen
+  alle 20 Sekunden. Ein `groupBy` genuegt.
+- **P2** Preis-Lookups cachen: beim Annehmen wird dieselbe Firmenzeile dreimal
+  gelesen (dispatch.ts ~675/678/685).
+- **P2** Rohe Status-Werte in Hotel-, Einrichtungs- und Event-Portal
+  (`FAHRT_LAEUFT` statt „Fahrt läuft"). Eine gemeinsame `StatusChip`-Komponente
+  loest das an allen drei Stellen; `TRACKING_LABEL` existiert bereits.
+- **P2** Barrierefreiheit: 130 `<label>`, davon nur 4 mit `htmlFor`; die
+  Adress-Autovervollstaendigung ist ohne Maus nicht bedienbar. Fuer oeffentliche
+  Traeger (Krankenfahrten) auch ein Vertriebsargument.
+- **P2** Zwei Instanzen brauchen zusaetzlich einen Redis-Adapter fuer Socket.IO
+  und einen gemeinsamen Rate-Limit-Speicher; der Dispatcher-Zustand ist
+  prozesslokal.
 - **P2** Preis kennzeichnen, wenn der Routendienst ausgefallen ist
   (Rückfall auf Luftlinie × 1,35 bei 30 km/h ist derzeit unsichtbar).
 - **P3** Zweite Instanz + Redis-Adapter, sobald mehr als ~60 Fahrer gleichzeitig fahren.

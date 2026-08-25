@@ -50,6 +50,11 @@ export function scheduleDailyPlatformRate(): void {
 
 // --- Flughafen-Modul (Phase 14): Verspätungserkennung ----------------------
 const FLIGHT_POLL_MS = 10 * 60_000;
+// Jede Fahrt loest eine EINZELNE, kostenpflichtige Flugabfrage aus. Ohne
+// Obergrenze wuerde ein Grossereignis am Flughafen sowohl das Kontingent des
+// Anbieters als auch diesen Prozess sprengen. Der Lauf wiederholt sich alle
+// 10 Minuten, die zeitlich naechsten Fahrten zuerst.
+const FLUG_DECKEL = Number(process.env.FLIGHT_BATCH ?? 200);
 
 async function pollFlights(dispatcher: Dispatcher): Promise<void> {
   const now = Date.now();
@@ -64,7 +69,12 @@ async function pollFlights(dispatcher: Dispatcher): Promise<void> {
       flightScheduledAt: { not: null },
       scheduledAt: { gt: new Date(now), lt: horizon },
     },
+    orderBy: { scheduledAt: "asc" },
+    take: FLUG_DECKEL,
   });
+  if (bookings.length === FLUG_DECKEL) {
+    console.warn(`Flugabfrage: Obergrenze von ${FLUG_DECKEL} erreicht – der Rest folgt im naechsten Lauf.`);
+  }
   for (const b of bookings) {
     try {
       const info = await lookupFlight(b.flightNumber!, "ARRIVAL");

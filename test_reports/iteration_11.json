@@ -34,7 +34,7 @@
     "scripts/e2e_invoice_archive.js (NEW)"
   ],
   "success_rate": {"backend": "100% (83/83 pytest)", "e2e": "100% (e2e_invoice_archive voller Lebenszyklus; invoice/bulk/driver/parallel weiterhin grün)", "frontend": "tsc clean; archivierte PDFs mit BEZAHLT-Stempel + Fälligkeit visuell verifiziert."},
-  "test_credentials": "Super-Admin: super@taxios.app / SuperAdmin2026! (role='ADMIN' im Login-Body).",
+  "test_credentials": "Super-Admin: super@taxios.app / <PASSWORT-ENTFERNT> (role='ADMIN' im Login-Body).",
   "retest_needed": false,
   "main_agent_can_self_test": true,
   "context_for_next_testing_agent": "Phasen 1-6 alle grün. Rechnungs-Archiv: POST /api/admin/invoices/<month>/issue (festschreiben, idempotent), GET /api/admin/invoices (eigenes Archiv), GET /api/admin/invoices/id/<id> (frozen PDF). Super: GET /api/super/invoices (?status/?overdue + totals), POST {action:issue-all,month}|{action:remind-overdue}, POST /api/super/invoices/id/<id> {action:pay|unpaid|remind}. Lifecycle OFFEN->BEZAHLT, overdue=OFFEN&&dueAt<now. db push nötig (Invoice). E2E backdatet dueAt via prisma um Überfälligkeit zu testen. Mögliche Phase 7: PDF-Stempel/Branding pro Plattform, Teilzahlungen, automatischer Monatsend-Cron (issue-all + Versand), Export DATEV/CSV-Buchungsjournal."

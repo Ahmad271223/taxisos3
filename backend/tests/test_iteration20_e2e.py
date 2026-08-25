@@ -10,13 +10,17 @@ import time
 import pytest
 import requests
 
+# Testpasswort NICHT im Repository hinterlegen – es landet sonst dauerhaft
+# im Git-Verlauf. Ueber die Umgebung setzen.
+TEST_PASSWORT = os.environ.get("QA_TEST_PASSWORT", "Pass!QA-2026")
+
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://d8817f61-ba4b-4a01-b8da-5f3db2df7025.preview.emergentagent.com").rstrip("/")
 
-CUSTOMER = {"email": "anna@kunde.test", "password": "demo1234", "role": "CUSTOMER"}
-DRIVER = {"username": "murat", "password": "demo1234", "role": "DRIVER"}
-ADMIN = {"email": "demo@citytaxi.test", "password": "demo1234", "role": "ADMIN"}
+CUSTOMER = {"email": "anna@kunde.test", "password": TEST_PASSWORT, "role": "CUSTOMER"}
+DRIVER = {"username": "murat", "password": TEST_PASSWORT, "role": "DRIVER"}
+ADMIN = {"email": "demo@citytaxi.test", "password": TEST_PASSWORT, "role": "ADMIN"}
 # Super-Admin uses same login but role:"ADMIN" (slug=_super)
-SUPER = {"email": "super@taxios.app", "password": "SuperAdmin2026!", "role": "ADMIN"}
+SUPER = {"email": "super@taxios.app", "password": os.environ.get("SUPER_ADMIN_PASSWORD", ""), "role": "ADMIN"}
 
 FROM_LOC = {"lat": 52.3759, "lng": 9.7320}
 TO_LOC = {"lat": 52.3669, "lng": 9.7510}

@@ -25,7 +25,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: "Nicht gefunden" }, { status: 404 });
   }
 
-  await logAccess({ actorType: "ADMIN", actorId: session.sub, action: "DOWNLOAD", entity: "MEDICAL_DOCUMENT", entityId: doc.id, detail: doc.fileName });
+  await logAccess({ actorType: "ADMIN", companyId: session.companyId, actorId: session.sub, action: "DOWNLOAD", entity: "MEDICAL_DOCUMENT", entityId: doc.id, detail: doc.fileName });
 
   const mime = (doc.mimeType || "").toLowerCase();
   const safe = SAFE_INLINE.has(mime);

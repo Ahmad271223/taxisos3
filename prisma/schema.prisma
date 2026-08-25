@@ -35,6 +35,15 @@ model Company {
   stripeSubscriptionId String?
   stripeCustomerId   String?
 
+  // ---- Rechnungsangaben (das Unternehmen ist AUSSTELLER der Fahrtbelege) ----
+  // Ohne Anschrift und Steuernummer ist ein Beleg keine Kleinbetragsrechnung
+  // nach § 33 UStDV und damit fuer Geschaeftsreisende nicht einreichbar.
+  taxId         String?  // Steuernummer
+  vatId         String?  // USt-IdNr.
+  bankName      String?
+  iban          String?
+  bic           String?
+
   // ---- Stripe Connect (Auszahlungskonto des Unternehmens) ----
   // Fahrpreise gehen als Destination-Charge direkt an dieses Konto.
   stripeAccountId      String?
@@ -392,6 +401,11 @@ model Booking {
   // Zuweisung
   driver         Driver?  @relation(fields: [driverId], references: [id])
   driverId       String?
+  // Schnappschuss fuer Belege: Company->Driver ist eine Cascade-Loeschung.
+  // Wird ein Fahrer entfernt, muss der bereits ausgestellte Beleg trotzdem
+  // noch zeigen, WER gefahren ist – sonst faellt die Nachpruefbarkeit weg.
+  driverNameSnap String?
+  driverPlateSnap String?
   declinedDriverIds String @default("")
 
   // Bewertung
@@ -500,6 +514,24 @@ model Booking {
   @@index([isScheduled, status, dispatchMode, scheduledAt])
   // Automatische Abrechnung nach Fahrtende (settleDueRides).
   @@index([paymentMethod, paymentStatus, tipPromptedAt])
+
+  // ---- Indizes fuer die haeufig gepollten Abfragen ----
+  // Ohne diese laufen sie als vollstaendiger Tabellenscan. Bei wenigen tausend
+  // Fahrten faellt das nicht auf, ab einigen hunderttausend wird es zur Wand –
+  // gemessen an 500.000 Buchungen: Faktor 20 bis >1000 je Abfrage, unter
+  // Parallelitaet rund Faktor 95 beim Durchsatz.
+  //
+  // Hotel-Portal ruft alle 8 Sekunden ab (api/hotels/rides).
+  @@index([hotelId, createdAt])
+  // Unternehmens-Kennzahlen: Tages- und Monatsumsatz (api/admin/overview),
+  // Zahlungsuebersicht (api/admin/payments).
+  @@index([companyId, status, completedAt])
+  // Storno-Kennzahl der letzten 30 Tage (api/admin/overview).
+  @@index([companyId, status, cancelledAt])
+  // Fahrtenliste im Kundenkonto (api/customer/bookings).
+  @@index([customerId, createdAt])
+  // Dispatch-Sweep, laeuft alle 20 Sekunden (server/dispatch.ts).
+  @@index([status, isScheduled, trackingStatus, createdAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -724,6 +756,10 @@ model EventHost {
   email        String   @unique
   passwordHash String
   phone        String?
+  // Anschrift des Rechnungsempfaengers. Fuer die Monatsrechnung der
+  // Firmenmobilitaet Pflicht, sobald sie 250 EUR uebersteigt (§ 14 UStG) –
+  // Hotels und Einrichtungen fuehren dieses Feld bereits.
+  address      String?
   active       Boolean  @default(true)
 
   promos          PromoCode[]
@@ -971,10 +1007,15 @@ model AccessLog {
   entity    String   // MEDICAL_DOCUMENT | BOOKING | PATIENT | RECURRING
   entityId  String?
   detail    String?
+  // Mandant, zu dem der Zugriff gehoert. OHNE dieses Feld las jeder
+  // Firmen-Admin die Zugriffe ALLER Unternehmen auf Gesundheitsdaten –
+  // ausgerechnet in der Tabelle, die den Datenschutz belegen soll.
+  companyId String?
   at        DateTime @default(now())
 
   @@index([entity, entityId])
   @@index([actorType, actorId])
+  @@index([companyId, at])
   @@index([at])
 }
 

@@ -17,10 +17,14 @@ import string
 import pytest
 import requests
 
+# Testpasswort NICHT im Repository hinterlegen – es landet sonst dauerhaft
+# im Git-Verlauf. Ueber die Umgebung setzen.
+TEST_PASSWORT = os.environ.get("QA_TEST_PASSWORT", "Pass!QA-2026")
+
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL").rstrip("/")
 
 SUPER_EMAIL = "super@taxios.app"
-SUPER_PASS = "SuperAdmin2026!"
+SUPER_PASS = os.environ.get("SUPER_ADMIN_PASSWORD", "")
 
 
 def _rand(n=6):
@@ -50,7 +54,7 @@ def company_admin():
     payload = {
         "name": f"TEST_Co_{ts}",
         "email": f"co+{ts}@test.com",
-        "password": "Pass1234",
+        "password": TEST_PASSWORT,
         "address": "Teststraße 1, 30159 Hannover",
         "phone": "0511 12345",
     }
@@ -165,7 +169,7 @@ class TestDriverCRUD:
             "username": uname,
             "name": "Test Fahrer",
             "phone": "0511 1",
-            "password": "taxi123",
+            "password": TEST_PASSWORT,
             "vehicle": "VW Golf",
             "plate": "H-XX 1",
             "color": "Schwarz",

@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { buildInvoice, parseMonth } from "@/lib/invoice";
 import { invoicePdf } from "@/lib/pdf";
 
+import { invoiceModuleRetired } from "@/lib/invoiceRetired";
 export const dynamic = "force-dynamic";
 
 /**
@@ -13,6 +14,14 @@ export const dynamic = "force-dynamic";
  * Firmen-Admin: nur die eigene Firma. Super-Admin: beliebige Firma via ?companyId=.
  */
 export async function GET(req: Request, { params }: { params: { month: string } }) {
+  // Diese Route erzeugt die Provisions-Rechnung als PDF. Ohne Provision waere
+  // das eine Rechnung ueber 0,00 EUR – siehe lib/invoiceRetired.ts.
+  // Die Umsatzuebersicht liefert sie weiterhin ueber ?format=json.
+  const url0 = new URL(req.url);
+  if (url0.searchParams.get("format") !== "json") {
+    const gesperrt = invoiceModuleRetired();
+    if (gesperrt) return gesperrt;
+  }
   const session = getSession();
   if (!session || (session.role !== "ADMIN" && session.role !== "SUPER_ADMIN")) {
     return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });

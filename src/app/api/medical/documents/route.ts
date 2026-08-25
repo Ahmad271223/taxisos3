@@ -119,6 +119,6 @@ export async function GET(req: Request) {
     },
   });
   const withValidity = docs.map((d) => ({ ...d, ...documentValidity(d.validUntil) }));
-  await logAccess({ actorType: "ADMIN", actorId: session.sub, action: "VIEW", entity: "MEDICAL_DOCUMENT", detail: `Liste (${docs.length})` });
+  await logAccess({ actorType: "ADMIN", companyId: session.companyId, actorId: session.sub, action: "VIEW", entity: "MEDICAL_DOCUMENT", detail: `Liste (${docs.length})` });
   return NextResponse.json({ documents: withValidity });
 }

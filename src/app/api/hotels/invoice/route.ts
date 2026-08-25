@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
-import { hotelStatementPdf } from "@/lib/hotelStatementPdf";
+import { hotelStatementPdf, hotelSections } from "@/lib/hotelStatementPdf";
+import { taxiVatRate } from "@/lib/ridePdf";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,13 @@ export async function GET(req: Request) {
       completedAt: { gte: start, lt: end },
     },
     orderBy: { completedAt: "asc" },
-    select: { id: true, completedAt: true, customerName: true, roomNumber: true, hotelPayment: true, pickupAddress: true, destAddress: true, fare: true, hotelSettledAt: true },
+    select: {
+      id: true, completedAt: true, customerName: true, roomNumber: true, hotelPayment: true,
+      pickupAddress: true, destAddress: true, fare: true, hotelSettledAt: true,
+      // Fuer Rechnung je Unternehmen + USt-Satz nach Strecke.
+      distanceMeters: true,
+      company: { select: { id: true, name: true, address: true, taxId: true, vatId: true } },
+    },
   });
 
   const lines = rides.map((b) => ({
@@ -45,6 +52,8 @@ export async function GET(req: Request) {
     route: `${b.pickupAddress} → ${b.destAddress}`,
     fare: r2(b.fare ?? 0),
     settled: !!b.hotelSettledAt,
+    companyName: b.company?.name ?? null,
+    distanceMeters: b.distanceMeters ?? null,
   }));
   const total = { count: lines.length, fare: r2(lines.reduce((s, l) => s + l.fare, 0)) };
   // Offen (noch nicht beglichen) vs. bezahlt.
@@ -66,8 +75,24 @@ export async function GET(req: Request) {
   const byRoom = groupSum((l) => l.room);
 
   if (format === "pdf") {
-    const hotel = await prisma.hotel.findUnique({ where: { id: session.sub }, select: { name: true } });
-    const pdf = await hotelStatementPdf({ hotelName: hotel?.name ?? "Hotel", periodLabel, lines, total: total.fare });
+    const hotel = await prisma.hotel.findUnique({ where: { id: session.sub }, select: { name: true, address: true } });
+    // Aussteller ist das jeweilige Taxiunternehmen, nicht die Plattform.
+    const carriers = new Map(
+      rides
+        .map((r) => r.company)
+        .filter((c): c is NonNullable<typeof c> => !!c)
+        .map((c) => [c.name, { id: c.id, name: c.name, address: c.address, taxId: c.taxId, vatId: c.vatId }]),
+    );
+    const pdf = await hotelStatementPdf({
+      hotelName: hotel?.name ?? "Hotel",
+      hotelAddress: hotel?.address ?? null,
+      periodLabel,
+      monthKey,
+      issuedAtIso: new Date().toISOString(),
+      lines,
+      total: total.fare,
+      sections: hotelSections(lines, carriers, taxiVatRate),
+    });
     return new NextResponse(Buffer.from(pdf), {
       headers: {
         "Content-Type": "application/pdf",
@@ -80,9 +105,9 @@ export async function GET(req: Request) {
 
   if (format === "csv") {
     const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const header = ["Datum", "Gast", "Zimmer", "Abrechnung", "Strecke", "Fahrpreis (EUR)"].join(";");
+    const header = ["Datum", "Gast", "Zimmer", "Abrechnung", "Taxiunternehmen", "Strecke", "Fahrpreis (EUR)"].join(";");
     const rows = lines.map((l) =>
-      [new Date(l.date).toLocaleDateString("de-DE"), l.guest, l.room, l.mode, l.route, l.fare.toFixed(2).replace(".", ",")].map(esc).join(";"),
+      [new Date(l.date).toLocaleDateString("de-DE"), l.guest, l.room, l.mode, l.companyName ?? "", l.route, l.fare.toFixed(2).replace(".", ",")].map(esc).join(";"),
     );
     const csv = "﻿" + [header, ...rows].join("\r\n");
     return new NextResponse(csv, {

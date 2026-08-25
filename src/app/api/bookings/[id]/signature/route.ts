@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { bookingRefWhere } from "@/lib/bookingRef";
+import { getSession } from "@/lib/session";
+import { bookingRefWhereCustomer } from "@/lib/bookingRef";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ const schema = z.object({
 // Digitalen Fahrtnachweis speichern (Unterschrift + Zeitstempel + GPS). Die
 // bookingId dient als Capability; eine Unterschrift je Fahrt (Upsert).
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const booking = await prisma.booking.findFirst({ where: bookingRefWhere(params.id), select: { id: true, status: true } });
+  const booking = await prisma.booking.findFirst({ where: bookingRefWhereCustomer(params.id, getSession("customer")?.sub), select: { id: true, status: true } });
   if (!booking) return NextResponse.json({ error: "Auftrag nicht gefunden" }, { status: 404 });
   if (booking.status === "STORNIERT") return NextResponse.json({ error: "Fahrt storniert" }, { status: 409 });
 
@@ -42,7 +43,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
 // Fahrtnachweis abrufen: Metadaten (JSON) oder das PNG-Bild (?format=png).
 export async function GET(req: Request, { params }: { params: { id: string } }) {
-  const booking = await prisma.booking.findFirst({ where: bookingRefWhere(params.id), select: { id: true } });
+  const booking = await prisma.booking.findFirst({ where: bookingRefWhereCustomer(params.id, getSession("customer")?.sub), select: { id: true } });
   if (!booking) return NextResponse.json({ hasSignature: false }, { status: 404 });
   const sig = await prisma.rideSignature.findUnique({ where: { bookingId: booking.id } });
   if (!sig) return NextResponse.json({ hasSignature: false }, { status: 404 });

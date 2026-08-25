@@ -14,13 +14,17 @@ import string
 import pytest
 import requests
 
+# Testpasswort NICHT im Repository hinterlegen – es landet sonst dauerhaft
+# im Git-Verlauf. Ueber die Umgebung setzen.
+TEST_PASSWORT = os.environ.get("QA_TEST_PASSWORT", "Pass!QA-2026")
+
 BASE_URL = (
     os.environ.get("REACT_APP_BACKEND_URL")
     or "https://taxios-dispatch.preview.emergentagent.com"
 ).rstrip("/")
 
 SUPER_EMAIL = "super@taxios.app"
-SUPER_PASS = "SuperAdmin2026!"
+SUPER_PASS = os.environ.get("SUPER_ADMIN_PASSWORD", "")
 
 
 def _rand(n=6):
@@ -33,7 +37,7 @@ def _register_company(city_tier=None):
     payload = {
         "name": f"TEST_Co_{ts}_{_rand(3)}",
         "email": f"co+{ts}{_rand(3)}@test.com",
-        "password": "Pass1234",
+        "password": TEST_PASSWORT,
         "address": "Teststr. 1",
         "phone": "0511 1",
     }
@@ -89,7 +93,7 @@ class TestCompanyCityTier:
             json={
                 "name": f"TEST_Bad_{ts}",
                 "email": f"bad+{ts}@test.com",
-                "password": "Pass1234",
+                "password": TEST_PASSWORT,
                 "cityTier": "MEDIUM",
             },
             timeout=15,

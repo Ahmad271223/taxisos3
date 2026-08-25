@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
-import { corporateStatementPdf, type CorporateStatementLine } from "@/lib/corporatePdf";
+import {
+  corporateStatementPdf,
+  corporateSections,
+  type CorporateCarrier,
+  type CorporateStatementLine,
+} from "@/lib/corporatePdf";
+import { taxiVatRate } from "@/lib/ridePdf";
 
 export const dynamic = "force-dynamic";
 
@@ -21,17 +27,38 @@ export async function GET(req: Request) {
   const periodLabel = new Intl.DateTimeFormat("de-DE", { month: "long", year: "numeric" }).format(start);
   const monthKey = `${year}-${String(monthIdx + 1).padStart(2, "0")}`;
 
-  const host = await prisma.eventHost.findUnique({ where: { id: session.sub }, select: { name: true } });
+  const host = await prisma.eventHost.findUnique({
+    where: { id: session.sub },
+    select: { name: true, address: true },
+  });
   const codes = await prisma.corporateCode.findMany({ where: { eventHostId: session.sub }, select: { code: true } });
   const codeList = codes.map((c) => c.code);
 
   let lines: CorporateStatementLine[] = [];
   let total = 0;
+  // Aussteller der Rechnung ist das befoerdernde Unternehmen. Deshalb wird es
+  // hier mitgeladen – ohne diese Angabe liesse sich die Abrechnung nicht je
+  // Unternehmen aufteilen und traege faelschlich die Plattform als Absender.
+  const carriers = new Map<string, CorporateCarrier>();
   if (codeList.length) {
     const bookings = await prisma.booking.findMany({
       where: { corporateCode: { in: codeList }, createdAt: { gte: start, lt: end } },
       orderBy: { createdAt: "asc" },
+      include: {
+        company: { select: { id: true, name: true, address: true, taxId: true, vatId: true } },
+      },
     });
+    for (const b of bookings) {
+      if (b.company && !carriers.has(b.company.name)) {
+        carriers.set(b.company.name, {
+          id: b.company.id,
+          name: b.company.name,
+          address: b.company.address ?? null,
+          taxId: b.company.taxId ?? null,
+          vatId: b.company.vatId ?? null,
+        });
+      }
+    }
     lines = bookings.map((b) => {
       const amount = b.fare ?? b.priceExact ?? b.priceApprox ?? b.priceMin ?? 0;
       total += amount;
@@ -41,6 +68,8 @@ export async function GET(req: Request) {
         route: `${b.pickupAddress} -> ${b.destAddress}`,
         code: b.corporateCode ?? "",
         amount,
+        companyName: b.company?.name ?? null,
+        distanceMeters: b.distanceMeters ?? null,
       };
     });
   }
@@ -62,7 +91,17 @@ export async function GET(req: Request) {
     });
   }
 
-  const pdf = await corporateStatementPdf({ company: host?.name ?? "Firma", periodLabel, lines, total });
+  const empfaenger = host?.name ?? "Firma";
+  const pdf = await corporateStatementPdf({
+    company: empfaenger,
+    companyAddress: host?.address ?? null,
+    periodLabel,
+    monthKey,
+    issuedAtIso: new Date().toISOString(),
+    lines,
+    total,
+    sections: corporateSections(lines, carriers, taxiVatRate, monthKey, empfaenger),
+  });
   return new NextResponse(Buffer.from(pdf), {
     headers: {
       "Content-Type": "application/pdf",

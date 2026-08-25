@@ -4,8 +4,11 @@ const nextConfig = {
   // "Map container is already initialized"). StrictMode ist nur ein Dev-Hilfsmittel
   // ohne Produktionswirkung -> deaktiviert, damit die Karte sauber lädt.
   reactStrictMode: false,
+  // Frueher wurden Lint- und Typfehler beim Bauen ignoriert. Der Typcheck des
+  // Projekts ist inzwischen fehlerfrei – ein neuer Fehler soll den Build
+  // stoppen und nicht still in die Produktion wandern.
   eslint: { ignoreDuringBuilds: true },
-  typescript: { ignoreBuildErrors: true },
+  typescript: { ignoreBuildErrors: false },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "images.unsplash.com" },

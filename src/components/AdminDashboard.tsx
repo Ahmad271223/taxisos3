@@ -194,6 +194,7 @@ export function AdminDashboard() {
       <AdminSidebar onLogout={logout} companyName={company?.name} />
 
       <div className="flex-1 lg:ml-72">
+        <AdminMobileNav onLogout={logout} companyName={company?.name} />
         {/* Top bar */}
         <header className="sticky top-0 z-20 border-b border-ink-100 bg-white/95 px-5 py-4 backdrop-blur lg:px-8">
           <div className="flex items-center justify-between gap-4">
@@ -281,29 +282,33 @@ export function AdminDashboard() {
             <Kpi testid="kpi-avg" label="Ø Fahrpreis" value={formatEuro(today?.avgFare ?? 0)} />
           </div>
 
-          {/* Provision & Monat */}
+          {/*
+            Frueher stand hier ein fest verdrahtetes Abzeichen "5 %" bzw. "7 %"
+            samt "Provision heute/diesen Monat". Eine Provision gibt es nicht
+            mehr – ein Neukunde las dort also, dass wir 5 % einbehalten,
+            waehrend daneben ueberall 0,00 EUR stand.
+          */}
           <div className="card grid gap-3 p-5 sm:grid-cols-4" data-testid="commission-card">
-            <div>
-              <p className="eyebrow text-ink-500">Tarif­stufe</p>
+            <div className="sm:col-span-2">
+              <p className="eyebrow text-ink-500">Ihre Einnahmen</p>
               <p className="mt-1 font-display text-lg font-extrabold text-ink-900">
-                {company?.cityTier === "BIG" ? "Großstadt" : "Klein/Land"}
-                <span className="ml-2 rounded bg-brand-500 px-2 py-0.5 text-xs font-bold text-ink-900">
-                  {company?.cityTier === "BIG" ? "7 %" : "5 %"}
+                Sie behalten
+                <span className="ml-2 rounded bg-green-100 px-2 py-0.5 text-xs font-bold text-green-800">
+                  100 % des Fahrpreises
                 </span>
               </p>
-            </div>
-            <div data-testid="kpi-fee-today">
-              <p className="eyebrow text-ink-500">Provision heute</p>
-              <p className="mt-1 font-display text-lg font-extrabold text-ink-900">{formatEuro(today?.platformFee ?? 0)}</p>
-            </div>
-            <div data-testid="kpi-fee-month">
-              <p className="eyebrow text-ink-500">Provision diesen Monat</p>
-              <p className="mt-1 font-display text-lg font-extrabold text-ink-900">{formatEuro(month?.platformFee ?? 0)}</p>
-              <p className="text-xs text-ink-500">aus {formatEuro(month?.revenue ?? 0)} Brutto · {month?.trips ?? 0} Fahrten</p>
+              <p className="mt-1 text-xs text-ink-500">
+                Keine Provision je Fahrt. Kartenzahlungen gehen direkt auf Ihr Auszahlungskonto.
+              </p>
             </div>
             <div data-testid="kpi-net-month">
-              <p className="eyebrow text-ink-500">Netto-Auszahlung Monat</p>
-              <p className="mt-1 font-display text-lg font-extrabold text-green-700">{formatEuro(month?.net ?? 0)}</p>
+              <p className="eyebrow text-ink-500">Umsatz diesen Monat</p>
+              <p className="mt-1 font-display text-lg font-extrabold text-green-700">{formatEuro(month?.revenue ?? 0)}</p>
+              <p className="text-xs text-ink-500">{month?.trips ?? 0} Fahrten</p>
+            </div>
+            <div data-testid="kpi-fee-today">
+              <p className="eyebrow text-ink-500">Umsatz heute</p>
+              <p className="mt-1 font-display text-lg font-extrabold text-ink-900">{formatEuro(today?.revenue ?? 0)}</p>
               <p className="text-xs text-ink-500">{cancellations30d} Stornos in 30 T.</p>
             </div>
             <div className="sm:col-span-4 border-t border-ink-100 pt-3">
@@ -605,14 +610,85 @@ function Row({ label, value, mono, highlight }: { label: string; value: string; 
   );
 }
 
+// Eine Quelle fuer Seitenleiste UND mobiles Menue.
+const ADMIN_NAV = [
+  { href: "/admin", label: "Dashboard", icon: "M3 12l9-9 9 9M5 10v10h14V10" },
+  { href: "/admin/fahrer", label: "Fahrer", icon: "M12 14a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 7a7 7 0 0 1 14 0" },
+  { href: "/admin/preise", label: "Preise", icon: "M3 7h18M6 12h12M9 17h6" },
+  { href: "/admin/bewertungen", label: "Bewertungen", icon: "M12 2l2.95 6.94L22 9.97l-5.5 4.78L18.18 22 12 18.27 5.82 22l1.68-7.25L2 9.97l7.05-1.03Z" },
+];
+
+/**
+ * Navigation unterhalb von 1024 px.
+ *
+ * Die Seitenleiste ist dort ausgeblendet – ohne diesen Ersatz erreichte eine
+ * Zentrale auf Tablet und Handy weder Fahrerverwaltung noch Preise noch
+ * Bewertungen und konnte sich nicht einmal abmelden.
+ */
+function AdminMobileNav({ onLogout, companyName }: { onLogout: () => void; companyName?: string }) {
+  const pathname = usePathname() || "";
+  const [offen, setOffen] = useState(false);
+  return (
+    <div className="lg:hidden">
+      <div className="flex items-center justify-between gap-3 bg-ink-950 px-4 py-3 text-white">
+        <Brand href="/admin" subtitle={companyName ?? "Zentrale"} tone="light" />
+        <button
+          type="button"
+          onClick={() => setOffen((v) => !v)}
+          aria-expanded={offen}
+          aria-controls="admin-mobile-menu"
+          aria-label={offen ? "Menü schließen" : "Menü öffnen"}
+          data-testid="admin-mobile-toggle"
+          className="rounded-xl p-2 text-white transition hover:bg-white/10"
+        >
+          <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none">
+            <path
+              d={offen ? "M6 6l12 12M18 6L6 18" : "M4 7h16M4 12h16M4 17h16"}
+              stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+            />
+          </svg>
+        </button>
+      </div>
+      {offen && (
+        <nav id="admin-mobile-menu" className="grid gap-1 bg-ink-950 px-4 pb-4 text-white" data-testid="admin-mobile-menu">
+          {ADMIN_NAV.map((it) => {
+            const active = it.href === "/admin" ? pathname === "/admin" : pathname.startsWith(it.href);
+            return (
+              <Link
+                key={it.href}
+                href={it.href}
+                onClick={() => setOffen(false)}
+                className={`flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold transition ${
+                  active ? "bg-brand-500 text-ink-900" : "text-ink-300 hover:bg-white/5 hover:text-white"
+                }`}
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none">
+                  <path d={it.icon} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {it.label}
+              </Link>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => { setOffen(false); onLogout(); }}
+            data-testid="admin-mobile-logout"
+            className="flex items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-bold text-ink-300 transition hover:bg-white/5 hover:text-white"
+          >
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Ausloggen
+          </button>
+        </nav>
+      )}
+    </div>
+  );
+}
+
 function AdminSidebar({ onLogout, companyName }: { onLogout: () => void; companyName?: string }) {
   const pathname = usePathname() || "";
-  const items = [
-    { href: "/admin", label: "Dashboard", icon: "M3 12l9-9 9 9M5 10v10h14V10" },
-    { href: "/admin/fahrer", label: "Fahrer", icon: "M12 14a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 7a7 7 0 0 1 14 0" },
-    { href: "/admin/preise", label: "Preise", icon: "M3 7h18M6 12h12M9 17h6" },
-    { href: "/admin/bewertungen", label: "Bewertungen", icon: "M12 2l2.95 6.94L22 9.97l-5.5 4.78L18.18 22 12 18.27 5.82 22l1.68-7.25L2 9.97l7.05-1.03Z" },
-  ];
+  const items = ADMIN_NAV;
   return (
     <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-72 lg:flex-col lg:bg-ink-950 lg:px-5 lg:py-6 lg:text-white">
       <Brand href="/admin" subtitle={companyName ?? "Zentrale"} tone="light" />

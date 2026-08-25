@@ -12,7 +12,7 @@
       {"component": "BookingForm /c/<slug>/buchen", "issue": "CRITICAL state bug: line 322 `onChange={(t) => setPickup({ address: t })}` and line 334 `onChange={(t) => setDest({ address: t })}` REPLACE the whole AddrState and DROP lat/lng. AddressInput's suggestion-click handler (line 89-95) calls onSelect(r) THEN onChange(r.label) → React batches both setState calls so the final state is `{address: r.label}` only. Therefore haveRoute (pickup.lat!=null && dest.lat!=null) stays false forever, the price preview stays as 'Wählen Sie Abhol- und Zieladresse für eine automatische Preisvorschau.' and the Weiter button stays disabled with 'Geben Sie zuerst beide Adressen ein.'. The whole 2-step booking flow is UNREACHABLE from the UI even though the backend POST /api/bookings + tracking page both work.", "selector": "[data-testid='booking-continue'] (stays disabled)", "priority": "CRITICAL"},
       {"component": "AddressInput.tsx onClick (line 89-95)", "issue": "Same root cause: calling onChange(r.label) AFTER onSelect(r) is fragile — any parent onChange that does setX({address: t}) (which BookingForm does) will clobber the coords set by onSelect. Fix one OR the other.", "selector": "AddressInput suggestion <button>", "priority": "CRITICAL"},
       {"component": "/admin/login form", "issue": "Login form 'Demo-Zugang admin@citytaxi.de / admin123' text still shown — there is no demo seed anymore so this hint is misleading.", "selector": "Demo-Zugang hint span", "priority": "LOW"},
-      {"component": "/fahrer/login form", "issue": "Same misleading 'Demo-Zugang fahrer1 ... fahrer6 / taxi123' hint visible.", "selector": "Demo-Zugang hint span", "priority": "LOW"}
+      {"component": "/fahrer/login form", "issue": "Same misleading 'Demo-Zugang fahrer1 ... fahrer6 / <PASSWORT-ENTFERNT>' hint visible.", "selector": "Demo-Zugang hint span", "priority": "LOW"}
     ],
     "integration_issues": [
       {"flow": "Customer booking step1 → step2 → /verfolgen", "issue": "Blocked at step1 because of the BookingForm lat/lng-wipe bug above. Workaround used in this test: POST /api/bookings via fetch — that works and tracking page renders correctly.", "affected_selectors": ["booking-continue (stays disabled)", "booking-confirm (never rendered)", "pay-card (never rendered)", "confirm-booking (never rendered)"]},
@@ -41,7 +41,7 @@
   ],
   "updated_files": [],
   "success_rate": {"backend": "100%", "frontend": "60%"},
-  "test_credentials": "Super-Admin: super@taxios.app / SuperAdmin2026!. New company: e2e_1781275228@test.de / ePass2026! (slug=e2e-co-1781275228). Driver `drv1781275228 / taxi123` was created and then deleted by the admin-delete-driver test.",
+  "test_credentials": "Super-Admin: super@taxios.app / <PASSWORT-ENTFERNT>. New company: e2e_1781275228@test.de / <PASSWORT-ENTFERNT> (slug=e2e-co-1781275228). Driver `drv1781275228 / <PASSWORT-ENTFERNT>` was created and then deleted by the admin-delete-driver test.",
   "seed_data_creation": "Registered new company E2E Co 1781275228 (slug e2e-co-1781275228), created a driver, then deleted that driver via API. One CARD booking left over (id=cmqb1hqzl000hfchr8h7dyrho).",
   "retest_needed": true,
   "main_agent_can_self_test": true,
