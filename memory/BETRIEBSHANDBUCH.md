@@ -11,6 +11,18 @@ Stand: 25.08.2026. Betreiber: IT Solutions by Ahmad Fakih, Baldurstraße 5,
 
 ## 0. Erste Handgriffe bei jeder Störung
 
+**Läuft der Dienst überhaupt?**
+
+```bash
+curl -s https://<domain>/api/health
+```
+
+Antwortet `{"ok":true,...}`, laufen Prozess **und** Datenbankverbindung.
+`503` heißt: der Prozess lebt, kommt aber nicht an die Datenbank – dann direkt
+zu Abschnitt 3. Keine Antwort heißt: der Prozess ist tot, dann Abschnitt 5.
+Auf Render gehört dieser Pfad in **Health Check Path**, sonst merkt der Hoster
+einen Prozess ohne Datenbank nicht.
+
 ```bash
 npx tsx scripts/check_state.ts
 ```
@@ -214,7 +226,6 @@ umgehen" – jeder dieser Punkte hat einen konkreten Schaden dahinter.
   Zahlungen, nicht zugewiesenen Fahrten oder SMS-Ausfällen. Heute merkt eine
   Störung nur, wer zufällig hinschaut oder wen ein Kunde anruft. Das ist der
   wichtigste offene Punkt in diesem Handbuch.
-- **Kein Health-Endpunkt**, an dem der Hoster den Zustand ablesen kann.
 - **Kein Prüfpfad für Preisänderungen** (wer hat wann welchen Tarif geändert).
 - Eine Instanz trägt rund 40–60 gleichzeitig fahrende Fahrer. Darüber braucht
   es eine zweite Instanz mit Redis-Adapter für Socket.IO und einen gemeinsamen
