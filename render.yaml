@@ -90,7 +90,7 @@ services:
       # ---- Oeffentliche Adresse ---------------------------------------------
       # Beim ERSTEN Deploy leer lassen: der Server nimmt dann automatisch die
       # Render-Adresse (RENDER_EXTERNAL_URL). Sobald die eigene Domain
-      # angebunden ist, hier eintragen, z. B. https://taxios.de - Stripe
+      # angebunden ist, hier eintragen: https://altstadttaxi-hannover.de - Stripe
       # springt nach der Karteneingabe hierher zurueck, alle SMS-Links zeigen
       # darauf, und nur diese Herkunft darf die Live-Verbindung nutzen.
       - key: APP_BASE_URL

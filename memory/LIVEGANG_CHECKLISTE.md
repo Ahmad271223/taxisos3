@@ -22,7 +22,8 @@ ab. Das ist Absicht — jeder Punkt hat einen konkreten Schaden dahinter.
 - [ ] **`AUTH_SECRET`** mit mindestens 32 zufälligen Zeichen setzen. Nicht der
       Standardwert — diese Sperre ist **nicht umgehbar**, weil sich mit einem
       erratbaren Geheimnis beliebige Sitzungen fälschen ließen.
-- [ ] **Domain mit HTTPS** in `APP_BASE_URL` und `ALLOWED_ORIGINS`.
+- [ ] **Domain mit HTTPS** in `APP_BASE_URL` und `ALLOWED_ORIGINS` — die Domain
+      steht fest: **altstadttaxi-hannover.de** (Anleitung unten in Abschnitt F).
 - [ ] **`SMS_DISABLED` und `ENABLE_SIMULATOR` ausschalten**, sonst läuft der
       Echtbetrieb mit Testfahrern.
 - [ ] **Google Maps — zwei Schlüssel** aus der Google Cloud Console (Abrechnungskonto
@@ -125,3 +126,27 @@ teurer:
 - **Zweite Instanz ab ~60 gleichzeitig fahrenden Fahrern**, dann mit
   Redis-Adapter für Socket.IO und gemeinsamem Drosselungsspeicher.
 - **Kein Datenexport für Betroffene** (Art. 15/20 nur manuell).
+
+---
+
+## F. Domain anbinden: altstadttaxi-hannover.de
+
+1. Render → Web-Dienst `taxisos3` → **Settings → Custom Domains → Add**:
+   `altstadttaxi-hannover.de` **und** `www.altstadttaxi-hannover.de`.
+   Render zeigt je Domain den nötigen DNS-Eintrag an.
+2. Beim Domain-Anbieter (wo die Domain registriert ist) im DNS setzen:
+   - `altstadttaxi-hannover.de` → **A-Record** auf die von Render angezeigte IP
+   - `www` → **CNAME** auf `taxisos3.onrender.com`
+   DNS braucht 5 Minuten bis einige Stunden. Render stellt das TLS-Zertifikat
+   danach automatisch aus (Status in *Custom Domains* wird grün).
+3. In Render → **Environment** setzen und neu deployen:
+   - `APP_BASE_URL` = `https://altstadttaxi-hannover.de`
+   - `ALLOWED_ORIGINS` = `https://altstadttaxi-hannover.de,https://www.altstadttaxi-hannover.de`
+4. Google Cloud → Browser-Schlüssel → Website-Einschränkungen: beide Domains
+   stehen bereits drin (`…/*`). Nach dem Livegang `http://localhost:3000/*`
+   und die onrender-Adresse entfernen.
+5. Stripe → Entwickler → Webhooks: Endpunkt auf
+   `https://altstadttaxi-hannover.de/api/stripe/webhook` legen, Secret als
+   `STRIPE_WEBHOOK_SECRET` eintragen.
+6. Impressum/Datenschutzerklärung auf der Seite nennen die Domain und die
+   Empfänger (Google, Stripe, Twilio, Resend, Render).
