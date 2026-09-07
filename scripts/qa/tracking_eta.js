@@ -108,7 +108,15 @@ async function main() {
   const zaehlerVor = updates.all().length;
   // Fahrer fährt weiter dicht an den Kunden heran.
   for (let i = 0; i < 4; i++) {
-    dsock.emit("driver:location", { lat: HBF.lat + 0.002, lng: HBF.lng + 0.002 });
+    // Nah-Punkt AUF der Fahrtroute (80 % der Strecke), nicht bloss nahe der
+    // Luftlinie: rund um den Hauptbahnhof kennt der Routendienst Einbahn-
+    // strassen und Fussgaengerzonen - ein Punkt 250 m daneben kann eine
+    // laengere Anfahrt haben als einer 1,6 km entfernt. Auf der Route ist
+    // die Restfahrt dagegen garantiert kuerzer.
+    const aufRoute = Array.isArray(geo) && geo.length > 3
+      ? geo[Math.floor(geo.length * 0.8)]
+      : [HBF.lat + 0.002, HBF.lng + 0.002];
+    dsock.emit("driver:location", { lat: aufRoute[0], lng: aufRoute[1] });
     await sleep(800);
   }
   await sleep(1500);
