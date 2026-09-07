@@ -85,6 +85,27 @@ async function main() {
     check("Route folgt echten Strassen (viele Punkte)", (route.geometry ?? []).length > 10, route.geometry?.length);
     info(`Hauptbahnhof -> List: ${(route.distanceMeters / 1000).toFixed(2)} km, ${Math.round(route.durationSeconds / 60)} Min`);
 
+    // Laeden und Orte: das konnte die alte Suche (Photon) und muss Google
+    // ueber die Places API ebenfalls koennen - sonst findet der Fahrgast
+    // "C&A" oder seinen Friseur nicht.
+    let placesFrei = true;
+    let laden = [];
+    try {
+      laden = await geoGoogle.placesSuchen("C&A Hannover", 3, { lat: 52.3759, lng: 9.732 });
+    } catch (e) {
+      placesFrei = false;
+      info(`Places API nicht freigeschaltet (${String(e?.message ?? e).slice(0, 90)}) - im Cloud-Projekt "Places API (New)" aktivieren und im Server-Schluessel erlauben.`);
+    }
+    if (placesFrei) {
+      check("Laden wird gefunden (C&A)", laden.length > 0 && /C&A/i.test(laden[0].label), laden[0]?.label);
+      check("Laden hat eine Anschrift", !!laden[0] && /Hannover/.test(laden[0].label), laden[0]?.label);
+      const ueberSuche = await geoGoogle.geocodeGoogle("Neues Rathaus Hannover", 3, { lat: 52.3759, lng: 9.732 });
+      check("Adresssuche nutzt Places fuer Orte", ueberSuche.length > 0 && /Rathaus/i.test(ueberSuche[0].label), ueberSuche[0]?.label);
+    } else {
+      check("Ohne Places faellt die Suche auf Adressen zurueck (kein Ausfall)",
+        (await geoGoogle.geocodeGoogle("Georgstrasse 21 Hannover", 1, { lat: 52.3759, lng: 9.732 })).length > 0);
+    }
+
     const mehrziel = await geoGoogle.routeGoogle([
       { lat: 52.3759, lng: 9.732 }, { lat: 52.3705, lng: 9.7392 }, { lat: 52.39, lng: 9.76 },
     ]);

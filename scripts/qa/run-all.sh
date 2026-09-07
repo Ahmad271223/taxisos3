@@ -18,7 +18,7 @@ REIHEN=(
   frontend_walk dashboards security_refs pdf_names pdf_invoices driver_sync tracking_eta funds_check settle_race no_fake_success
   live_ready invoice_retired flights account_group payment_flow subscription
   plans_connect driver_confirm_replace chat_offline scheduled_freeze
-  freeze_deadlock loadtest loadtest_heavy betrieb profil_aendern beleg_schnappschuss zehn_firmen google_maps
+  freeze_deadlock loadtest loadtest_heavy betrieb profil_aendern beleg_schnappschuss zehn_firmen google_maps grosser_test
 )
 if [ -n "${QA_REIHEN:-}" ]; then REIHEN=($QA_REIHEN); fi
 

@@ -27,13 +27,81 @@ function ohneLand(label: string): string {
 }
 
 /**
- * Adresssuche. Die Geocoding API kann auch mit Teileingaben umgehen und
- * liefert Koordinaten in EINEM Aufruf - anders als Places Autocomplete, das
- * einen zweiten Aufruf je Treffer braeuchte. Fuer die Adresseingabe beim
- * Bestellen reicht das; die Suche wird auf Deutschland und auf einen Kasten
- * um den Standardort eingegrenzt.
+ * Orte und Geschaefte: "C&A", "Tonys Barbershop Linden", "Neues Rathaus".
+ *
+ * Die Geocoding API kennt nur Adressen - fuer solche Eingaben liefert sie
+ * nichts oder Unsinn. Die Places API (Text Search) versteht Namen von Laeden,
+ * Praxen, Hotels und liefert Name, Anschrift UND Koordinate in EINEM Aufruf.
+ * Die Feldmaske ist bewusst knapp: sie bestimmt bei Google den Preis.
+ *
+ * Voraussetzung im Cloud-Projekt: "Places API (New)" aktiviert und im
+ * Server-Schluessel freigegeben. Fehlt das, antwortet Google mit 403 - dann
+ * greift die Adresssuche ueber die Geocoding API (siehe geocodeGoogle).
+ */
+export async function placesSuchen(query: string, limit: number, bias: GeoPoint): Promise<GeocodeResult[]> {
+  const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": schluessel(),
+      "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.location",
+    },
+    body: JSON.stringify({
+      textQuery: query,
+      languageCode: "de",
+      regionCode: "DE",
+      pageSize: Math.min(Math.max(limit, 1), 10),
+      // Bevorzugt (nicht erzwungen): 30 km um den Standardort.
+      locationBias: { circle: { center: { latitude: bias.lat, longitude: bias.lng }, radius: 30000 } },
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Google Places HTTP ${res.status}: ${text.slice(0, 160)}`);
+  }
+  const data = (await res.json()) as {
+    places?: Array<{
+      displayName?: { text?: string };
+      formattedAddress?: string;
+      location?: { latitude: number; longitude: number };
+    }>;
+  };
+  const out: GeocodeResult[] = [];
+  for (const p of data.places ?? []) {
+    if (!p.location) continue;
+    const name = p.displayName?.text?.trim() ?? "";
+    const adresse = ohneLand(p.formattedAddress ?? "");
+    // "Tonys Barbershop, Limmerstrasse 12, 30451 Hannover" - Name nur, wenn er
+    // nicht ohnehin schon am Anfang der Anschrift steht.
+    const label = name && !adresse.toLowerCase().startsWith(name.toLowerCase()) ? `${name}, ${adresse}` : adresse || name;
+    out.push({ label, lat: p.location.latitude, lng: p.location.longitude });
+  }
+  return out;
+}
+
+/**
+ * Adresssuche: zuerst Places (Laeden UND Adressen), bei Fehler oder ohne
+ * Treffer die Geocoding API (nur Adressen, guenstiger). So findet die Suche
+ * "C&A" genauso wie "Bahnhofstrasse 5" - und faellt nie komplett aus, nur
+ * weil Places im Projekt (noch) nicht freigeschaltet ist.
  */
 export async function geocodeGoogle(query: string, limit: number, bias: GeoPoint): Promise<GeocodeResult[]> {
+  try {
+    const orte = await placesSuchen(query, limit, bias);
+    if (orte.length) return orte;
+  } catch (e: any) {
+    // Nur einmal je Prozess laut werden - sonst steht bei jedem Tastendruck
+    // dieselbe Zeile im Protokoll.
+    if (!placesGemeldet) {
+      placesGemeldet = true;
+      console.warn("Google Places nicht nutzbar, Adresssuche laeuft ueber Geocoding:", e?.message ?? e);
+    }
+  }
+  return geocodeAdresse(query, limit, bias);
+}
+let placesGemeldet = false;
+
+async function geocodeAdresse(query: string, limit: number, bias: GeoPoint): Promise<GeocodeResult[]> {
   const d = 0.45; // ~50 km um den Standardort - bevorzugt, nicht erzwungen
   const bounds = `${bias.lat - d},${bias.lng - d}|${bias.lat + d},${bias.lng + d}`;
   const params = new URLSearchParams({
