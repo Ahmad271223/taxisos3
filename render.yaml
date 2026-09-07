@@ -60,6 +60,15 @@ services:
       - key: DB_CONNECTION_LIMIT
         value: "10"
 
+      # ---- Generalprobe vor dem echten Start ---------------------------------
+      # Die Startsperre verweigert im Echtbetrieb den Start ohne Live-Stripe
+      # und Twilio. Fuer die Probe auf Render mit TEST-Schluesseln (kein
+      # echtes Geld) hier "1" eintragen - der Server meldet dann bei jedem
+      # Start laut, dass er im Probebetrieb laeuft. VOR dem echten Livegang
+      # diese Variable LOESCHEN; nur AUTH_SECRET laesst sich nie umgehen.
+      - key: ALLOW_TEST_MODE_IN_PRODUCTION
+        sync: false
+
       # ---- Betrieb ---------------------------------------------------------
       # Render setzt genau EINEN Proxy davor: die Drosselung liest die
       # Client-IP deshalb vom rechten Ende der x-forwarded-for-Kette.
