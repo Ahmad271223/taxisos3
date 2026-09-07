@@ -51,6 +51,20 @@ export async function POST(req: Request) {
       });
     }
 
+    // ---- 1b. Auszahlungskonto des Unternehmens (Connect) ---------------
+    // Stripe meldet jede Aenderung der Freischaltung. Ohne diese Uebernahme
+    // wuesste die App nichts davon und wickelte weiter ueber das
+    // Plattform-Konto ab, obwohl die Firma laengst bereit ist.
+    if (event.type === "account.updated" && obj?.id) {
+      await prisma.company.updateMany({
+        where: { stripeAccountId: obj.id },
+        data: {
+          stripeChargesEnabled: !!obj.charges_enabled,
+          stripePayoutsEnabled: !!obj.payouts_enabled,
+        },
+      });
+    }
+
     // ---- 2. Unternehmens-Abo ------------------------------------------
     if (event.type.startsWith("customer.subscription.")) {
       const companyId =

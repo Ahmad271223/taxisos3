@@ -14,9 +14,12 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   }
   const messages = await prisma.chatMessage.findMany({
     where: { bookingId: booking.id },
-    orderBy: { createdAt: "asc" },
+    // Die NEUESTEN 100, danach fuer die Anzeige wieder aufsteigend. Vorher
+    // kamen die aeltesten 100 - ab der 101. Nachricht verschwand alles Neue.
+    orderBy: { createdAt: "desc" },
     take: 100,
   });
+  messages.reverse();
   // Die kanonische Auftrags-ID mitgeben: der Aufrufer kennt oft nur den
   // Verfolgungs-Token aus der Adresszeile, die Ereignisse des Servers nennen
   // aber immer die ID. Ohne diesen Wert kann die Oberflaeche eingehende

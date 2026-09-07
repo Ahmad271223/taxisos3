@@ -23,6 +23,12 @@ Stand: 25.08.2026.
   pro Konto greift **auch dann**, wenn keine IP feststellbar ist — sonst ließe
   es sich durch Verschleiern der Herkunft aushebeln.
 
+- Passwörter bei der Registrierung mindestens 8 Zeichen; Firmen-Registrierung
+  gedrosselt (5 je IP und 10 Minuten).
+- Echtzeitkanal der Fahrer: Koordinaten werden auf Weltgrenzen geprüft,
+  Statuswerte nur aus einer festen Liste angenommen, Positionsmeldungen auf
+  eine je Sekunde begrenzt.
+
 ## 2. Zugriffskontrolle und Mandantentrennung
 
 - Jede Abfrage von Fahrten, Fahrern und Dokumenten ist auf den Mandanten

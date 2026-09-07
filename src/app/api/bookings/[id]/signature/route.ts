@@ -10,16 +10,31 @@ const MAX = 2_000_000; // ~1.4 MB PNG
 const schema = z.object({
   signedName: z.string().max(120).optional().nullable(),
   dataBase64: z.string().min(20).max(MAX),
-  lat: z.number().optional().nullable(),
-  lng: z.number().optional().nullable(),
+  lat: z.number().finite().min(-90).max(90).optional().nullable(),
+  lng: z.number().finite().min(-180).max(180).optional().nullable(),
 });
+
+// Base64 eines PNG beginnt immer mit dieser Folge (Signatur 89 50 4E 47 ...).
+const PNG_ANFANG = "iVBORw0KGgo";
 
 // Digitalen Fahrtnachweis speichern (Unterschrift + Zeitstempel + GPS). Die
 // bookingId dient als Capability; eine Unterschrift je Fahrt (Upsert).
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const booking = await prisma.booking.findFirst({ where: bookingRefWhereCustomer(params.id, getSession("customer")?.sub), select: { id: true, status: true } });
+  const booking = await prisma.booking.findFirst({
+    where: bookingRefWhereCustomer(params.id, getSession("customer")?.sub),
+    select: { id: true, status: true, trackingStatus: true },
+  });
   if (!booking) return NextResponse.json({ error: "Auftrag nicht gefunden" }, { status: 404 });
   if (booking.status === "STORNIERT") return NextResponse.json({ error: "Fahrt storniert" }, { status: 409 });
+  // Ein Fahrtnachweis kann erst entstehen, wenn gefahren wird oder wurde.
+  const unterwegsOderFertig = booking.status === "ABGESCHLOSSEN" || ["FAHRT_LAEUFT", "BEENDET"].includes(booking.trackingStatus);
+  if (!unterwegsOderFertig) {
+    return NextResponse.json({ error: "Die Unterschrift ist erst waehrend oder nach der Fahrt moeglich." }, { status: 409 });
+  }
+  // Einmal unterschrieben ist unterschrieben: ein Nachweis, der sich spaeter
+  // ueberschreiben laesst, ist keiner.
+  const vorhanden = await prisma.rideSignature.findUnique({ where: { bookingId: booking.id }, select: { id: true } });
+  if (vorhanden) return NextResponse.json({ error: "Diese Fahrt ist bereits unterschrieben." }, { status: 409 });
 
   let json: any;
   try {
@@ -31,11 +46,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!parsed.success) return NextResponse.json({ error: "Unterschrift fehlt oder zu groß." }, { status: 400 });
   const d = parsed.data;
   const data = d.dataBase64.replace(/^data:image\/png;base64,/, "");
+  if (!data.startsWith(PNG_ANFANG)) {
+    return NextResponse.json({ error: "Die Unterschrift muss ein PNG-Bild sein." }, { status: 400 });
+  }
 
-  const sig = await prisma.rideSignature.upsert({
-    where: { bookingId: booking.id },
-    create: { bookingId: booking.id, signedName: d.signedName ?? null, dataBase64: data, lat: d.lat ?? null, lng: d.lng ?? null, signedAt: new Date() },
-    update: { signedName: d.signedName ?? null, dataBase64: data, lat: d.lat ?? null, lng: d.lng ?? null, signedAt: new Date() },
+  const sig = await prisma.rideSignature.create({
+    data: { bookingId: booking.id, signedName: d.signedName ?? null, dataBase64: data, lat: d.lat ?? null, lng: d.lng ?? null, signedAt: new Date() },
     select: { id: true, signedAt: true, signedName: true },
   });
   return NextResponse.json({ signature: { ...sig, hasSignature: true } }, { status: 201 });

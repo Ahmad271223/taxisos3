@@ -9,7 +9,7 @@ import { recurringDTO } from "@/server/serialize";
 
 export const dynamic = "force-dynamic";
 
-const point = z.object({ address: z.string().min(1), lat: z.number(), lng: z.number() });
+const point = z.object({ address: z.string().min(1), lat: z.number().finite().min(-90).max(90), lng: z.number().finite().min(-180).max(180) });
 const hhmm = z.string().regex(/^\d{1,2}:\d{2}$/);
 
 const schema = z.object({

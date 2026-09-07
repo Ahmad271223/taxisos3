@@ -17,7 +17,7 @@ export async function GET() {
 
 const schema = z.object({
   preferredCompanyIds: z.array(z.string()).max(50).optional(),
-  defaultPickup: z.object({ address: z.string().min(1), lat: z.number(), lng: z.number() }).nullable().optional(),
+  defaultPickup: z.object({ address: z.string().min(1), lat: z.number().finite().min(-90).max(90), lng: z.number().finite().min(-180).max(180) }).nullable().optional(),
 });
 
 // Flotten-Whitelist speichern (bevorzugte Firmen).

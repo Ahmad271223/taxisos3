@@ -158,8 +158,18 @@ async function driverState(driverId: string) {
 // Zustandsabruf an jeden Fahrer), aber sie darf nicht stillschweigend Fahrten
 // verschlucken: wird sie erreicht, sind aeltere Vorbestellungen fuer Fahrer
 // unsichtbar. Deshalb ein Hinweis im Protokoll.
-const OFFENE_VORBESTELLUNGEN_MAX = Number(process.env.OPEN_SCHEDULED_MAX ?? 50);
+const OFFENE_VORBESTELLUNGEN_MAX = Number(process.env.OPEN_SCHEDULED_MAX ?? 200);
 let deckelGemeldet = 0;
+
+const FAHRER_STATUS = new Set(["FREI", "PAUSE", "OFFLINE"]);
+
+function koordinateGueltig(lat: unknown, lng: unknown): lat is number {
+  return (
+    typeof lat === "number" && typeof lng === "number" &&
+    Number.isFinite(lat) && Number.isFinite(lng) &&
+    lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
+  );
+}
 
 function fahrtZugriff(socket: Socket, ref: string) {
   if (socket.data.role === "DRIVER") return bookingRefWhereDriver(ref, socket.data.driverId);
@@ -266,6 +276,21 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
     if (driverSession?.role === "DRIVER") {
       const session = driverSession;
       const driverId = session.sub;
+      // Bei JEDEM Verbindungsaufbau nachsehen, ob der Zugang noch gilt: der
+      // Anmelde-Ausweis im Browser laeuft erst nach sieben Tagen ab. Ohne
+      // diese Pruefung koennte ein deaktivierter Fahrer bis dahin weiter
+      // Auftraege annehmen.
+      const fahrerKonto = await prisma.driver
+        .findUnique({ where: { id: driverId }, select: { active: true } })
+        .catch(() => null);
+      if (fahrerKonto && fahrerKonto.active === false) {
+        socket.emit("auth:error", {
+          code: "DRIVER_INACTIVE",
+          error: "Ihr Zugang wurde deaktiviert. Bitte wenden Sie sich an Ihre Zentrale.",
+        });
+        socket.disconnect(true);
+        return;
+      }
       socket.data.role = "DRIVER";
       socket.data.driverId = driverId;
       socket.join(`driver:${driverId}`);
@@ -307,13 +332,22 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
         }
       });
 
+      // Positionen: nur echte Koordinaten, hoechstens eine je Sekunde. Jede
+      // Meldung erzeugt einen Datenbankschreibvorgang und ggf. eine
+      // Routenberechnung - ein durchdrehender Client darf das nicht fluten.
+      let letztePosition = 0;
       socket.on("driver:location", (p: { lat: number; lng: number }) => {
-        if (typeof p?.lat === "number" && typeof p?.lng === "number") {
-          dispatcher.updateLocation(driverId, p.lat, p.lng).catch(() => {});
-        }
+        if (!koordinateGueltig(p?.lat, p?.lng)) return;
+        const jetzt = Date.now();
+        if (jetzt - letztePosition < 1000) return;
+        letztePosition = jetzt;
+        dispatcher.updateLocation(driverId, p.lat, p.lng).catch(() => {});
       });
 
       socket.on("driver:status", async (p: { status: string }, ack?: (r: any) => void) => {
+        // Nur die Zustaende, die ein Fahrer selbst setzen darf. Alles andere
+        // (BESETZT, RESERVIERT) vergibt die Vermittlung.
+        if (!FAHRER_STATUS.has(p?.status)) return ack?.({ ok: false, error: "Ungueltiger Status." });
         await dispatcher.setStatus(driverId, p.status).catch(() => {});
         ack?.({ ok: true });
       });
@@ -373,6 +407,11 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
       );
 
       socket.on("disconnect", () => {
+        // Zweites Geraet oder zweiter Tab desselben Fahrers noch verbunden?
+        // Dann bleibt er online - frueher setzte JEDE getrennte Verbindung
+        // den Fahrer offline, auch wenn die andere noch lief.
+        const weitere = io.sockets.adapter.rooms.get(`driver:${driverId}`)?.size ?? 0;
+        if (weitere > 0) return;
         realDrivers.delete(driverId);
         dispatcher.onDriverDisconnect(driverId).catch(() => {});
       });
@@ -403,9 +442,10 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
       if (!b) return ack?.({ ok: false });
       const msgs = await prisma.chatMessage.findMany({
         where: { bookingId: b.id },
-        orderBy: { createdAt: "asc" },
+        orderBy: { createdAt: "desc" },
         take: 100,
       });
+      msgs.reverse();
       ack?.({ ok: true, messages: msgs.map(messageDTO) });
     });
 

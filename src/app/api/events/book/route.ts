@@ -10,7 +10,7 @@ import { getDispatcher } from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
 
-const point = z.object({ address: z.string().min(1), lat: z.number(), lng: z.number() });
+const point = z.object({ address: z.string().min(1), lat: z.number().finite().min(-90).max(90), lng: z.number().finite().min(-180).max(180) });
 const schema = z.object({
   eventId: z.string().min(1),
   pickup: point,
@@ -23,6 +23,11 @@ const schema = z.object({
 
 // Sammelbuchung: bucht mehrere Taxis für eine Veranstaltung in einem Rutsch.
 export async function POST(req: Request) {
+  // Ohne Dispatcher wuerde die Fahrt angelegt, aber nie gesucht - der Kunde
+  // saehe endlos "Fahrer wird gesucht". Dann lieber ehrlich ablehnen.
+  if (!getDispatcher()) {
+    return NextResponse.json({ error: "Vermittlung gerade nicht erreichbar. Bitte in einer Minute erneut versuchen." }, { status: 503 });
+  }
   const session = requireRole("EVENT");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
   let json: any;

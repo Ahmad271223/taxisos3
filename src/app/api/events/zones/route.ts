@@ -14,8 +14,8 @@ export async function GET() {
 
 const schema = z.object({
   name: z.string().min(2).max(120),
-  lat: z.number(),
-  lng: z.number(),
+  lat: z.number().finite().min(-90).max(90),
+  lng: z.number().finite().min(-180).max(180),
   radiusMeters: z.number().int().min(30).max(5000).optional(),
 });
 

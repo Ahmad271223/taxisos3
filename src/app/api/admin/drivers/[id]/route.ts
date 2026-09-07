@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
 import { driverAdmin } from "@/server/serialize";
 import { normalizeClass } from "@/lib/vehicleClasses";
+import { getRuntime } from "@/server/runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +54,24 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   const data: any = { ...rest };
   if (vehicleClass != null) data.vehicleClass = normalizeClass(vehicleClass);
   const driver = await prisma.driver.update({ where: { id: params.id }, data });
+
+  // Eine Deaktivierung muss SOFORT wirken: offene Verbindungen des Fahrers
+  // werden getrennt und er verschwindet aus der Disposition. Sonst faehrt er
+  // mit seiner bereits offenen Sitzung einfach weiter.
+  if (parsed.data.active === false) {
+    const rt = getRuntime();
+    try {
+      await rt?.dispatcher.setStatus(params.id, "OFFLINE");
+    } catch (e: any) {
+      console.error("Fahrer offline setzen fehlgeschlagen:", e?.message ?? e);
+    }
+    try {
+      rt?.io.in(`driver:${params.id}`).disconnectSockets(true);
+    } catch (e: any) {
+      console.error("Fahrer-Verbindung trennen fehlgeschlagen:", e?.message ?? e);
+    }
+  }
+
   return NextResponse.json({ driver: driverAdmin(driver) });
 }
 

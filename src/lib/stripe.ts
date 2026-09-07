@@ -36,7 +36,16 @@ async function getClient(): Promise<StripeLike | null> {
     clientPromise = import("stripe")
       .then((m: any) => {
         const Stripe = m.default ?? m;
-        return new Stripe(process.env.STRIPE_SECRET_KEY as string);
+        // Wiederholungen und ein grosszuegiger Zeitrahmen: ein einzelner
+        // abgerissener Verbindungsaufbau (Mobilfunk, Proxy, kurze Stoerung bei
+        // Stripe) liess sonst eine beendete Fahrt UNBEZAHLT zurueck, obwohl
+        // Karte und Konto in Ordnung waren. Stripe erkennt Wiederholungen
+        // anhand des mitgesendeten Idempotenz-Schluessels - es wird also
+        // niemals doppelt abgebucht.
+        return new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+          maxNetworkRetries: 3,
+          timeout: 20_000,
+        });
       })
       .catch((e: any) => {
         // Ohne diese Meldung liefe die App still im Ersatzbetrieb weiter,

@@ -36,6 +36,11 @@ export function LiveTaxiMap() {
   const [vorschlaege, setVorschlaege] = useState<GeocodeResult[]>([]);
   const [ziel, setZiel] = useState<GeocodeResult | null>(null);
   const [sucheOffen, setSucheOffen] = useState(false);
+  // Standortabfrage auf Knopfdruck: iOS Safari und neuere Browser zeigen die
+  // Erlaubnis-Abfrage nur nach einer Nutzeraktion - die stille Abfrage beim
+  // Laden bleibt dort ohne Antwort, und der Fahrgast sah nie "sein" Taxi.
+  const [gpsFehler, setGpsFehler] = useState<string | null>(null);
+  const [gpsLaeuft, setGpsLaeuft] = useState(false);
   const [me, setMe] = useState<{ name: string } | null>(null);
   const [userLoc, setUserLoc] = useState<UserLoc | null>(null);
 
@@ -139,6 +144,32 @@ export function LiveTaxiMap() {
 
   // Auswahl fuehrt direkt ins Formular - Ziel samt Koordinaten sind dann schon
   // gesetzt, der Fahrgast tippt die Adresse kein zweites Mal.
+  function standortErmitteln() {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setGpsFehler("Standortdienste werden von diesem Browser nicht unterstützt.");
+      return;
+    }
+    setGpsFehler(null);
+    setGpsLaeuft(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLoc({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setGpsLaeuft(false);
+      },
+      (err) => {
+        setGpsLaeuft(false);
+        setGpsFehler(
+          err.code === 1
+            ? "Standort blockiert – bitte in den Browser-Einstellungen für diese Seite erlauben."
+            : err.code === 3
+              ? "Standort nicht rechtzeitig ermittelt – bitte erneut versuchen."
+              : "Standort konnte nicht ermittelt werden.",
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30_000 },
+    );
+  }
+
   function zielWaehlen(r: GeocodeResult) {
     setZiel(r);
     setWhereTo(r.label);
@@ -175,7 +206,7 @@ export function LiveTaxiMap() {
     <main className="relative h-screen w-screen overflow-hidden bg-ink-50" data-testid="live-map-page">
       {/* Vollbild-Karte */}
       <div className="absolute inset-0" data-testid="live-map">
-        <Map center={center} markers={allMarkers} fit />
+        <Map center={center} markers={allMarkers} fit follow={!!userLoc} />
       </div>
 
       {/* TOP BAR – schlank, ohne Emoji */}
@@ -281,6 +312,25 @@ export function LiveTaxiMap() {
                 </li>
               ))}
             </ul>
+          )}
+          {!userLoc && !selectedLive && (
+            <div className="mt-2 flex flex-col items-center gap-1" data-testid="live-locate-row">
+              <button
+                type="button"
+                onClick={standortErmitteln}
+                disabled={gpsLaeuft}
+                data-testid="live-locate"
+                className="flex items-center gap-2 rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold text-ink-900 shadow-card ring-1 ring-ink-200 hover:bg-ink-50 disabled:opacity-60"
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                {gpsLaeuft ? "Standort wird ermittelt …" : "Meinen Standort verwenden"}
+              </button>
+              {gpsFehler && (
+                <span className="rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-red-600 shadow-card ring-1 ring-red-200" role="alert">
+                  {gpsFehler}
+                </span>
+              )}
+            </div>
           )}
           {fastest && !selectedLive && (
             <div className="mt-2 flex items-center justify-center gap-2 text-xs font-semibold text-ink-900" data-testid="fastest-eta">

@@ -38,6 +38,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     /* body optional */
   }
 
-  await getDispatcher()?.cancelBooking(params.id, { actorType: "ADMIN", reason: reason ?? undefined });
+  const dispatcher = getDispatcher();
+  if (!dispatcher) {
+    return NextResponse.json({ error: "Vermittlung gerade nicht erreichbar. Bitte in einer Minute erneut versuchen." }, { status: 503 });
+  }
+  await dispatcher.cancelBooking(params.id, { actorType: "ADMIN", reason: reason ?? undefined });
   return NextResponse.json({ ok: true });
 }

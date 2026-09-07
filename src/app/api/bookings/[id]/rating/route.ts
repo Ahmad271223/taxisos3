@@ -17,8 +17,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
     return NextResponse.json({ error: "Bewertung muss zwischen 1 und 5 liegen" }, { status: 400 });
   }
-  const booking = await prisma.booking.findFirst({ where: bookingRefWhereCustomer(params.id, getSession("customer")?.sub), select: { id: true } });
+  const booking = await prisma.booking.findFirst({
+    where: bookingRefWhereCustomer(params.id, getSession("customer")?.sub),
+    select: { id: true, status: true, ratedAt: true },
+  });
   if (!booking) return NextResponse.json({ error: "Auftrag nicht gefunden" }, { status: 404 });
+  if (booking.status !== "ABGESCHLOSSEN") {
+    return NextResponse.json({ error: "Bewerten geht erst nach dem Ende der Fahrt." }, { status: 409 });
+  }
+  if (booking.ratedAt) {
+    return NextResponse.json({ error: "Diese Fahrt wurde bereits bewertet." }, { status: 409 });
+  }
 
   await prisma.booking.update({
     where: { id: booking.id },

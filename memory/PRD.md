@@ -198,6 +198,81 @@ Gaeste weiterhin ausschliesslich ueber den Token.
 Abgesichert durch `scripts/qa/security_refs.js` (55 Pruefungen) und
 `scripts/qa/tracking_eta.js` (13).
 
+**Zweiter externer Bericht (behoben 2026-09-07):** Von 38 gemeldeten Punkten
+waren 9 echt und sind behoben (`scripts/qa/haertung.js`, 31 Pruefungen):
+
+- Das Kunden-Storno gab den ROHEN Fahrer-Datensatz zurueck - samt
+  Passwort-Hash, Benutzername und Rufnummer. Jetzt nur noch das DTO. Alle
+  anderen Routen mit Fahrerdaten nutzten das DTO bereits.
+- Unterschrift: war vor der Fahrt moeglich, ueberschreibbar, ohne PNG- und
+  Koordinatenpruefung. Jetzt erst waehrend/nach der Fahrt, einmalig, nur PNG,
+  Koordinaten mit Weltgrenzen.
+- Bewertung: war vor Fahrtende moeglich und beliebig oft ueberschreibbar.
+- Firmenbudget: zwei gleichzeitige Buchungen sahen beide "Budget frei" und
+  gaben zusammen mehr aus; ein Datenbankfehler beim Verbuchen wurde still
+  geschluckt. Jetzt eine atomare, bedingte Verbuchung; reicht das Budget nicht
+  mehr, wird die eben angelegte Fahrt wieder entfernt.
+- Chat lieferte ab der 101. Nachricht die aeltesten statt der neuesten.
+- Fahrer-Socket: Fantasie-Koordinaten und erfundene Statuswerte wurden
+  uebernommen; Positionen ungedrosselt. Jetzt Weltgrenzen, Status nur aus
+  FREI/PAUSE/OFFLINE, hoechstens eine Position je Sekunde.
+- Zweites Geraet desselben Fahrers: eine getrennte Verbindung setzte ihn
+  offline, obwohl die andere noch lief.
+- Ohne Dispatcher gaben Storno und Buchung "ok" zurueck; jetzt 503, und eine
+  Fahrt wird ohne Dispatcher gar nicht erst angelegt.
+- Flugdaten: bei Anbieter-Ausfall galt die vom Client gemeldete Verspaetung.
+  Jetzt die planmaessige Zeit ohne Verspaetung.
+- Registrierung: Passwort mindestens 8 Zeichen (vorher 6), Firmen-
+  Registrierung gedrosselt; STRIPE_WEBHOOK_SECRET ist im Echtbetrieb Pflicht.
+
+Als FALSCH oder nicht zutreffend eingestuft: "Python-Proxy" und "/api/healthz"
+(ein toter FastAPI-Rest einer frueheren Iteration, nirgends referenziert -
+jetzt geloescht); firmenuebergreifende Vorbestellungen (bewusster
+Marktplatz, seit 25.08. ohne Fahrgastdaten); alle Mehrinstanz-Punkte
+(Redis-Adapter, Zeitgeber, Rate-Limit) - die Architektur ist auf GENAU EINE
+Instanz festgelegt und dokumentiert; ALLOW_TEST_MODE_IN_PRODUCTION ist der
+dokumentierte Probebetrieb mit lauter Meldung; der Trinkgeld-Weg ueber den
+Verfolgungslink ist gewollt und durch Zeitfenster und Obergrenze begrenzt.
+Offen gelassen (bewusst): E-Mail-Bestaetigung bei der Firmenregistrierung,
+Widerruf laufender Sitzungen (JWT 7 Tage), Push-Schluessel als Pflicht.
+
+**Dritter externer Bericht (behoben 2026-09-07):** Von den Punkten #39-55
+waren fuenf echt; sie sind behoben (`scripts/qa/haertung.js`, jetzt 51
+Pruefungen):
+
+- Ein DEAKTIVIERTER Fahrer konnte sich weiterhin anmelden und Auftraege
+  annehmen. Die Deaktivierung wirkte erst, wenn sein Anmelde-Ausweis nach
+  sieben Tagen ablief. Jetzt greift sie an drei Stellen: die Anmeldung wird
+  abgewiesen, der Echtzeitkanal prueft bei JEDEM Verbindungsaufbau nach, und
+  beim Deaktivieren werden bestehende Verbindungen sofort getrennt und der
+  Fahrer auf OFFLINE gesetzt.
+- Ein GESPERRTES Kundenkonto konnte sich anmelden und sein Profil aendern -
+  also E-Mail und Rufnummer austauschen und die Sperre so umgehen. Buchen war
+  bereits gesperrt. Jetzt wird die Anmeldung abgewiesen; eine noch offene
+  Sitzung darf lesen (der Kunde soll den Grund und seine Belege sehen), aber
+  nichts mehr aendern.
+- Zieländerung: Koordinaten wurden ohne Weltgrenzen uebernommen, beliebig oft
+  und sogar nach der Bezahlung. Jetzt Weltgrenzen, hoechstens 300 km Luftlinie
+  von der Abholung, hoechstens zehn Aenderungen je halbe Stunde und keine mehr,
+  sobald abgerechnet ist.
+- Beim Stripe-Aufruf brach gelegentlich der Verbindungsaufbau ab und liess eine
+  beendete Fahrt UNBEZAHLT zurueck. Jetzt bis zu drei Wiederholungen mit
+  20 Sekunden Zeitrahmen (Stripe erkennt Wiederholungen am Idempotenz-
+  Schluessel, es wird nie doppelt abgebucht).
+
+Der Verfolgungs-Token bleibt bewusst eine Capability (Punkt #39): ein Gast
+ohne Konto hat nichts anderes. Missbrauch ist jetzt aber begrenzt statt
+unbeschraenkt - siehe die drei Schranken oben.
+
+**Auszahlungskonto (neu 2026-09-07):** Die Schnittstelle fuer Stripe Connect
+war vollstaendig, aber es gab keine Oberflaeche dazu - keine Firma konnte ihr
+Konto hinterlegen, und die Rueckkehr-Adresse aus dem Stripe-Onboarding zeigte
+auf eine Seite, die es nicht gab. Neu: `/admin/auszahlung`
+(`src/components/AdminPayout.tsx`) mit Status, offenen Nachweisen im Klartext,
+Link ins Stripe-Dashboard und der Erklaerung des Geldflusses. Ausserdem
+uebernimmt der Webhook jetzt `account.updated`: ohne das erfuhr die App nie,
+dass eine Firma freigeschaltet wurde, und buchte weiter aufs Plattform-Konto.
+
 
 ---
 

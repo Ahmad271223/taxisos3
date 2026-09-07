@@ -62,6 +62,18 @@ export async function POST(req: Request) {
     if (!customer || !(await verifyPassword(password, customer.passwordHash))) {
       return NextResponse.json({ error: "E-Mail oder Passwort falsch" }, { status: 401 });
     }
+    // Gesperrte Konten kommen gar nicht erst herein. Vorher war die Sperre nur
+    // eine Buchungssperre: anmelden, Profil aendern und Fahrten einsehen ging
+    // weiter - die Sperre wirkte also nur halb.
+    if (customer.blocked) {
+      return NextResponse.json(
+        {
+          error: customer.blockedReason ?? "Ihr Konto ist gesperrt. Bitte wenden Sie sich an unsere Zentrale.",
+          code: "ACCOUNT_BLOCKED",
+        },
+        { status: 403 },
+      );
+    }
     const token = signSession({
       sub: customer.id,
       role: "CUSTOMER",
@@ -84,6 +96,15 @@ export async function POST(req: Request) {
   });
   if (!driver || !(await verifyPassword(password, driver.passwordHash))) {
     return NextResponse.json({ error: "Benutzername oder Passwort falsch" }, { status: 401 });
+  }
+  // Ein deaktivierter Fahrer konnte sich bisher normal anmelden und war damit
+  // wieder disponierbar - die Deaktivierung in der Fahrerverwaltung blieb
+  // faktisch wirkungslos.
+  if (driver.active === false) {
+    return NextResponse.json(
+      { error: "Ihr Zugang wurde deaktiviert. Bitte wenden Sie sich an Ihre Zentrale.", code: "DRIVER_INACTIVE" },
+      { status: 403 },
+    );
   }
   const token = signSession({
     sub: driver.id,

@@ -13,7 +13,7 @@ import { bookingDTO } from "@/server/serialize";
 
 export const dynamic = "force-dynamic";
 
-const point = z.object({ address: z.string().min(1), lat: z.number(), lng: z.number() });
+const point = z.object({ address: z.string().min(1), lat: z.number().finite().min(-90).max(90), lng: z.number().finite().min(-180).max(180) });
 const schema = z.object({
   pickup: point.optional(),
   dest: point.optional(),

@@ -22,6 +22,9 @@ function profilDTO(c: any) {
     phoneVerified: !!c.phoneVerifiedAt,
     emergencyContactName: c.emergencyContactName ?? null,
     emergencyContactPhone: c.emergencyContactPhone ?? null,
+    // Damit die Oberflaeche den Grund nennen kann, statt nur Fehler zu zeigen.
+    blocked: !!c.blocked,
+    blockedReason: c.blockedReason ?? null,
   };
 }
 
@@ -61,6 +64,19 @@ export async function PATCH(req: Request) {
 
   const c = await prisma.customer.findUnique({ where: { id: session.sub } });
   if (!c) return NextResponse.json({ error: "Nicht gefunden" }, { status: 404 });
+
+  // Gesperrtes Konto: LESEN bleibt erlaubt (der Kunde soll den Grund sehen und
+  // an seine Belege kommen), AENDERN nicht. Sonst liesse sich eine Sperre
+  // umgehen, indem man einfach E-Mail und Rufnummer austauscht.
+  if (c.blocked) {
+    return NextResponse.json(
+      {
+        error: c.blockedReason ?? "Ihr Konto ist gesperrt. Bitte wenden Sie sich an unsere Zentrale.",
+        code: "ACCOUNT_BLOCKED",
+      },
+      { status: 403 },
+    );
+  }
 
   const neueMail = d.email !== undefined ? d.email.toLowerCase().trim() : undefined;
   const mailAendert = neueMail !== undefined && neueMail !== c.email;

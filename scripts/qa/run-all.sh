@@ -18,7 +18,7 @@ REIHEN=(
   frontend_walk dashboards security_refs pdf_names pdf_invoices driver_sync tracking_eta funds_check settle_race no_fake_success
   live_ready invoice_retired flights account_group payment_flow subscription
   plans_connect driver_confirm_replace chat_offline scheduled_freeze
-  freeze_deadlock loadtest loadtest_heavy betrieb profil_aendern beleg_schnappschuss zehn_firmen google_maps grosser_test
+  freeze_deadlock loadtest loadtest_heavy betrieb profil_aendern beleg_schnappschuss zehn_firmen google_maps grosser_test haertung
 )
 if [ -n "${QA_REIHEN:-}" ]; then REIHEN=($QA_REIHEN); fi
 
@@ -47,7 +47,10 @@ starte_server() {
     rm -rf .next
     QA_NEXT_BEREINIGT=1
   fi
-  SMS_DISABLED=1 ENABLE_SIMULATOR=0 npx tsx server.ts > "$LOG" 2>&1 &
+  # --use-system-ca wie im Entwicklungsbetrieb: ohne das schlaegt hinter einer
+  # TLS-pruefenden Software jeder zweite Stripe-Aufruf fehl und der Testlauf
+  # meldet Zahlungsfehler, die keine sind.
+  SMS_DISABLED=1 ENABLE_SIMULATOR=0 NODE_OPTIONS=--use-system-ca npx tsx server.ts > "$LOG" 2>&1 &
   for _ in $(seq 1 60); do
     if [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/ 2>/dev/null)" = "200" ]; then
       if grep -qi EADDRINUSE "$LOG"; then echo "    ! Alter Server laeuft noch"; return 1; fi

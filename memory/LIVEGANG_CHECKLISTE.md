@@ -16,6 +16,12 @@ ab. Das ist Absicht — jeder Punkt hat einen konkreten Schaden dahinter.
 - [ ] **Stripe freischalten** und `STRIPE_SECRET_KEY` als Live-Schlüssel
       eintragen. Das Konto ist DE/EUR, aber Zahlungen und Auszahlungen sind
       noch nicht aktiviert.
+- [ ] **Stripe Connect aktivieren** (Stripe → Connect → Einstellungen, Typ
+      *Express*, Land Deutschland). Ohne Connect kann kein Taxiunternehmen ein
+      eigenes Auszahlungskonto hinterlegen; alle Kartenzahlungen liefen dann
+      über das Plattform-Konto und müssten von Hand weitergereicht werden.
+      Jede Firma richtet ihr Konto danach selbst ein unter
+      **Dashboard → Auszahlung** (`/admin/auszahlung`).
 - [ ] **Twilio auf ein bezahltes Konto** umstellen (`TWILIO_ACCOUNT_SID`).
       Aktuell Trial: SMS nur an verifizierte Nummern, mit Testhinweis im Text,
       rund 50 am Tag.
@@ -41,6 +47,11 @@ ab. Das ist Absicht — jeder Punkt hat einen konkreten Schaden dahinter.
 - ~~Kartendienst lizenzieren~~ → erledigt durch Google Maps (siehe Abschnitt A).
 - [ ] **Bezahlter Hosting-Plan** (Render). Der kostenlose Plan hat **keine**
       Wiederherstellungspunkte — es gibt dort schlicht keine Sicherung.
+- [ ] **Datenbank abschotten:** Render → Datenbank `taxisos-db` → *Access Control*.
+      Dort steht standardmäßig `0.0.0.0/0` (aus dem ganzen Internet erreichbar).
+      Diesen Eintrag **entfernen** — die App spricht über die interne Adresse
+      (die `DATABASE_URL` aus dem Blueprint ist bereits die interne). Nur wenn du
+      selbst per Tool auf die Datenbank willst, deine eigene IP eintragen.
 - [ ] **Wiederherstellung einmal proben.** Ablauf in
       `BETRIEBSHANDBUCH.md`, Abschnitt 7. Die dabei gemessene Dauer ist deine
       Antwort auf „wie lange sind wir im Ernstfall offline".
@@ -146,7 +157,16 @@ teurer:
    stehen bereits drin (`…/*`). Nach dem Livegang `http://localhost:3000/*`
    und die onrender-Adresse entfernen.
 5. Stripe → Entwickler → Webhooks: Endpunkt auf
-   `https://altstadttaxi-hannover.de/api/stripe/webhook` legen, Secret als
-   `STRIPE_WEBHOOK_SECRET` eintragen.
+   `https://altstadttaxi-hannover.de/api/payments/webhook` legen (NICHT
+   `/api/stripe/webhook` — diesen Pfad gibt es nicht), Secret als
+   `STRIPE_WEBHOOK_SECRET` eintragen. Diese Ereignisse ankreuzen:
+   `payment_intent.succeeded`, `payment_intent.payment_failed`,
+   `payment_intent.canceled`, `account.updated`,
+   `customer.subscription.created/updated/deleted`, `invoice.paid`,
+   `invoice.payment_failed`, `checkout.session.completed`.
+   `account.updated` ist der wichtigste: darüber erfährt die App, dass ein
+   Taxiunternehmen seine Stripe-Prüfung bestanden hat. Fehlt es, gelten alle
+   Firmen dauerhaft als nicht auszahlungsbereit und jede Kartenzahlung landet
+   auf dem Plattform-Konto.
 6. Impressum/Datenschutzerklärung auf der Seite nennen die Domain und die
    Empfänger (Google, Stripe, Twilio, Resend, Render).

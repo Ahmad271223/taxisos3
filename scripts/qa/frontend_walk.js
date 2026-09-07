@@ -44,6 +44,7 @@ const GESCHUETZT = [
   ["/admin/fahrer", "Fahrerverwaltung"],
   ["/admin/preise", "Preise"],
   ["/admin/abo", "Abo"],
+  ["/admin/auszahlung", "Auszahlungskonto"],
   ["/admin/abrechnung", "Abrechnung"],
   ["/admin/bewertungen", "Bewertungen"],
   ["/admin/krankenfahrten", "Krankenfahrten"],

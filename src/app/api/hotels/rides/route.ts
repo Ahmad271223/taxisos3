@@ -13,7 +13,7 @@ import { bookingDTO } from "@/server/serialize";
 
 export const dynamic = "force-dynamic";
 
-const point = z.object({ address: z.string().min(1), lat: z.number(), lng: z.number() });
+const point = z.object({ address: z.string().min(1), lat: z.number().finite().min(-90).max(90), lng: z.number().finite().min(-180).max(180) });
 const schema = z.object({
   guestName: z.string().min(1).max(120),
   guestPhone: z.string().max(40).optional().nullable(),
@@ -49,6 +49,11 @@ export async function GET() {
 // einen Tracking-Link (keine App nötig). Hotel ist vertrauenswürdig -> keine
 // Telefon-Verifizierung.
 export async function POST(req: Request) {
+  // Ohne Dispatcher wuerde die Fahrt angelegt, aber nie gesucht - der Kunde
+  // saehe endlos "Fahrer wird gesucht". Dann lieber ehrlich ablehnen.
+  if (!getDispatcher()) {
+    return NextResponse.json({ error: "Vermittlung gerade nicht erreichbar. Bitte in einer Minute erneut versuchen." }, { status: 503 });
+  }
   const session = requireRole("HOTEL");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
   // Rollen-Gating: z. B. Buchhaltung darf keine Fahrten buchen.

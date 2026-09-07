@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, signSession, authConfigured, ADMIN_COOKIE } from "@/lib/auth";
 
+import { rateLimit, clientIp } from "@/lib/ratelimit";
 export const dynamic = "force-dynamic";
 
 const schema = z.object({
@@ -10,7 +11,7 @@ const schema = z.object({
   address: z.string().optional().nullable(),
   phone: z.string().optional().nullable(),
   email: z.string().email(),
-  password: z.string().min(6),
+  password: z.string().min(8),
   // cityTier wird NICHT vom Antragsteller übernommen: die Provisionsstufe
   // (BIG 7 % / SMALL 5 %) bestimmt der Plattform-Betreiber, sonst könnte sich
   // jede Firma die niedrigere Gebühr selbst zuweisen. Default: SMALL.
@@ -35,6 +36,13 @@ async function uniqueSlug(base: string): Promise<string> {
 }
 
 export async function POST(req: Request) {
+  // Ohne Drosselung liesse sich hier im Sekundentakt eine Firma nach der
+  // anderen anlegen (Spam, fremde E-Mail-Adressen belegen).
+  const ip = clientIp(req);
+  if (ip) {
+    const r = rateLimit(`register-company:${ip}`, 5, 10 * 60_000);
+    if (!r.ok) return NextResponse.json({ error: "Zu viele Registrierungen. Bitte spaeter erneut." }, { status: 429 });
+  }
   let json: any;
   try {
     json = await req.json();

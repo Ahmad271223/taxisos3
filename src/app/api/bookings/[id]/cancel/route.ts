@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getDispatcher } from "@/server/runtime";
 import { getSession } from "@/lib/session";
 import { bookingRefWhereCustomer } from "@/lib/bookingRef";
+import { bookingDTO } from "@/server/serialize";
 
 export const dynamic = "force-dynamic";
 
@@ -40,10 +41,19 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     /* body optional */
   }
 
-  await getDispatcher()?.cancelBooking(booking.id, { actorType: "CUSTOMER", reason: reason ?? undefined });
+  // Ohne Dispatcher darf hier kein "ok" zurueckgehen: frueher lief das
+  // optionale Verkettungszeichen ins Leere und der Kunde sah trotzdem
+  // "storniert", obwohl nichts passiert war.
+  const dispatcher = getDispatcher();
+  if (!dispatcher) {
+    return NextResponse.json({ error: "Vermittlung gerade nicht erreichbar. Bitte in einer Minute erneut versuchen." }, { status: 503 });
+  }
+  await dispatcher.cancelBooking(booking.id, { actorType: "CUSTOMER", reason: reason ?? undefined });
   const updated = await prisma.booking.findUnique({
     where: { id: booking.id },
-    include: { driver: true },
+    include: { driver: true, card: true },
   });
-  return NextResponse.json({ ok: true, booking: updated });
+  // NUR das DTO: der rohe Datensatz enthaelt den Fahrer samt Passwort-Hash,
+  // Benutzername und Rufnummer - das hat im Browser nichts verloren.
+  return NextResponse.json({ ok: true, booking: updated ? bookingDTO(updated) : null });
 }

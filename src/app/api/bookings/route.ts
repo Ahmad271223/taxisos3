@@ -23,8 +23,8 @@ import { bookingDTO } from "@/server/serialize";
 
 export const dynamic = "force-dynamic";
 
-const point = z.object({ lat: z.number(), lng: z.number() });
-const stop = z.object({ address: z.string().min(1), lat: z.number(), lng: z.number() });
+const point = z.object({ lat: z.number().finite().min(-90).max(90), lng: z.number().finite().min(-180).max(180) });
+const stop = z.object({ address: z.string().min(1), lat: z.number().finite().min(-90).max(90), lng: z.number().finite().min(-180).max(180) });
 
 const schema = z.object({
   // Plattform-Buchung: Firma optional, das System sucht den nächsten freien Fahrer
@@ -76,6 +76,11 @@ const schema = z.object({
 });
 
 export async function POST(req: Request) {
+  // Ohne Dispatcher wuerde die Fahrt angelegt, aber nie gesucht - der Kunde
+  // saehe endlos "Fahrer wird gesucht". Dann lieber ehrlich ablehnen.
+  if (!getDispatcher()) {
+    return NextResponse.json({ error: "Vermittlung gerade nicht erreichbar. Bitte in einer Minute erneut versuchen." }, { status: 503 });
+  }
   // Rate-Limit (nur hinter Proxy/Ingress): Buchungs-Spam bremsen.
   const ip = clientIp(req);
   if (ip) {
@@ -242,8 +247,14 @@ export async function POST(req: Request) {
         flightStatusServer = info.status;
         terminalServer = info.terminal ?? terminalServer;
       }
-    } catch {
-      /* Anbieter nicht erreichbar -> Clientwerte als Naeherung behalten */
+    } catch (e: any) {
+      // Anbieter nicht erreichbar: die vom Client gemeldete Verspaetung NICHT
+      // uebernehmen - genau im Ausfall liesse sich die Abholzeit sonst
+      // beliebig verschieben. Es gilt die planmaessige Zeit; die Verspaetung
+      // wird spaeter vom Zeitgeber nachgezogen, sobald der Anbieter antwortet.
+      console.warn("Flugdaten nicht abrufbar, planmaessige Zeit ohne Verspaetung verwendet:", e?.message ?? e);
+      flightDelayMinutes = 0;
+      flightStatusServer = null;
     }
   }
   // Annullierter Flug: Fahrt nicht stillschweigend anlegen.
@@ -344,9 +355,28 @@ export async function POST(req: Request) {
 
   // Firmen-Mobilitäts-Kontingent verbuchen (Anzahl + geschätzte Summe in Cent).
   if (corporateActive && corporateCode) {
-    await prisma.corporateCode
-      .update({ where: { code: corporateCode }, data: { usedRides: { increment: 1 }, usedCents: { increment: corporateFareCents } } })
-      .catch(() => {});
+    // Atomar und BEDINGT: Pruefung und Verbuchung in einer Anweisung. Zwei
+    // gleichzeitige Buchungen sahen frueher beide "50 EUR frei" und gaben
+    // zusammen 80 EUR aus; ein Datenbankfehler wurde still geschluckt und die
+    // Fahrt lief kostenlos. Reicht das Budget nicht mehr, wird die gerade
+    // angelegte Fahrt wieder entfernt (es wurde noch nichts vermittelt).
+    const verbucht = await prisma.$executeRaw`
+      UPDATE "CorporateCode"
+      SET "usedRides" = "usedRides" + 1, "usedCents" = "usedCents" + ${corporateFareCents}
+      WHERE "code" = ${corporateCode}
+        AND "active" = true
+        AND ("maxRides" IS NULL OR "usedRides" < "maxRides")
+        AND ("budgetCents" IS NULL OR "usedCents" + ${corporateFareCents} <= "budgetCents")
+    `;
+    if (verbucht !== 1) {
+      await prisma.booking.delete({ where: { id: booking.id } }).catch((e) =>
+        console.error("Firmen-Buchung ohne Budget konnte nicht entfernt werden:", booking.id, e?.message ?? e),
+      );
+      return NextResponse.json(
+        { error: "Das Firmenbudget ist inzwischen aufgebraucht.", code: "CORPORATE_INVALID" },
+        { status: 402 },
+      );
+    }
   }
 
   if (!isScheduled) {

@@ -323,6 +323,16 @@ export function AdminDashboard() {
                 </svg>
                 Abo &amp; Abrechnung – Tarif, Zahlungsmittel, Rechnungen →
               </a>
+              <a
+                href="/admin/auszahlung"
+                data-testid="payout-link"
+                className="mt-2 inline-flex items-center gap-2 text-sm font-bold text-ink-700 hover:text-ink-900"
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
+                  <path d="M12 3v13m0 0 4-4m-4 4-4-4M4 20h16" stroke="currentColor" strokeWidth="2" />
+                </svg>
+                Auszahlungskonto – Kartenzahlungen direkt auf Ihr Konto →
+              </a>
               <p className="mt-1 text-xs text-ink-400">
                 Fahrpreise gehen zu 100 % an Sie – wir berechnen nur die monatliche Gebühr.
               </p>
@@ -615,6 +625,7 @@ const ADMIN_NAV = [
   { href: "/admin", label: "Dashboard", icon: "M3 12l9-9 9 9M5 10v10h14V10" },
   { href: "/admin/fahrer", label: "Fahrer", icon: "M12 14a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 7a7 7 0 0 1 14 0" },
   { href: "/admin/preise", label: "Preise", icon: "M3 7h18M6 12h12M9 17h6" },
+  { href: "/admin/auszahlung", label: "Auszahlung", icon: "M3 7.5h18v9H3zM7 12h.01M12 12h5" },
   { href: "/admin/bewertungen", label: "Bewertungen", icon: "M12 2l2.95 6.94L22 9.97l-5.5 4.78L18.18 22 12 18.27 5.82 22l1.68-7.25L2 9.97l7.05-1.03Z" },
 ];
 

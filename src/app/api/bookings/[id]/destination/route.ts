@@ -5,10 +5,32 @@ import { getDispatcher } from "@/server/runtime";
 import { bookingDTO } from "@/server/serialize";
 import { getSession } from "@/lib/session";
 import { bookingRefWhereCustomer } from "@/lib/bookingRef";
+import { rateLimit } from "@/lib/ratelimit";
 
 export const dynamic = "force-dynamic";
 
-const place = z.object({ address: z.string().min(1), lat: z.number(), lng: z.number() });
+// Koordinaten muessen auf der Erde liegen. Ohne Grenzen landete jede
+// Fantasiezahl in der Streckenberechnung und erzeugte Preise aus dem Nichts.
+const place = z.object({
+  address: z.string().trim().min(1).max(300),
+  lat: z.number().finite().min(-90).max(90),
+  lng: z.number().finite().min(-180).max(180),
+});
+
+// Luftlinie in Kilometern (Haversine).
+function luftlinieKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371;
+  const bog = (g: number) => (g * Math.PI) / 180;
+  const dLat = bog(bLat - aLat);
+  const dLng = bog(bLng - aLng);
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(bog(aLat)) * Math.cos(bog(bLat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+// Weiter als das ist keine Taxifahrt mehr, sondern ein Tippfehler oder
+// Mutwille. Der Fahrgast soll in so einem Fall die Zentrale anrufen.
+const MAX_ENTFERNUNG_KM = 300;
 
 const schema = z
   .object({
@@ -34,6 +56,24 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (booking.status === "ABGESCHLOSSEN" || booking.status === "STORNIERT") {
     return NextResponse.json({ error: "Diese Fahrt kann nicht mehr geändert werden." }, { status: 409 });
   }
+  // Ist bereits abgerechnet, wuerde eine Zieländerung den Preis einer schon
+  // bezahlten Fahrt verschieben.
+  if (booking.paymentStatus === "BEZAHLT") {
+    return NextResponse.json(
+      { error: "Diese Fahrt ist bereits bezahlt und kann nicht mehr geändert werden." },
+      { status: 409 },
+    );
+  }
+  // Der Verfolgungs-Link wandert per SMS durch fremde Hände. Eine Handvoll
+  // Änderungen je Fahrt ist normal, hunderte sind es nicht - jede loest eine
+  // vollstaendige Neuberechnung der Strecke aus.
+  const takt = rateLimit(`ziel:${booking.id}`, 10, 30 * 60_000);
+  if (!takt.ok) {
+    return NextResponse.json(
+      { error: "Zu viele Zieländerungen. Bitte rufen Sie die Zentrale an." },
+      { status: 429 },
+    );
+  }
 
   let json: any;
   try {
@@ -45,6 +85,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!parsed.success) {
     return NextResponse.json(
       { error: "Bitte ein neues Ziel oder einen Zwischenstopp angeben.", details: parsed.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  // Plausibilitaet: das neue Ziel muss im Umkreis der Abholung liegen.
+  const zuWeit = [parsed.data.dest, parsed.data.addStop].some(
+    (p) => p && luftlinieKm(booking.pickupLat, booking.pickupLng, p.lat, p.lng) > MAX_ENTFERNUNG_KM,
+  );
+  if (zuWeit) {
+    return NextResponse.json(
+      { error: `Das Ziel liegt weiter als ${MAX_ENTFERNUNG_KM} km entfernt. Bitte rufen Sie die Zentrale an.` },
       { status: 400 },
     );
   }

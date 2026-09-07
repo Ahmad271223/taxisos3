@@ -41,7 +41,7 @@ export function collectFindings(env = process.env): GuardFinding[] {
   }
   if (!has(env.STRIPE_WEBHOOK_SECRET)) {
     f.push({
-      fatal: false, key: "STRIPE_WEBHOOK_SECRET",
+      fatal: true, key: "STRIPE_WEBHOOK_SECRET",
       problem: "Keine Stripe-Webhooks – Abo- und Auszahlungsstatus kommen verzögert.",
       fix: "Im Stripe-Dashboard einen Webhook auf /api/stripe/webhook anlegen und das Signaturgeheimnis eintragen.",
     });

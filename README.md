@@ -21,7 +21,7 @@ Läuft komplett im Browser, ohne App-Installation, auf Smartphone, Tablet und De
 - Der **nächstgelegene freie Fahrer** wird automatisch ermittelt (Luftlinie/Haversine)
 - 30-Sekunden-Annahmefenster – bei Ablehnung/Timeout geht der Auftrag automatisch
   an den nächsten Fahrer
-- Wird kein Fahrer gefunden, wird erneut zugewiesen, sobald ein Fahrer frei wird
+- Wird kein Fahrer gefunden, sucht das System bis zu 3 Minuten weiter (auch bei Fahrern, die in dieser Zeit frei werden); danach endet die Suche und der Fahrgast wird per SMS informiert
 
 **Fahrer**
 - Login, Status (Frei / Besetzt / Pause / Offline)

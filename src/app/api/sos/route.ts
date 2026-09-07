@@ -10,8 +10,8 @@ export const dynamic = "force-dynamic";
 
 const schema = z.object({
   bookingId: z.string().optional().nullable(),
-  lat: z.number().optional().nullable(),
-  lng: z.number().optional().nullable(),
+  lat: z.number().finite().min(-90).max(90).optional().nullable(),
+  lng: z.number().finite().min(-180).max(180).optional().nullable(),
   message: z.string().max(300).optional().nullable(),
 });
 

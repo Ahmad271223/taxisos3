@@ -13,8 +13,8 @@ async function ownZone(id: string, hostId: string) {
 
 const patchSchema = z.object({
   name: z.string().min(2).max(120).optional(),
-  lat: z.number().optional(),
-  lng: z.number().optional(),
+  lat: z.number().finite().min(-90).max(90).optional(),
+  lng: z.number().finite().min(-180).max(180).optional(),
   radiusMeters: z.number().int().min(30).max(5000).optional(),
   active: z.boolean().optional(),
 });
