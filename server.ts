@@ -18,6 +18,18 @@ import { scheduleDailyPlatformRate, scheduleFlightPolling, scheduleRecurringRide
 const dev = process.env.NODE_ENV !== "production";
 const port = Number(process.env.PORT ?? 3000);
 
+// Erster Deploy auf Render, bevor die eigene Domain angebunden ist: Render
+// stellt die oeffentliche Adresse als RENDER_EXTERNAL_URL bereit. Fehlen
+// APP_BASE_URL/ALLOWED_ORIGINS, werden sie daraus abgeleitet - sonst wuerde
+// die Startsperre den allerersten Start verweigern, obwohl die Adresse
+// bekannt ist. Sobald APP_BASE_URL gesetzt ist (eigene Domain), gilt diese.
+if (!process.env.APP_BASE_URL && process.env.RENDER_EXTERNAL_URL) {
+  process.env.APP_BASE_URL = process.env.RENDER_EXTERNAL_URL;
+}
+if (!process.env.ALLOWED_ORIGINS && process.env.APP_BASE_URL) {
+  process.env.ALLOWED_ORIGINS = process.env.APP_BASE_URL;
+}
+
 // Vor allem anderen: darf dieser Server ueberhaupt im Echtbetrieb laufen?
 assertLiveReady();
 
