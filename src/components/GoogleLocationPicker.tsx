@@ -3,8 +3,8 @@
 // Orts-Pin auf der Google-Karte: tippen setzt die Nadel, ziehen verschiebt
 // sie. Gleiche Schnittstelle wie LocationPicker (Leaflet).
 
-import { useEffect, useRef } from "react";
-import { loadGoogleMaps } from "./googleMapsLoader";
+import { useEffect, useRef, useState } from "react";
+import { loadGoogleMaps, beiGoogleMapsAblehnung, ABLEHNUNGS_HINWEIS } from "./googleMapsLoader";
 import { PIN_HTML } from "./markerHtml";
 
 const MAP_ID = process.env.NEXT_PUBLIC_GOOGLE_MAP_ID || "DEMO_MAP_ID";
@@ -23,9 +23,12 @@ export default function GoogleLocationPicker({
   const pinRef = useRef<any>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const [fehler, setFehler] = useState<string | null>(null);
 
   useEffect(() => {
     let abgebrochen = false;
+    // Abgelehnter Schluessel -> Hinweis statt Absturz (siehe GoogleMap.tsx).
+    const abmelden = beiGoogleMapsAblehnung(() => setFehler(ABLEHNUNGS_HINWEIS));
     loadGoogleMaps()
       .then((g) => {
         if (abgebrochen || !divRef.current) return;
@@ -46,8 +49,11 @@ export default function GoogleLocationPicker({
         });
         mapRef.current = map;
       })
-      .catch((e) => console.error("Google Maps:", e?.message ?? e));
-    return () => { abgebrochen = true; };
+      .catch((e) => {
+        console.error("Google Maps:", e?.message ?? e);
+        setFehler("Karte konnte nicht geladen werden.");
+      });
+    return () => { abgebrochen = true; abmelden(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -55,7 +61,18 @@ export default function GoogleLocationPicker({
   useEffect(() => {
     const map = mapRef.current;
     const g = window.google;
-    if (!map || !g) return;
+    if (!map || !g || fehler) return;
+    try {
+      setzeNadel();
+    } catch (e: any) {
+      console.error("Google Maps (Nadel):", e?.message ?? e);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, fehler]);
+
+  function setzeNadel() {
+    const map = mapRef.current;
+    const g = window.google;
     if (!value) {
       if (pinRef.current) { pinRef.current.map = null; pinRef.current = null; }
       return;
@@ -70,7 +87,7 @@ export default function GoogleLocationPicker({
         content: huelle.firstElementChild ?? huelle,
         gmpDraggable: true,
       });
-      pin.addListener("dragend", () => {
+      pin.addEventListener("dragend", () => {
         const p = pin.position;
         if (!p) return;
         const lat = typeof p.lat === "function" ? p.lat() : p.lat;
@@ -81,7 +98,18 @@ export default function GoogleLocationPicker({
     } else {
       pinRef.current.position = pos;
     }
-  }, [value]);
+  }
 
+  if (fehler) {
+    return (
+      <div
+        className="flex h-full w-full items-center justify-center rounded-xl bg-ink-50 p-4 text-center text-sm text-ink-500"
+        role="alert"
+        data-testid="google-map-error"
+      >
+        {fehler}
+      </div>
+    );
+  }
   return <div ref={divRef} style={{ height: "100%", width: "100%" }} data-testid="google-location-picker" />;
 }
