@@ -46,9 +46,20 @@ export async function GET() {
 
   // Dokument-Ablauf-Ampel: Nachweise mit Gültigkeitsdatum zu Buchungen dieser
   // Firma; alles, was bald abläuft oder abgelaufen ist, kommt in die Warnungen.
+  //
+  // Ein Nachweis hängt nicht immer an einer einzelnen Fahrt: bei einer
+  // Serienfahrt (Dialyse, Reha) wird die Verordnung an die SERIE gehängt.
+  // Solche Dokumente fielen hier bisher heraus – die Verordnung war hochgeladen,
+  // tauchte in der Prüfliste der Zentrale aber nie auf und lief unbemerkt ab.
   const validityDocs = await prisma.medicalDocument.findMany({
-    where: { validUntil: { not: null }, booking: { companyId } },
-    select: { id: true, kind: true, fileName: true, validUntil: true, bookingId: true },
+    where: {
+      validUntil: { not: null },
+      OR: [
+        { booking: { companyId } },
+        { recurring: { bookings: { some: { companyId } } } },
+      ],
+    },
+    select: { id: true, kind: true, fileName: true, validUntil: true, bookingId: true, recurringId: true },
   });
   const warnings = validityDocs
     .map((d) => ({ ...d, ...documentValidity(d.validUntil) }))

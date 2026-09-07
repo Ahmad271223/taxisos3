@@ -108,10 +108,21 @@ function main() {
   check("Grund wird genannt", /JEDER Website/i.test(offen.out));
 
   section("9) Reine Hinweise blockieren nicht");
-  const nurWarnung = startServer({ ...ECHT, STRIPE_WEBHOOK_SECRET: "", AVIATIONSTACK_KEY: "" });
+  // AVIATIONSTACK_KEY ist ein echter Hinweis: ohne ihn laeuft der Betrieb mit
+  // Demo-Flugdaten weiter. STRIPE_WEBHOOK_SECRET gehoert seit dem 07.09.2026
+  // NICHT mehr in diese Gruppe – siehe Abschnitt 9b.
+  const nurWarnung = startServer({ ...ECHT, AVIATIONSTACK_KEY: "" });
   check("Start freigegeben", nurWarnung.out.includes("START-FREIGEGEBEN"), nurWarnung.code);
   check("Einschränkungen werden gemeldet", /Einschränkungen/i.test(nurWarnung.out));
-  check("Webhook-Hinweis erscheint", /STRIPE_WEBHOOK_SECRET/.test(nurWarnung.out));
+
+  section("9b) Fehlendes Webhook-Geheimnis hält den Start an");
+  // Ohne dieses Geheimnis erfaehrt die App nichts von Stripe: keine bezahlten
+  // Fahrten, keine fehlgeschlagenen Karten und vor allem keine Freischaltung
+  // der Auszahlungskonten (account.updated). Ein stiller Start waere schlimmer
+  // als ein ehrlicher Abbruch.
+  const ohneWebhook = startServer({ ...ECHT, STRIPE_WEBHOOK_SECRET: "" });
+  check("Start abgebrochen", ohneWebhook.code === 1, ohneWebhook.code);
+  check("Webhook-Grund wird genannt", /STRIPE_WEBHOOK_SECRET/.test(ohneWebhook.out));
 
   section("10) Der Testbetrieb wird nicht behindert");
   const dev = startServer({ ...ECHT, NODE_ENV: "development", STRIPE_SECRET_KEY: "sk_test_abc", ENABLE_SIMULATOR: "1" });

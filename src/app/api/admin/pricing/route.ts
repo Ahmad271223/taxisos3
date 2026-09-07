@@ -10,7 +10,15 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
   let pricing = await prisma.pricing.findUnique({ where: { companyId: session.companyId } });
   if (!pricing) {
-    pricing = await prisma.pricing.create({ data: { companyId: session.companyId } });
+    // Ein GET soll eigentlich nichts aendern. Solange der Datensatz beim
+    // ersten Oeffnen entstehen muss, wenigstens ohne Rennen: zwei gleichzeitige
+    // Aufrufe liefen vorher beide in create und der zweite scheiterte an der
+    // Eindeutigkeit.
+    pricing = await prisma.pricing.upsert({
+      where: { companyId: session.companyId },
+      create: { companyId: session.companyId },
+      update: {},
+    });
   }
   return NextResponse.json({ pricing });
 }

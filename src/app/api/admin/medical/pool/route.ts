@@ -2,16 +2,46 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
-import { medicalLabel } from "@/lib/medical";
 import { vehicleClass as vehicleClassInfo } from "@/lib/vehicleClasses";
 import { getDispatcher } from "@/server/runtime";
 import { logAccess } from "@/lib/accessLog";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Grobe Lage aus einer Anschrift: Postleitzahl und Ort, ohne Strasse und
+ * Hausnummer. "Musterstrasse 12, 30169 Hannover" wird zu "30169 Hannover".
+ *
+ * Fuer die Entscheidung "kann und will ich diese Fahrt fahren?" reicht das
+ * vollstaendig aus. Die genaue Anschrift bekommt erst, wer die Fahrt
+ * tatsaechlich uebernimmt.
+ */
+function grobeLage(adresse: string | null | undefined): string {
+  const a = (adresse ?? "").trim();
+  if (!a) return "Raum Hannover";
+  const plzOrt = a.match(/\b\d{5}\s+[^,]+/);
+  if (plzOrt) return plzOrt[0].trim();
+  const teile = a.split(",").map((s) => s.trim()).filter(Boolean);
+  // Ohne Postleitzahl: den letzten Bestandteil nehmen, aber nie den ersten
+  // (der ist die Strasse).
+  if (teile.length > 1) return teile[teile.length - 1];
+  return "Raum Hannover";
+}
+
 // Zuweisungs-Pool: offene Krankenfahrten/Vorbestellungen (dispatchMode ADMIN),
 // die noch keiner Zentrale zugewiesen sind. Sichtbar für ALLE Taxi-Zentralen –
 // die erste, die einen Fahrer zuweist, bekommt die Fahrt.
+//
+// DATENSCHUTZ (07.09.2026): Diese Liste geht an FREMDE Unternehmen, die die
+// Fahrt noch gar nicht haben. Frueher standen darin Patientenname, die Art der
+// Krankenfahrt (Dialyse, Onkologie ...), der Name der Einrichtung und beide
+// vollstaendigen Anschriften. Damit konnte jede angemeldete Zentrale
+// Gesundheitsdaten namentlich benannter Menschen mitlesen, ohne je etwas mit
+// der Fahrt zu tun zu haben - Art. 9 DSGVO, besondere Kategorie.
+//
+// Jetzt enthaelt der Pool nur noch, was fuer die Entscheidung noetig ist:
+// grobe Lage, Zeit, Entfernung und die Anforderungen ans Fahrzeug. Wer
+// zuweist, sieht ueber die normale Auftragsansicht sofort alles Weitere.
 export async function GET() {
   const session = requireRole("ADMIN");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
@@ -20,24 +50,21 @@ export async function GET() {
     where: { dispatchMode: "ADMIN", status: "OFFEN", driverId: null },
     orderBy: [{ scheduledAt: "asc" }, { createdAt: "asc" }],
     take: 100,
-    include: { institution: { select: { name: true, type: true } } },
   });
 
-  // Schlanke, datensparsame Pool-Ansicht (keine Versicherungs-/Kostenträgerdaten).
   const pool = rows.map((b) => ({
     id: b.id,
-    patientName: b.patientName ?? b.customerName,
-    institution: b.institution?.name ?? "Einrichtung",
-    institutionType: b.institution?.type ?? null,
-    medicalType: b.medicalType ?? null,
-    medicalLabel: medicalLabel(b.medicalType),
+    // Kein Name, keine Einrichtung, keine Fahrtart: das sind Gesundheitsdaten
+    // einer bestimmbaren Person und gehen fremde Zentralen nichts an.
+    pickupArea: grobeLage(b.pickupAddress),
+    destArea: grobeLage(b.destAddress),
+    // Anforderungen ans Fahrzeug bleiben - ohne sie kann niemand entscheiden,
+    // ob er die Fahrt ueberhaupt bedienen kann.
     vehicleClass: b.vehicleClass,
     vehicleClassLabel: vehicleClassInfo(b.vehicleClass).label,
     vehicleClassIcon: vehicleClassInfo(b.vehicleClass).icon,
     requiresRamp: b.requiresRamp ?? false,
     requiresStretcher: b.requiresStretcher ?? false,
-    pickupAddress: b.pickupAddress,
-    destAddress: b.destAddress,
     scheduledAt: b.scheduledAt ? b.scheduledAt.toISOString() : null,
     isScheduled: b.isScheduled,
     distanceMeters: b.distanceMeters ?? null,

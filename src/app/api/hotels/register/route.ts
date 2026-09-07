@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, signSession, authConfigured, HOTEL_COOKIE } from "@/lib/auth";
@@ -8,12 +9,18 @@ export const dynamic = "force-dynamic";
 const schema = z.object({
   name: z.string().min(2),
   email: z.string().email(),
-  password: z.string().min(6),
+  // Ein Hotelkonto fuehrt Gaestestammdaten und loest Fahrten aus.
+  password: z.string().min(8),
   phone: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
 });
 
 export async function POST(req: Request) {
+  // Ohne Bremse liessen sich massenhaft Hotelkonten anlegen.
+  const ip = clientIp(req);
+  if (ip && !rateLimit(`register-hotel:${ip}`, 5, 10 * 60_000).ok) {
+    return NextResponse.json({ error: "Zu viele Registrierungen. Bitte später erneut." }, { status: 429 });
+  }
   let json: any;
   try {
     json = await req.json();

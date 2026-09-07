@@ -43,12 +43,12 @@ export default async function MobilityLanding({ params }: { params: { code: stri
             <div className="mt-4 grid gap-1 rounded-2xl bg-ink-50 p-4 text-sm text-ink-600">
               <p className="font-bold text-ink-900">So funktioniert&apos;s</p>
               <p>Adresse eingeben, Taxi kommt – Sie zahlen nichts. Die Kosten trägt das Firmenkonto.</p>
-              {(remaining.remainingRides != null || cc.perRideCents != null) && (
-                <p className="mt-1 text-xs text-ink-500">
-                  {remaining.remainingRides != null && <>Noch {remaining.remainingRides} Fahrt(en) verfügbar. </>}
-                  {cc.perRideCents != null && <>Bis {euro(cc.perRideCents)} pro Fahrt gedeckt.</>}
-                </p>
-              )}
+              {/* Diese Seite ist ÖFFENTLICH – der Code hängt auf einem Aufsteller.
+                  Restbudget, Restfahrten und das Limit je Fahrt standen hier
+                  früher im Klartext; wer den Aufsteller fotografiert, konnte
+                  daraus die Ausgaben des Unternehmens ablesen. Für den Fahrgast
+                  zählt nur, dass der Code gilt. */}
+              <p className="mt-1 text-xs text-ink-500">Gültig – die Kosten übernimmt das Firmenkonto.</p>
             </div>
 
             <Link href={`/buchen?corp=${cc.code}`} data-testid="corp-book" className="btn-primary mt-5 inline-block w-full">

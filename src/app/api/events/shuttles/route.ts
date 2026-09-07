@@ -1,4 +1,11 @@
 import { NextResponse } from "next/server";
+import { portalCan } from "@/lib/portalRoles";
+
+// Unterkonten eines Veranstalters (portalRole) hatten bisher dieselben Rechte
+// wie der Inhaber: die Sitzung laeuft aus technischen Gruenden unter der ID
+// des Hauptkontos, und geprueft wurde die Rolle nirgends. Eine Kraft mit
+// der Rolle "Buchhaltung" konnte damit Rabattcodes anlegen und Fahrten
+// buchen. Jetzt entscheidet portalCan() ueber jeden schreibenden Zugriff.
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
@@ -24,7 +31,8 @@ const schema = z.object({
   label: z.string().min(1).max(120),
   fromAddress: z.string().max(200).optional().nullable(),
   toAddress: z.string().max(200).optional().nullable(),
-  time: z.string().regex(/^\d{2}:\d{2}$/),
+  // Vorher bestand auch "99:99" diese Pruefung.
+  time: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, "Bitte eine Uhrzeit zwischen 00:00 und 23:59 angeben."),
   vehicleClass: z.string().max(30).optional().nullable(),
   seats: z.number().int().min(1).max(99).optional().nullable(),
 });
@@ -32,6 +40,9 @@ const schema = z.object({
 export async function POST(req: Request) {
   const session = requireRole("EVENT");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  if (!portalCan(session.portalRole, "settings")) {
+    return NextResponse.json({ error: "Ihre Rolle darf diese Einstellungen nicht ändern." }, { status: 403 });
+  }
   let json: any;
   try {
     json = await req.json();

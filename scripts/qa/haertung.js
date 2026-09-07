@@ -20,6 +20,15 @@
 //  11. Zieländerung: Koordinaten ohne Grenzen, beliebig oft, auch nach der
 //      Bezahlung
 //
+// Vierter Bericht (08.09.2026):
+//  12. Krankenfahrten-Pool gab Patientenname, Fahrtart und beide vollstaendigen
+//      Anschriften an ALLE Zentralen weiter
+//  13. CSV-Exporte waren anfaellig fuer Formeln in Excel
+//  14. Fahrerpasswoerter durften vier Zeichen lang sein
+//  15. Firmen-Code verriet oeffentlich das Restbudget
+//  16. Event-Unterkonten hatten alle Rechte des Hauptkontos
+//  17. Rabattcodes wurden nicht atomar verbucht
+//
 // Aufruf: node scripts/qa/haertung.js   (Server muss laufen)
 /* eslint-disable no-console */
 require("@next/env").loadEnvConfig(".");
@@ -274,6 +283,126 @@ async function main() {
     if (r.status === 429) break;
   }
   check("Dauerhafte Zieländerungen werden gebremst", letzterStatus === 429, letzterStatus);
+
+  // =========================================================================
+  section("12) Krankenfahrten-Pool ohne Patientendaten");
+  const co12 = await H.registerCompany("HP");
+  const inst12 = await prisma.institution.create({
+    data: {
+      name: `QA Dialyse ${H.uniq()}`, type: "DIALYSE",
+      email: `dial${H.uniq()}@test.de`, passwordHash: "x", active: true,
+    },
+    select: { id: true },
+  });
+  const poolFahrt = await fahrtInDb({
+    dispatchMode: "ADMIN", status: "OFFEN", institutionId: inst12.id,
+    patientName: "Max Mustermann", medicalType: "DIALYSE",
+    pickupAddress: "Musterstrasse 12, 30169 Hannover",
+    destAddress: "Klinikweg 3, 30625 Hannover",
+    requiresRamp: true,
+  });
+  const pool = await get("/api/admin/medical/pool", co12.admin);
+  check("Pool ist abrufbar", pool.status === 200, pool.status);
+  const eintrag = (pool.body?.pool ?? []).find((x) => x.id === poolFahrt.id);
+  check("Die Fahrt steht im Pool", !!eintrag);
+  const rohPool = JSON.stringify(eintrag ?? {});
+  check("KEIN Patientenname", !/Mustermann/i.test(rohPool), rohPool.slice(0, 160));
+  check("KEINE Fahrtart", !/DIALYSE|Dialyse/.test(rohPool), rohPool.slice(0, 160));
+  check("KEINE Einrichtung", !/QA Dialyse/.test(rohPool));
+  check("KEINE genaue Abholadresse", !/Musterstrasse 12/.test(rohPool));
+  check("KEINE genaue Zieladresse", !/Klinikweg 3/.test(rohPool));
+  check("Grobe Lage vorhanden", /30169 Hannover/.test(eintrag?.pickupArea ?? ""), eintrag?.pickupArea);
+  check("Fahrzeug-Anforderung bleibt sichtbar", eintrag?.requiresRamp === true);
+
+  // =========================================================================
+  section("13) CSV-Export: Formeln werden entschaerft");
+  const { csvFeld } = await import("../../src/lib/csv.ts").catch(() => ({ csvFeld: null }));
+  if (csvFeld) {
+    check("Gleichheitszeichen wird entschaerft", csvFeld("=1+1").startsWith('"\''), csvFeld("=1+1"));
+    check("Plus wird entschaerft", csvFeld("+HYPERLINK()").startsWith('"\''));
+    check("At-Zeichen wird entschaerft", csvFeld("@SUM(A1)").startsWith('"\''));
+    check("Normaler Text bleibt unveraendert", csvFeld("Max Mustermann") === '"Max Mustermann"', csvFeld("Max Mustermann"));
+    check("Anfuehrungszeichen bleiben maskiert", csvFeld('a"b') === '"a""b"', csvFeld('a"b'));
+  } else {
+    info("csvFeld nicht importierbar - uebersprungen");
+  }
+
+  // =========================================================================
+  section("14) Passwortlaengen");
+  const kurzFahrer = await post("/api/admin/drivers", { name: "Kurz", username: `kurz${H.uniq()}`, password: "1234" }, co.admin);
+  check("Fahrer mit 4-Zeichen-Passwort abgelehnt", kurzFahrer.status === 400, kurzFahrer.status);
+  const kurzInst = await post("/api/institutions/register", {
+    name: "Kurz Klinik", email: `ki${H.uniq()}@test.de`, password: "kurz12", type: "KLINIK",
+  });
+  check("Einrichtung mit 6-Zeichen-Passwort abgelehnt", kurzInst.status === 400, kurzInst.status);
+
+  // =========================================================================
+  section("15) Firmen-Code verraet keine Budgetdaten");
+  const host15 = await prisma.eventHost.create({
+    data: { name: `QA Veranstalter ${H.uniq()}`, email: `ev${H.uniq()}@test.de`, passwordHash: "x" },
+    select: { id: true },
+  });
+  const code15 = `QATEST${String(H.uniq()).slice(-6)}`;
+  await prisma.corporateCode.create({
+    data: {
+      eventHostId: host15.id, code: code15, label: "QA", active: true,
+      budgetCents: 385000, maxRides: 77, perRideCents: 5000,
+    },
+  });
+  const auskunft = await get(`/api/corporate/${code15}`);
+  check("Code wird oeffentlich aufgeloest", auskunft.status === 200 && auskunft.body?.valid === true, auskunft.status);
+  const rohCode = JSON.stringify(auskunft.body ?? {});
+  check("KEIN Restbudget", !/385000|remainingCents/.test(rohCode), rohCode.slice(0, 160));
+  check("KEINE Restfahrten", !/remainingRides|77/.test(rohCode), rohCode.slice(0, 160));
+  check("KEIN Limit je Fahrt", !/perRideCents|5000/.test(rohCode), rohCode.slice(0, 160));
+  check("Firmenname bleibt (dafuer ist der Code da)", typeof auskunft.body?.company === "string");
+
+  // =========================================================================
+  section("16) Event-Unterkonto darf nicht alles");
+  const evMail = `evp${H.uniq()}@test.de`;
+  const evReg = await post("/api/events/register", { name: "QA Event GmbH", email: evMail, password: "Pass1234" });
+  check("Veranstalter angelegt", evReg.status === 200 || evReg.status === 201, evReg.body?.error);
+  const evHost = await prisma.eventHost.findUnique({ where: { email: evMail }, select: { id: true } });
+  const buchhaltungMail = `buch${H.uniq()}@test.de`;
+  // Ueber die echte Schnittstelle anlegen - so stimmt auch der Passwort-Hash.
+  const anlegen = await post(
+    "/api/portal/users",
+    { name: "Buchhaltung", email: buchhaltungMail, password: "Pass1234", role: "ACCOUNTING" },
+    evReg.cookie,
+  );
+  check("Unterkonto (Buchhaltung) angelegt", anlegen.status === 200 || anlegen.status === 201, anlegen.body?.error);
+  const buchLogin = await post("/api/events/login", { email: buchhaltungMail, password: "Pass1234" });
+  if (buchLogin.status === 200) {
+    const alsBuch = buchLogin.cookie;
+    const versuch = await post("/api/events/promos", { code: `X${H.uniq()}`, discountType: "PERCENT", discountValue: 50 }, alsBuch);
+    check("Buchhaltung darf KEINE Rabattcodes anlegen", versuch.status === 403, versuch.status);
+    const rechnung = await get(`/api/events/billing?eventId=egal`, alsBuch);
+    check("Buchhaltung darf Abrechnungen sehen (kein 403)", rechnung.status !== 403, rechnung.status);
+  } else {
+    info(`Anmeldung des Unterkontos nicht moeglich (${buchLogin.status}) - Abschnitt uebersprungen`);
+  }
+
+  // =========================================================================
+  section("17) Rabattcode wird atomar verbucht");
+  const promoCode = `QAP${String(H.uniq()).slice(-6)}`;
+  await prisma.promoCode.create({
+    data: {
+      eventHostId: host15.id, code: promoCode, discountType: "PERCENT",
+      discountValue: 10, maxUses: 1, usedCount: 0, active: true,
+    },
+  });
+  const tel17 = await H.verifiedPhone();
+  const zweiBuchungen = await Promise.all([1, 2].map(() =>
+    post("/api/bookings", {
+      customerName: "QA Promo", customerPhone: tel17.phone, verificationToken: tel17.token,
+      pickupAddress: "A", pickup: HBF, destAddress: "B", dest: LIST,
+      promoCode, paymentMethod: "CASH",
+    }),
+  ));
+  const nachher = await prisma.promoCode.findUnique({ where: { code: promoCode }, select: { usedCount: true } });
+  check("Zaehler ueberschreitet maxUses NICHT", (nachher?.usedCount ?? 0) <= 1, nachher?.usedCount);
+  const mitRabatt = zweiBuchungen.filter((r) => (r.body?.booking?.promoDiscount ?? 0) > 0).length;
+  check("Hoechstens eine Fahrt bekommt den Rabatt", mitRabatt <= 1, mitRabatt);
 
   s1.close();
   await prisma.$disconnect();

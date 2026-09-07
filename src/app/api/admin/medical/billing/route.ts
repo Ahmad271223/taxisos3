@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { csvFeld } from "@/lib/csv";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
 import { logAccess } from "@/lib/accessLog";
@@ -68,7 +69,7 @@ export async function GET(req: Request) {
   };
 
   if (format === "csv") {
-    const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const esc = csvFeld;
     const header = ["Datum", "Patient", "Fahrtart", "Kostenträger", "Vers.-Nr.", "Strecke", "km", "Fahrpreis (EUR)"].join(";");
     const rows = lines.map((l) =>
       [

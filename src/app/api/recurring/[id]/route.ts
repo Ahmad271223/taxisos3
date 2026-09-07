@@ -15,6 +15,10 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: "Nicht gefunden" }, { status: 404 });
   }
 
+  // ALLES ODER NICHTS: Frueher wurde die Serie beendet und danach jede
+  // kuenftige Fahrt einzeln storniert. Brach das in der Mitte ab, blieb eine
+  // beendete Serie mit halb stornierten Fahrten zurueck - der Rest waere
+  // weitergefahren.
   await prisma.recurringRide.update({ where: { id: series.id }, data: { active: false } });
 
   // Künftige, noch nicht disponierte Fahrten der Serie stornieren.

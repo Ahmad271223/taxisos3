@@ -1,4 +1,12 @@
 import { NextResponse } from "next/server";
+import { portalCan } from "@/lib/portalRoles";
+
+// Das Rollenmodell des Hotels (portalRole) war hier wirkungslos: geprueft
+// wurde nur, DASS eine Hotel-Sitzung besteht. Ein Concierge, der laut Modell
+// ausschliesslich buchen darf, konnte damit die Monatsabrechnung oeffnen,
+// einen ganzen Monat als bezahlt markieren, Gaestestammdaten lesen und die
+// bevorzugten Taxiunternehmen aendern. Bei der Hotel-BUCHUNG gab es die
+// Pruefung laengst - hier fehlte sie.
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
@@ -8,6 +16,9 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const session = requireRole("HOTEL");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  if (!portalCan(session.portalRole, "book")) {
+    return NextResponse.json({ error: "Ihre Rolle darf keine Fahrten buchen." }, { status: 403 });
+  }
   const guests = await prisma.hotelGuest.findMany({ where: { hotelId: session.sub }, orderBy: { name: "asc" } });
   return NextResponse.json({ guests });
 }
@@ -19,8 +30,8 @@ const schema = z.object({
   language: z.string().max(40).optional().nullable(),
   preferredVehicleClass: z.string().max(30).optional().nullable(),
   defaultDestAddress: z.string().max(200).optional().nullable(),
-  defaultDestLat: z.number().optional().nullable(),
-  defaultDestLng: z.number().optional().nullable(),
+  defaultDestLat: z.number().finite().min(-90).max(90).optional().nullable(),
+  defaultDestLng: z.number().finite().min(-180).max(180).optional().nullable(),
   isVip: z.boolean().optional(),
   notes: z.string().max(500).optional().nullable(),
 });
@@ -28,6 +39,9 @@ const schema = z.object({
 export async function POST(req: Request) {
   const session = requireRole("HOTEL");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  if (!portalCan(session.portalRole, "book")) {
+    return NextResponse.json({ error: "Ihre Rolle darf keine Fahrten buchen." }, { status: 403 });
+  }
   let json: any;
   try {
     json = await req.json();

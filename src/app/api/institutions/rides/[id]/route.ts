@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { einrichtungAktiv } from "@/lib/kontoAktiv";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
@@ -41,6 +42,14 @@ async function ownedBooking(bookingId: string, instId: string) {
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   const session = requireRole("INSTITUTION");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  // Eine Sperre muss SOFORT wirken, nicht erst wenn der Ausweis nach sieben
+  // Tagen ablaeuft - hier haengen Patientenakten dran.
+  if (!(await einrichtungAktiv(session.sub))) {
+    return NextResponse.json(
+      { error: "Ihr Zugang ist derzeit gesperrt. Bitte wenden Sie sich an die Zentrale.", code: "INSTITUTION_INACTIVE" },
+      { status: 403 },
+    );
+  }
   const b = await ownedBooking(params.id, session.sub);
   if (!b) return NextResponse.json({ error: "Fahrt nicht gefunden" }, { status: 404 });
   if (notEditable(b)) return NextResponse.json({ error: "Fahrt ist bereits unterwegs oder abgeschlossen – keine Änderung möglich." }, { status: 409 });
@@ -109,6 +118,14 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
   const session = requireRole("INSTITUTION");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  // Eine Sperre muss SOFORT wirken, nicht erst wenn der Ausweis nach sieben
+  // Tagen ablaeuft - hier haengen Patientenakten dran.
+  if (!(await einrichtungAktiv(session.sub))) {
+    return NextResponse.json(
+      { error: "Ihr Zugang ist derzeit gesperrt. Bitte wenden Sie sich an die Zentrale.", code: "INSTITUTION_INACTIVE" },
+      { status: 403 },
+    );
+  }
   const b = await ownedBooking(params.id, session.sub);
   if (!b) return NextResponse.json({ error: "Fahrt nicht gefunden" }, { status: 404 });
   if (notEditable(b)) return NextResponse.json({ error: "Fahrt ist bereits unterwegs oder abgeschlossen – keine Stornierung möglich." }, { status: 409 });

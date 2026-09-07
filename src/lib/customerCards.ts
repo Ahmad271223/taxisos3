@@ -6,7 +6,7 @@
 // zu speichern.
 
 import { prisma } from "./prisma";
-import { createStripeCustomer, getCardInfo, detachCard } from "./stripe";
+import { paymentMethodOwner, createStripeCustomer, getCardInfo, detachCard } from "./stripe";
 
 export interface CardDTO {
   id: string;
@@ -74,8 +74,16 @@ export async function ensureStripeCustomer(customerId: string): Promise<string |
     console.error(`Zahlungskonto fuer Kunde ${c.id} konnte nicht angelegt werden:`, created.error ?? "unbekannt");
     return null;
   }
-  await prisma.customer.update({ where: { id: c.id }, data: { stripeCustomerId: created.customerId } });
-  return created.customerId;
+  // Bedingtes Schreiben (siehe ensureCompanyCustomer): bei zwei gleichzeitigen
+  // Anfragen darf nicht der eine Stripe-Kunde den anderen ueberschreiben -
+  // sonst haengen gespeicherte Karten am einen und die Belastungen am anderen.
+  const gesetzt = await prisma.customer.updateMany({
+    where: { id: c.id, stripeCustomerId: null },
+    data: { stripeCustomerId: created.customerId },
+  });
+  if (gesetzt.count === 1) return created.customerId;
+  const jetzt = await prisma.customer.findUnique({ where: { id: c.id }, select: { stripeCustomerId: true } });
+  return jetzt?.stripeCustomerId ?? created.customerId;
 }
 
 // Karten eines Kunden (Standardkarte zuerst).
@@ -92,6 +100,19 @@ export async function listCards(customerId: string): Promise<CardDTO[]> {
 export async function saveCard(customerId: string, paymentMethodId: string): Promise<CardDTO | null> {
   const existing = await prisma.customerCard.findUnique({ where: { stripePaymentMethodId: paymentMethodId } });
   if (existing) return cardDTO(existing);
+
+  // BESITZ PRUEFEN: Die Kennung der Zahlungsmethode kommt aus dem Browser. Wer
+  // eine fremde kennt, konnte sie sich bisher einfach eintragen lassen - wir
+  // haben nur unsere EIGENE Datenbank befragt. Stripe muss bestaetigen, dass
+  // die Karte wirklich am Zahlungskonto dieses Fahrgasts haengt.
+  const eigner = await paymentMethodOwner(paymentMethodId);
+  if (eigner !== undefined) {
+    const c = await prisma.customer.findUnique({ where: { id: customerId }, select: { stripeCustomerId: true } });
+    if (!c?.stripeCustomerId || eigner !== c.stripeCustomerId) {
+      console.warn(`Zahlungsmethode ${paymentMethodId} gehoert nicht zu Kunde ${customerId} – abgelehnt.`);
+      return null;
+    }
+  }
 
   const info = await getCardInfo(paymentMethodId);
   if (!info) return null;
@@ -140,7 +161,15 @@ export async function removeCard(customerId: string, cardId: string): Promise<{ 
     return { ok: false, reason: "Diese Karte wird noch für eine offene Fahrt benötigt." };
   }
 
-  await detachCard(card.stripePaymentMethodId);
+  // Ergebnis pruefen: Frueher wurde die Karte lokal auch dann entfernt, wenn
+  // Stripe sie NICHT geloest hat. Danach zeigte die App "entfernt", waehrend
+  // die Zahlungsmethode bei Stripe weiter am Kunden hing - unsauber gegenueber
+  // dem Loeschverlangen des Fahrgasts (Art. 17 DSGVO) und spaeter nicht mehr
+  // aufloesbar, weil wir die Vorgangsnummer nicht mehr kennen.
+  const geloest = await detachCard(card.stripePaymentMethodId);
+  if (!geloest) {
+    return { ok: false, reason: "Die Karte konnte beim Zahlungsdienstleister nicht entfernt werden. Bitte später erneut versuchen." };
+  }
   await prisma.customerCard.delete({ where: { id: cardId } });
 
   if (card.isDefault) {

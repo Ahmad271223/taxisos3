@@ -90,7 +90,21 @@ export async function POST() {
       return NextResponse.json({ error: created.error ?? "Konto konnte nicht angelegt werden." }, { status: 502 });
     }
     accountId = created.accountId;
-    await prisma.company.update({ where: { id: company.id }, data: { stripeAccountId: accountId } });
+    // Bedingtes Schreiben: Zwei gleichzeitige Anfragen legten sonst zwei
+    // Stripe-Konten an, von denen nur eines gespeichert wurde - das andere
+    // blieb als verwaistes Auszahlungskonto bei Stripe zurueck. Gewinnt eine
+    // andere Anfrage, uebernehmen wir deren Konto.
+    const gesetzt = await prisma.company.updateMany({
+      where: { id: company.id, stripeAccountId: null },
+      data: { stripeAccountId: accountId },
+    });
+    if (gesetzt.count !== 1) {
+      const jetzt = await prisma.company.findUnique({
+        where: { id: company.id },
+        select: { stripeAccountId: true },
+      });
+      accountId = jetzt?.stripeAccountId ?? accountId;
+    }
   }
 
   const base = baseUrl();

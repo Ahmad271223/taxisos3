@@ -62,9 +62,15 @@ async function main() {
 
   const vorher = positionen.all().length;
   // Fahrer bewegt sich Richtung Kunde.
+  //
+  // Abstand > 1 Sekunde: Seit dem 07.09.2026 nimmt der Echtzeitkanal hoechstens
+  // EINE Position je Sekunde und Verbindung an (Schutz gegen Fluten). Mit den
+  // frueheren 700 ms fiel jede zweite Meldung genau dieser Drosselung zum
+  // Opfer - der Test mass damit das alte Verhalten, nicht einen Fehler. Echte
+  // Fahrer-Apps senden ohnehin alle 3 bis 5 Sekunden.
   for (const p of [WEIT, MITTE, NAH]) {
     dsock.emit("driver:location", { lat: p.lat, lng: p.lng });
-    await sleep(700);
+    await sleep(1200);
   }
   const empfangen = positionen.all().slice(vorher);
   check("Kunde empfängt Positionen schon auf der Anfahrt", empfangen.length >= 3, empfangen.length);

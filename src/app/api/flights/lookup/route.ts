@@ -13,9 +13,15 @@ const schema = z.object({
 
 export async function POST(req: Request) {
   const ip = clientIp(req);
-  if (ip) {
-    const r = rateLimit(`flight:ip:${ip}`, 40, 10 * 60_000);
-    if (!r.ok) return NextResponse.json({ error: "Zu viele Abfragen. Bitte später erneut." }, { status: 429 });
+  // Ohne erkennbare Adresse lief diese Route frueher voellig ungebremst - und
+  // jede Anfrage geht an einen kostenpflichtigen Anbieter. Wie bei der
+  // Adresssuche gibt es deshalb einen gemeinsamen Topf fuer alle Aufrufe ohne
+  // Adresse.
+  const bremse = ip
+    ? rateLimit(`flight:ip:${ip}`, 40, 10 * 60_000)
+    : rateLimit("flight:ohne-adresse", 60, 10 * 60_000);
+  if (!bremse.ok) {
+    return NextResponse.json({ error: "Zu viele Abfragen. Bitte später erneut." }, { status: 429 });
   }
 
   let json: any;

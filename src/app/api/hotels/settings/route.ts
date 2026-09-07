@@ -1,4 +1,12 @@
 import { NextResponse } from "next/server";
+import { portalCan } from "@/lib/portalRoles";
+
+// Das Rollenmodell des Hotels (portalRole) war hier wirkungslos: geprueft
+// wurde nur, DASS eine Hotel-Sitzung besteht. Ein Concierge, der laut Modell
+// ausschliesslich buchen darf, konnte damit die Monatsabrechnung oeffnen,
+// einen ganzen Monat als bezahlt markieren, Gaestestammdaten lesen und die
+// bevorzugten Taxiunternehmen aendern. Bei der Hotel-BUCHUNG gab es die
+// Pruefung laengst - hier fehlte sie.
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
@@ -24,6 +32,9 @@ const schema = z.object({
 export async function PATCH(req: Request) {
   const session = requireRole("HOTEL");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  if (!portalCan(session.portalRole, "settings")) {
+    return NextResponse.json({ error: "Ihre Rolle darf diese Einstellungen nicht ändern." }, { status: 403 });
+  }
   let json: any;
   try {
     json = await req.json();

@@ -69,6 +69,22 @@ export async function prepareRidePayment(bookingId: string): Promise<{
   const destination =
     b.company?.stripeAccountId && b.company.stripeChargesEnabled ? b.company.stripeAccountId : null;
 
+  // Vorgang beanspruchen, BEVOR wir Stripe rufen. Zwei gleichzeitige Anlaeufe
+  // (Fahrt geht live + Aktualisierung durch die Zentrale) haetten sonst beide
+  // "noch keine Reservierung" gelesen und je eine Reservierung erzeugt; in der
+  // Datenbank landete nur eine, die andere blockierte verwaist Geld auf der
+  // Karte. Der Idempotenz-Schluessel in stripe.ts faengt denselben Fall auf
+  // Stripe-Seite ab - hier sparen wir uns den Aufruf gleich ganz.
+  const anspruch = await prisma.booking.updateMany({
+    where: {
+      id: b.id,
+      paymentRef: null,
+      OR: [{ settlingAt: null }, { settlingAt: { lt: new Date(Date.now() - SETTLE_LOCK_MS) } }],
+    },
+    data: { settlingAt: new Date() },
+  });
+  if (anspruch.count !== 1) return { ok: true, skipped: true };
+
   const hold = await holdOnSavedCard({
     stripeCustomerId,
     paymentMethodId: b.card.stripePaymentMethodId,
@@ -78,6 +94,7 @@ export async function prepareRidePayment(bookingId: string): Promise<{
   });
 
   if (!hold.ok) {
+    await prisma.booking.update({ where: { id: b.id }, data: { settlingAt: null } }).catch(() => {});
     return failPrepare(
       b.id,
       hold.error ?? "Die Karte wurde von der Bank abgelehnt.",
@@ -101,10 +118,13 @@ export async function prepareRidePayment(bookingId: string): Promise<{
       priceAuthorized: hold.amount ?? amount,
       paymentStatus: "KARTE_HINTERLEGT",
       paymentError: null,
+      // Anspruch wieder freigeben – der Vorgang ist abgeschlossen.
+      settlingAt: null,
     },
   });
   if (noch.count === 0) {
     await voidPayment(hold.ref).catch(() => null);
+    await prisma.booking.update({ where: { id: b.id }, data: { settlingAt: null } }).catch(() => {});
     return { ok: true, skipped: true };
   }
   return { ok: true, authorized: hold.amount ?? amount };
@@ -132,11 +152,25 @@ export async function releaseHold(bookingId: string): Promise<boolean> {
   if (!b?.paymentRef || !((b.priceAuthorized ?? 0) > 0)) return false;
   if (b.paymentStatus === "BEZAHLT") return false;
   const res = await voidPayment(b.paymentRef);
+  if (!res.ok) {
+    // NICHT die Referenz loeschen: die Reservierung besteht bei Stripe
+    // moeglicherweise weiter und blockiert Geld auf der Karte des Fahrgasts.
+    // Ohne die Vorgangsnummer wuessten wir spaeter nicht mehr, was freizugeben
+    // ist. Stattdessen vermerken wir den Fehlschlag, damit er auffaellt.
+    await prisma.booking
+      .update({
+        where: { id: bookingId },
+        data: { paymentError: "Freigabe der Kartenreservierung fehlgeschlagen – bitte in Stripe prüfen." },
+      })
+      .catch(() => {});
+    console.error(`Kartenreservierung ${b.paymentRef} konnte nicht freigegeben werden.`);
+    return false;
+  }
   await prisma.booking.update({
     where: { id: bookingId },
-    data: { priceAuthorized: null, paymentRef: null },
+    data: { priceAuthorized: null, paymentRef: null, paymentError: null },
   });
-  return res.ok;
+  return true;
 }
 
 export interface SettleResult {

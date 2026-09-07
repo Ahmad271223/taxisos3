@@ -1,4 +1,12 @@
 import { NextResponse } from "next/server";
+import { portalCan } from "@/lib/portalRoles";
+
+// Unterkonten eines Veranstalters (portalRole) hatten bisher dieselben Rechte
+// wie der Inhaber: die Sitzung laeuft aus technischen Gruenden unter der ID
+// des Hauptkontos, und geprueft wurde die Rolle nirgends. Eine Kraft mit
+// der Rolle "Buchhaltung" konnte damit Rabattcodes anlegen und Fahrten
+// buchen. Jetzt entscheidet portalCan() ueber jeden schreibenden Zugriff.
+import { csvFeld } from "@/lib/csv";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
 import {
@@ -16,6 +24,9 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const session = requireRole("EVENT");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  if (!portalCan(session.portalRole, "invoices")) {
+    return NextResponse.json({ error: "Ihre Rolle darf keine Abrechnungen einsehen." }, { status: 403 });
+  }
 
   const monthParam = new URL(req.url).searchParams.get("month"); // "YYYY-MM"
   const now = new Date();
@@ -76,7 +87,7 @@ export async function GET(req: Request) {
   total = Math.round(total * 100) / 100;
 
   if (new URL(req.url).searchParams.get("format") === "csv") {
-    const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const esc = csvFeld;
     const header = ["Datum", "Fahrgast", "Fahrt", "Code", "Betrag (EUR)"].join(";");
     const rows = lines.map((l) =>
       [l.date.toLocaleDateString("de-DE"), l.guest, l.route, l.code, l.amount.toFixed(2).replace(".", ",")].map(esc).join(";"),

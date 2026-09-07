@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { einrichtungAktiv } from "@/lib/kontoAktiv";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
@@ -11,6 +12,14 @@ export const dynamic = "force-dynamic";
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const session = requireRole("INSTITUTION");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  // Eine Sperre muss SOFORT wirken, nicht erst wenn der Ausweis nach sieben
+  // Tagen ablaeuft - hier haengen Patientenakten dran.
+  if (!(await einrichtungAktiv(session.sub))) {
+    return NextResponse.json(
+      { error: "Ihr Zugang ist derzeit gesperrt. Bitte wenden Sie sich an die Zentrale.", code: "INSTITUTION_INACTIVE" },
+      { status: 403 },
+    );
+  }
   const patient = await prisma.institutionPatient.findUnique({ where: { id: params.id } });
   if (!patient || patient.institutionId !== session.sub) {
     return NextResponse.json({ error: "Nicht gefunden" }, { status: 404 });
@@ -64,6 +73,14 @@ const patchSchema = z.object({
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   const session = requireRole("INSTITUTION");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  // Eine Sperre muss SOFORT wirken, nicht erst wenn der Ausweis nach sieben
+  // Tagen ablaeuft - hier haengen Patientenakten dran.
+  if (!(await einrichtungAktiv(session.sub))) {
+    return NextResponse.json(
+      { error: "Ihr Zugang ist derzeit gesperrt. Bitte wenden Sie sich an die Zentrale.", code: "INSTITUTION_INACTIVE" },
+      { status: 403 },
+    );
+  }
   const existing = await prisma.institutionPatient.findUnique({ where: { id: params.id }, select: { institutionId: true } });
   if (!existing || existing.institutionId !== session.sub) {
     return NextResponse.json({ error: "Nicht gefunden" }, { status: 404 });

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logAccess } from "@/lib/accessLog";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
@@ -36,5 +37,20 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "Nicht gefunden" }, { status: 404 });
   }
   await prisma.sosAlert.update({ where: { id: alert.id }, data: { status: "RESOLVED", resolvedAt: new Date() } });
+
+  // Ein Notruf ist das ernsteste Ereignis im ganzen System. Bisher stand danach
+  // nur "irgendwann erledigt" im Datensatz - wer ihn gesehen, bewertet und
+  // geschlossen hat, war nicht mehr feststellbar. Fuer die spaetere
+  // Aufarbeitung (und fuer die Berufsgenossenschaft) muss das nachvollziehbar
+  // sein, deshalb ein eigener Eintrag im Zugriffsprotokoll.
+  await logAccess({
+    actorType: "ADMIN",
+    companyId: session.companyId,
+    actorId: session.companyId,
+    action: "UPDATE",
+    entity: "SOS",
+    entityId: alert.id,
+    detail: `Notruf geschlossen durch ${session.name ?? session.username ?? session.companyId}`,
+  });
   return NextResponse.json({ ok: true });
 }

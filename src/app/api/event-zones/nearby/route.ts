@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { prisma } from "@/lib/prisma";
 import { haversineMeters } from "@/lib/geo";
 
@@ -11,10 +12,22 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const lat = Number(url.searchParams.get("lat"));
   const lng = Number(url.searchParams.get("lng"));
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+  // Oeffentliche Route ohne jede Bremse, die je Aufruf Datenbankarbeit
+  // ausloest. Und `isFinite` allein laesst Koordinaten zu, die es nicht gibt.
+  const ip = clientIp(req);
+  if (!rateLimit(ip ? `zonen:${ip}` : "zonen:ohne-adresse", 60, 10 * 60_000).ok) {
+    return NextResponse.json({ error: "Zu viele Abfragen. Bitte später erneut." }, { status: 429 });
+  }
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
     return NextResponse.json({ zone: null }, { status: 400 });
   }
-  const zones = await prisma.eventZone.findMany({ where: { active: true }, take: 500 });
+  // Feste Reihenfolge: ohne `orderBy` war bei mehr als 500 aktiven Zonen nicht
+  // einmal festgelegt, WELCHE 500 geprueft werden.
+  const zones = await prisma.eventZone.findMany({
+    where: { active: true },
+    orderBy: { createdAt: "asc" },
+    take: 500,
+  });
   let best: { zone: any; dist: number } | null = null;
   for (const z of zones) {
     const dist = haversineMeters({ lat, lng }, { lat: z.lat, lng: z.lng });

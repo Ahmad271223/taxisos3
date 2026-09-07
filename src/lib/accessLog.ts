@@ -5,7 +5,15 @@
 import { prisma } from "@/lib/prisma";
 
 export type AccessAction = "VIEW" | "DOWNLOAD" | "APPROVE" | "REJECT" | "CREATE" | "UPDATE" | "CANCEL" | "EXPORT";
-export type AccessEntity = "MEDICAL_DOCUMENT" | "BOOKING" | "PATIENT" | "RECURRING";
+// INSTITUTION: Freigabe/Sperre einer Einrichtung durch die Plattform.
+// SOS:         Bearbeitung eines Notrufs – muss nachvollziehbar bleiben.
+export type AccessEntity =
+  | "MEDICAL_DOCUMENT"
+  | "BOOKING"
+  | "PATIENT"
+  | "RECURRING"
+  | "INSTITUTION"
+  | "SOS";
 
 export async function logAccess(e: {
   actorType: "ADMIN" | "INSTITUTION" | "CUSTOMER" | "SYSTEM";

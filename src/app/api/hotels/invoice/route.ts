@@ -1,4 +1,14 @@
 import { NextResponse } from "next/server";
+import { logAccess } from "@/lib/accessLog";
+import { portalCan } from "@/lib/portalRoles";
+
+// Das Rollenmodell des Hotels (portalRole) war hier wirkungslos: geprueft
+// wurde nur, DASS eine Hotel-Sitzung besteht. Ein Concierge, der laut Modell
+// ausschliesslich buchen darf, konnte damit die Monatsabrechnung oeffnen,
+// einen ganzen Monat als bezahlt markieren, Gaestestammdaten lesen und die
+// bevorzugten Taxiunternehmen aendern. Bei der Hotel-BUCHUNG gab es die
+// Pruefung laengst - hier fehlte sie.
+import { csvFeld } from "@/lib/csv";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
 import { hotelStatementPdf, hotelSections } from "@/lib/hotelStatementPdf";
@@ -13,6 +23,9 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 export async function GET(req: Request) {
   const session = requireRole("HOTEL");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  if (!portalCan(session.portalRole, "invoices")) {
+    return NextResponse.json({ error: "Ihre Rolle darf keine Abrechnungen einsehen." }, { status: 403 });
+  }
 
   const url = new URL(req.url);
   const monthParam = url.searchParams.get("month");
@@ -39,6 +52,13 @@ export async function GET(req: Request) {
       pickupAddress: true, destAddress: true, fare: true, hotelSettledAt: true,
       // Fuer Rechnung je Unternehmen + USt-Satz nach Strecke.
       distanceMeters: true,
+      // Schnappschuss zuerst: eine erneut erzeugte Januar-Abrechnung soll die
+      // Firmendaten von damals tragen, nicht die von heute. Beim einzelnen
+      // Fahrtbeleg war das laengst so geloest.
+      companyNameSnap: true,
+      companyAddressSnap: true,
+      companyTaxIdSnap: true,
+      companyVatIdSnap: true,
       company: { select: { id: true, name: true, address: true, taxId: true, vatId: true } },
     },
   });
@@ -52,7 +72,7 @@ export async function GET(req: Request) {
     route: `${b.pickupAddress} → ${b.destAddress}`,
     fare: r2(b.fare ?? 0),
     settled: !!b.hotelSettledAt,
-    companyName: b.company?.name ?? null,
+    companyName: b.companyNameSnap ?? b.company?.name ?? null,
     distanceMeters: b.distanceMeters ?? null,
   }));
   const total = { count: lines.length, fare: r2(lines.reduce((s, l) => s + l.fare, 0)) };
@@ -104,7 +124,7 @@ export async function GET(req: Request) {
   }
 
   if (format === "csv") {
-    const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const esc = csvFeld;
     const header = ["Datum", "Gast", "Zimmer", "Abrechnung", "Taxiunternehmen", "Strecke", "Fahrpreis (EUR)"].join(";");
     const rows = lines.map((l) =>
       [new Date(l.date).toLocaleDateString("de-DE"), l.guest, l.room, l.mode, l.companyName ?? "", l.route, l.fare.toFixed(2).replace(".", ",")].map(esc).join(";"),
@@ -127,6 +147,9 @@ export async function GET(req: Request) {
 export async function PATCH(req: Request) {
   const session = requireRole("HOTEL");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  if (!portalCan(session.portalRole, "invoices")) {
+    return NextResponse.json({ error: "Ihre Rolle darf keine Abrechnungen einsehen." }, { status: 403 });
+  }
 
   const body = await req.json().catch(() => ({}));
   const monthParam = typeof body?.month === "string" ? body.month : "";
@@ -147,5 +170,16 @@ export async function PATCH(req: Request) {
     },
     data: { hotelSettledAt: settled ? new Date() : null },
   });
+  // Der Zahlungsstatus eines ganzen Monats ist eine Geldentscheidung. Bisher
+  // stand danach nur "bezahlt" im Datensatz - nicht, wer das wann veranlasst
+  // hat. Bei einer spaeteren Rueckfrage war das nicht mehr aufzuklaeren.
+  await logAccess({
+    actorType: "ADMIN",
+    actorId: session.sub,
+    action: "UPDATE",
+    entity: "BOOKING",
+    detail: `Hotelabrechnung ${monthParam} (${res.count} Fahrten) als ${settled ? "bezahlt" : "offen"} markiert durch ${session.name ?? session.username ?? session.sub} (Rolle ${session.portalRole ?? "OWNER"})`,
+  });
+
   return NextResponse.json({ ok: true, month: monthParam, settled, count: res.count });
 }

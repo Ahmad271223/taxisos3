@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { einrichtungAktiv } from "@/lib/kontoAktiv";
+import { alarm } from "@/server/alarm";
+import { rateLimit } from "@/lib/ratelimit";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
@@ -34,6 +37,14 @@ const schema = z.object({
 export async function GET() {
   const session = requireRole("INSTITUTION");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  // Eine Sperre muss SOFORT wirken, nicht erst wenn der Ausweis nach sieben
+  // Tagen ablaeuft - hier haengen Patientenakten dran.
+  if (!(await einrichtungAktiv(session.sub))) {
+    return NextResponse.json(
+      { error: "Ihr Zugang ist derzeit gesperrt. Bitte wenden Sie sich an die Zentrale.", code: "INSTITUTION_INACTIVE" },
+      { status: 403 },
+    );
+  }
   const bookings = await prisma.booking.findMany({
     where: { institutionId: session.sub },
     orderBy: { createdAt: "desc" },
@@ -46,6 +57,9 @@ export async function GET() {
 // Neue Krankenfahrt im Auftrag eines Patienten anlegen (Einrichtung ist
 // vertrauenswürdig -> keine SMS-Verifizierung) und sofort disponieren.
 export async function POST(req: Request) {
+  // Ein einzelnes Konto kann hier viel Last erzeugen (Krankenfahrten). Die Bremse
+  // haengt am Konto, nicht an der IP - eine Einrichtung sitzt hinter
+  // einem gemeinsamen Anschluss.
   // Ohne Dispatcher wuerde die Fahrt angelegt, aber nie gesucht - der Kunde
   // saehe endlos "Fahrer wird gesucht". Dann lieber ehrlich ablehnen.
   if (!getDispatcher()) {
@@ -53,6 +67,17 @@ export async function POST(req: Request) {
   }
   const session = requireRole("INSTITUTION");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  // Eine Sperre muss SOFORT wirken, nicht erst wenn der Ausweis nach sieben
+  // Tagen ablaeuft - hier haengen Patientenakten dran.
+  if (!(await einrichtungAktiv(session.sub))) {
+    return NextResponse.json(
+      { error: "Ihr Zugang ist derzeit gesperrt. Bitte wenden Sie sich an die Zentrale.", code: "INSTITUTION_INACTIVE" },
+      { status: 403 },
+    );
+  }
+  if (!rateLimit(`inst-ride:${session.sub}`, 60, 60 * 60_000).ok) {
+    return NextResponse.json({ error: "Zu viele Aufträge in kurzer Zeit. Bitte kurz warten." }, { status: 429 });
+  }
   const inst = await prisma.institution.findUnique({ where: { id: session.sub } });
   if (!inst) return NextResponse.json({ error: "Einrichtung nicht gefunden" }, { status: 401 });
 
@@ -145,7 +170,18 @@ export async function POST(req: Request) {
 
   // Nur Schnellaufträge (AUTO, sofort) gehen direkt an freie Fahrer. Pool-Fahrten
   // (ADMIN) warten auf die Zuweisung durch eine Taxi-Zentrale.
-  if (dispatchMode === "AUTO" && !isScheduled) getDispatcher()?.dispatchBooking(booking.id).catch(() => {});
+  if (dispatchMode === "AUTO" && !isScheduled) getDispatcher()
+      ?.dispatchBooking(booking.id)
+      // Der Fehler wurde frueher stillschweigend verworfen: die Krankenfahrt stand
+      // in der Datenbank, aber niemand suchte je einen Fahrer, und die
+      // Anfrage meldete trotzdem Erfolg. Jetzt wird der Fehlschlag
+      // protokolliert und gemeldet, damit er nicht unbemerkt bleibt.
+      .catch((e: any) => {
+        console.error(`Vermittlung fehlgeschlagen (${booking.id}):`, e?.message ?? e);
+        alarm("warnung", `dispatch:${booking.id}`, "Vermittlung fehlgeschlagen", {
+          hinweis: `Krankenfahrt ${booking.id} wurde angelegt, aber die Vermittlung schlug fehl: ${e?.message ?? e}`,
+        });
+      });
   await logAccess({ actorType: "INSTITUTION", actorId: inst.id, action: "CREATE", entity: "BOOKING", entityId: booking.id, detail: patientName });
 
   return NextResponse.json({ id: booking.id, ride: bookingDTO(booking) }, { status: 201 });

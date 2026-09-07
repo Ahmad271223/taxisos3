@@ -30,7 +30,10 @@ export async function GET() {
 const createSchema = z.object({
   name: z.string().min(1),
   username: z.string().min(3),
-  password: z.string().min(4),
+  // Ein Fahrerzugang kann Auftraege annehmen, Fahrgastdaten und Zieladressen
+  // sehen und den Fahrtverlauf aendern. Vier Zeichen waren dafuer nicht
+  // vertretbar - jetzt dieselbe Untergrenze wie bei allen anderen Konten.
+  password: z.string().min(8),
   phone: z.string().optional().nullable(),
   vehicleModel: z.string().optional().nullable(),
   vehiclePlate: z.string().optional().nullable(),
@@ -134,5 +137,24 @@ export async function POST(req: Request) {
       status: "OFFLINE",
     },
   });
+
+  // NACHKONTROLLE: Oben wurde gezaehlt, hier angelegt. Zwei gleichzeitige
+  // Anfragen sahen beide "noch ein Platz frei" (etwa 9 von 10) und legten
+  // beide an – der Tarif war danach mit 11 Fahrern ueberschritten. Eine Sperre
+  // auf "Anzahl Zeilen" gibt es in PostgreSQL nicht, deshalb pruefen wir nach
+  // dem Anlegen erneut und nehmen den ueberzaehligen Datensatz zurueck. Der
+  // Fahrer war noch keine Sekunde im Einsatz, es geht nichts verloren.
+  const nachher = await prisma.driver.count({ where: { companyId: session.companyId } });
+  if (nachher > getPlan(company?.plan).maxDrivers) {
+    await prisma.driver.delete({ where: { id: driver.id } }).catch(() => {});
+    return NextResponse.json(
+      {
+        error: `Ihr Tarif erlaubt maximal ${getPlan(company?.plan).maxDrivers} Fahrer. Bitte legen Sie den Fahrer erneut an, nachdem Sie den Tarif gewechselt haben.`,
+        code: "PLAN_LIMIT_REACHED",
+      },
+      { status: 402 },
+    );
+  }
+
   return NextResponse.json({ driver: driverAdmin(driver) }, { status: 201 });
 }

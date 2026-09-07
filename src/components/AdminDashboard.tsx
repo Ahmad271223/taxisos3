@@ -505,12 +505,17 @@ function MedicalPoolCard({ drivers }: { drivers: any[] }) {
           <div key={b.id} data-testid={`pool-ride-${b.id}`} className="border-b border-ink-50 px-5 py-3 last:border-0">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="min-w-0">
+                {/* Vor der Übernahme bewusst ohne Name, Einrichtung und Fahrtart:
+                    das sind Gesundheitsdaten und gehen fremde Zentralen nichts an.
+                    Nach dem Zuweisen steht alles im normalen Auftrag. */}
                 <p className="font-bold text-ink-900">
-                  {b.patientName} <span className="font-normal text-ink-400">· {b.institution}</span>
+                  {b.pickupArea} <span className="font-normal text-ink-400">→ {b.destArea}</span>
                 </p>
-                <p className="text-sm text-ink-600">{b.pickupAddress} → {b.destAddress}</p>
+                <p className="text-sm text-ink-600">
+                  {b.distanceMeters ? `${(b.distanceMeters / 1000).toFixed(1)} km` : "Entfernung unbekannt"}
+                  <span className="text-ink-400"> · genaue Adresse nach der Zuweisung</span>
+                </p>
                 <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-500">
-                  <span className="rounded bg-ink-100 px-1.5 py-0.5 font-semibold">{b.medicalLabel ?? "Fahrt"}</span>
                   <span className="rounded bg-ink-100 px-1.5 py-0.5 font-semibold">{b.vehicleClassIcon} {b.vehicleClassLabel}</span>
                   {b.requiresRamp && <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">🦽 Rampe</span>}
                   {b.requiresStretcher && <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">🛏️ Tragestuhl</span>}

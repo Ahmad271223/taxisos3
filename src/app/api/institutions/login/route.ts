@@ -43,6 +43,14 @@ export async function POST(req: Request) {
 
   const token = signSession({ sub: inst.id, role: "INSTITUTION", name: inst.name, username: inst.email, companyId: inst.id });
   const res = NextResponse.json({ ok: true, id: inst.id, name: inst.name });
-  res.cookies.set(INSTITUTION_COOKIE, token, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 7 * 24 * 3600 });
+  // "secure" fehlte hier, waehrend die Gegenstelle es korrekt setzt: der
+  // Ausweis waere ueber eine unverschluesselte Verbindung mitlesbar gewesen.
+  res.cookies.set(INSTITUTION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 7 * 24 * 3600,
+    secure: process.env.NODE_ENV === "production",
+  });
   return res;
 }

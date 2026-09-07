@@ -92,8 +92,18 @@ async function ensureCompanyCustomer(client: StripeLike, companyId: string): Pro
       phone: c.phone ?? undefined,
       metadata: { companyId: c.id, kind: "taxios_subscription" },
     });
-    await prisma.company.update({ where: { id: c.id }, data: { stripeCustomerId: cus.id } });
-    return cus.id;
+    // Bedingtes Schreiben: Zwei gleichzeitige Anfragen haben beide "noch kein
+    // Zahlungskonto" gelesen und je einen Stripe-Kunden angelegt. Wer zuerst
+    // kommt, gewinnt; der andere uebernimmt den gespeicherten Wert, statt ihn
+    // zu ueberschreiben. Sonst haette die Firma zwei Stripe-Kunden - mit
+    // Rechnungen an beiden.
+    const gesetzt = await prisma.company.updateMany({
+      where: { id: c.id, stripeCustomerId: null },
+      data: { stripeCustomerId: cus.id },
+    });
+    if (gesetzt.count === 1) return cus.id;
+    const jetzt = await prisma.company.findUnique({ where: { id: c.id }, select: { stripeCustomerId: true } });
+    return jetzt?.stripeCustomerId ?? cus.id;
   } catch (e: any) {
     console.error("Stripe-Kunde (Firma) fehlgeschlagen:", e?.message);
     return null;

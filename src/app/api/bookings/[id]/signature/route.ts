@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { rateLimit } from "@/lib/ratelimit";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
@@ -26,6 +27,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   });
   if (!booking) return NextResponse.json({ error: "Auftrag nicht gefunden" }, { status: 404 });
   if (booking.status === "STORNIERT") return NextResponse.json({ error: "Fahrt storniert" }, { status: 409 });
+  // Je Anfrage sind knapp 2 MB Bilddaten erlaubt. Ohne Bremse liesse sich
+  // damit die Datenbank vollschreiben - der Verfolgungs-Token reicht aus.
+  if (!rateLimit(`signatur:${booking.id}`, 5, 10 * 60_000).ok) {
+    return NextResponse.json({ error: "Zu viele Versuche. Bitte kurz warten." }, { status: 429 });
+  }
   // Ein Fahrtnachweis kann erst entstehen, wenn gefahren wird oder wurde.
   const unterwegsOderFertig = booking.status === "ABGESCHLOSSEN" || ["FAHRT_LAEUFT", "BEENDET"].includes(booking.trackingStatus);
   if (!unterwegsOderFertig) {

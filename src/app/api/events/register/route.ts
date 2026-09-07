@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, signSession, authConfigured, EVENT_COOKIE } from "@/lib/auth";
@@ -13,6 +14,11 @@ const schema = z.object({
 });
 
 export async function POST(req: Request) {
+  // Ohne Bremse liessen sich massenhaft Konten anlegen (Veranstalter).
+  const ip = clientIp(req);
+  if (ip && !rateLimit(`register-event:${ip}`, 5, 10 * 60_000).ok) {
+    return NextResponse.json({ error: "Zu viele Registrierungen. Bitte später erneut." }, { status: 429 });
+  }
   let json: any;
   try {
     json = await req.json();
@@ -36,6 +42,14 @@ export async function POST(req: Request) {
   });
 
   const res = NextResponse.json({ ok: true, id: host.id, name: host.name }, { status: 201 });
-  res.cookies.set(EVENT_COOKIE, token, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 7 * 24 * 3600 });
+  // "secure" fehlte hier, waehrend die Gegenstelle es korrekt setzt: der
+  // Ausweis waere ueber eine unverschluesselte Verbindung mitlesbar gewesen.
+  res.cookies.set(EVENT_COOKIE, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 7 * 24 * 3600,
+    secure: process.env.NODE_ENV === "production",
+  });
   return res;
 }

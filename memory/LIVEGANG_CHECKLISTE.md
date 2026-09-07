@@ -41,6 +41,16 @@ ab. Das ist Absicht — jeder Punkt hat einen konkreten Schaden dahinter.
       Solange sie fehlen, verschickt die Live-App **keine** SMS.
 - [ ] **US-Nummer freigeben**, falls nicht gebraucht (Twilio → Phone Numbers).
       Sie kostet rund 1 $ im Monat und wird als Absender nicht mehr verwendet.
+- [ ] **`INSTITUTION_APPROVAL`** bei Render auf `1` lassen (Voreinstellung im
+      Echtbetrieb). Neue Einrichtungen entstehen dann gesperrt. Freischalten
+      nach einer echten Prüfung — Anruf unter der **veröffentlichten** Nummer
+      der Klinik, nicht unter der bei der Anmeldung angegebenen:
+      `PATCH /api/super/institutions` mit `{"id":"…","active":true}`.
+      Offene Anmeldungen listet `GET /api/super/institutions?pending=1`.
+- [ ] **Zweiter Faktor für Einrichtungskonten** erwägen. Diese Konten führen
+      Patientendaten (Name, Geburtsdatum, Mobilität, Versicherungsnummer).
+      Aktuell schützt sie nur ein Passwort von mindestens acht Zeichen — für
+      Gesundheitsdaten ist das die Untergrenze, nicht das Ziel.
 - [ ] **`AUTH_SECRET`** mit mindestens 32 zufälligen Zeichen setzen. Nicht der
       Standardwert — diese Sperre ist **nicht umgehbar**, weil sich mit einem
       erratbaren Geheimnis beliebige Sitzungen fälschen ließen.
@@ -89,9 +99,12 @@ ab. Das ist Absicht — jeder Punkt hat einen konkreten Schaden dahinter.
 ## C. Empfohlen, aber nicht blockierend
 
 - [ ] `STRIPE_WEBHOOK_SECRET` setzen und den Webhook auf
-      `/api/stripe/webhook` einrichten.
+      `/api/payments/webhook` einrichten — vollständige Anleitung mit den
+      nötigen Ereignissen: `memory/STRIPE_ANLEITUNG.md`.
 - [ ] `REQUIRE_PHONE_VERIFICATION=1` einschalten.
-- [ ] `TWILIO_FROM` auf eine **deutsche** Absendernummer setzen.
+- ~~`TWILIO_FROM` auf eine deutsche Absendernummer setzen~~ → erledigt über den
+      alphanumerischen Absender `Altstadttax` (siehe Abschnitt A). Eine deutsche
+      Rufnummer wäre nur nötig, wenn Fahrgäste per SMS antworten sollen.
 - [ ] `AVIATIONSTACK_KEY` für echte Flugdaten (sonst Demo-Verspätungen).
 - [ ] Auf Render **Health Check Path** auf `/api/health` setzen.
 - [ ] `TRUSTED_PROXY_HOPS=1` (Render). Ohne das erkennt die Drosselung keine

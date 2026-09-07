@@ -98,6 +98,28 @@ function toCents(amountEur: number): number {
   return Math.max(50, Math.round((amountEur || 0) * 100));
 }
 
+/**
+ * Idempotenz-Schluessel fuer eine Kartenbelastung.
+ *
+ * Warum das noetig ist: Zwischen der erfolgreichen Belastung bei Stripe und
+ * dem Vermerk "BEZAHLT" in unserer Datenbank liegt ein winziger Moment. Stirbt
+ * der Prozess genau dort (Neustart, Absturz, Speichergrenze), gilt die Fahrt
+ * weiter als offen. Der naechste Anlauf wuerde ein ZWEITES Mal abbuchen -
+ * der Fahrgast zahlt doppelt.
+ *
+ * Mit einem Idempotenz-Schluessel erkennt Stripe den Wiederholungsversuch und
+ * liefert das Ergebnis der ERSTEN Anfrage zurueck, ohne erneut zu belasten
+ * (Stripe merkt sich den Schluessel 24 Stunden).
+ *
+ * Der Schluessel enthaelt bewusst auch Karte und Betrag: Eine erneute Zahlung
+ * mit einer ANDEREN Karte - etwa nachdem die erste abgelehnt wurde - ist ein
+ * neuer Vorgang und soll wirklich ausgefuehrt werden.
+ */
+function idemKey(zweck: string, opts: { bookingId?: string; paymentMethodId: string; cents: number }): string | undefined {
+  if (!opts.bookingId) return undefined;
+  return `${zweck}:${opts.bookingId}:${opts.paymentMethodId}:${opts.cents}`;
+}
+
 function isMock(ref: string | null | undefined): boolean {
   // WICHTIG: Ein FEHLENDER Verweis ist kein Ersatzbetrieb, sondern ein Fehler.
   // Vorher galt null als "mock" – dadurch meldete z. B. capturePayment(null)
@@ -472,6 +494,29 @@ export async function getCardInfo(paymentMethodId: string): Promise<StripeCardIn
   }
 }
 
+/**
+ * Zu welchem Stripe-Kunden gehoert diese Zahlungsmethode?
+ *
+ * Rueckgabe:
+ *   string  - die Kennung des Stripe-Kunden
+ *   null    - die Zahlungsmethode haengt an keinem Kunden
+ *   undefined - nicht feststellbar (kein Schluessel, Ersatzbetrieb, Stripe
+ *               nicht erreichbar). Der Aufrufer darf dann NICHT einfach
+ *               ablehnen, sonst waere die App ohne Stripe unbenutzbar.
+ */
+export async function paymentMethodOwner(paymentMethodId: string): Promise<string | null | undefined> {
+  const client = await getClient();
+  if (!client || isMock(paymentMethodId)) return undefined;
+  try {
+    const pm = await client.paymentMethods.retrieve(paymentMethodId);
+    const kunde = pm?.customer;
+    if (!kunde) return null;
+    return typeof kunde === "string" ? kunde : kunde.id ?? null;
+  } catch {
+    return undefined;
+  }
+}
+
 // Karte vom Kunden loesen (entfernen).
 export async function detachCard(paymentMethodId: string): Promise<boolean> {
   const client = await getClient();
@@ -531,19 +576,27 @@ export async function chargeSavedCard(opts: {
     }
     return { ok: true, paymentIntentId: mockRef("mock_pi"), amount: cents / 100, status: "BEZAHLT", mock: true };
   }
+  const schluessel = idemKey("ride-charge", {
+    bookingId: opts.metadata?.bookingId,
+    paymentMethodId: opts.paymentMethodId,
+    cents,
+  });
   try {
-    const pi = await client.paymentIntents.create({
-      amount: cents,
-      currency: "eur",
-      customer: opts.stripeCustomerId,
-      payment_method: opts.paymentMethodId,
-      off_session: true, // Kunde ist nicht mehr auf der Seite
-      confirm: true,
-      metadata: opts.metadata ?? {},
-      ...(opts.destinationAccountId
-        ? { transfer_data: { destination: opts.destinationAccountId }, on_behalf_of: opts.destinationAccountId }
-        : {}),
-    });
+    const pi = await client.paymentIntents.create(
+      {
+        amount: cents,
+        currency: "eur",
+        customer: opts.stripeCustomerId,
+        payment_method: opts.paymentMethodId,
+        off_session: true, // Kunde ist nicht mehr auf der Seite
+        confirm: true,
+        metadata: opts.metadata ?? {},
+        ...(opts.destinationAccountId
+          ? { transfer_data: { destination: opts.destinationAccountId }, on_behalf_of: opts.destinationAccountId }
+          : {}),
+      },
+      schluessel ? { idempotencyKey: schluessel } : undefined,
+    );
     const ok = pi.status === "succeeded";
     return {
       ok,
@@ -652,20 +705,30 @@ export async function holdOnSavedCard(opts: {
     }
     return { ok: true, ref: mockRef("mock_hold"), amount: cents / 100, mock: true };
   }
+  // Derselbe Schutz wie bei der Belastung: zwei gleichzeitige Anlaeufe duerfen
+  // nicht zwei Reservierungen auf derselben Karte erzeugen.
+  const schluessel = idemKey("ride-hold", {
+    bookingId: opts.metadata?.bookingId,
+    paymentMethodId: opts.paymentMethodId,
+    cents,
+  });
   try {
-    const pi = await client.paymentIntents.create({
-      amount: cents,
-      currency: "eur",
-      customer: opts.stripeCustomerId,
-      payment_method: opts.paymentMethodId,
-      capture_method: "manual", // nur reservieren, nicht abbuchen
-      off_session: true,
-      confirm: true,
-      metadata: opts.metadata ?? {},
-      ...(opts.destinationAccountId
-        ? { transfer_data: { destination: opts.destinationAccountId }, on_behalf_of: opts.destinationAccountId }
-        : {}),
-    });
+    const pi = await client.paymentIntents.create(
+      {
+        amount: cents,
+        currency: "eur",
+        customer: opts.stripeCustomerId,
+        payment_method: opts.paymentMethodId,
+        capture_method: "manual", // nur reservieren, nicht abbuchen
+        off_session: true,
+        confirm: true,
+        metadata: opts.metadata ?? {},
+        ...(opts.destinationAccountId
+          ? { transfer_data: { destination: opts.destinationAccountId }, on_behalf_of: opts.destinationAccountId }
+          : {}),
+      },
+      schluessel ? { idempotencyKey: schluessel } : undefined,
+    );
     const ok = pi.status === "requires_capture";
     return {
       ok,

@@ -84,7 +84,12 @@ export async function POST(req: Request) {
 
   // Läuft bereits ein Abo -> Änderungen laufen über das Stripe-Kundenportal
   // (Tarifwechsel, Zahlungsmittel, Kündigung, Rechnungen).
-  if (company?.stripeSubscriptionId && json?.action !== "new") {
+  // FRUEHER: `json?.action !== "new"` – der Client konnte also einfach
+  // {"action":"new"} senden und trotz laufendem Abo einen zweiten Checkout
+  // starten. Ergebnis waeren zwei Abos fuer dieselbe Firma, beide monatlich
+  // abgebucht. Ein Tarifwechsel gehoert ins Stripe-Kundenportal, das genau
+  // dafuer da ist (Upgrade/Downgrade mit anteiliger Verrechnung).
+  if (company?.stripeSubscriptionId) {
     const portal = await createBillingPortal(session.companyId);
     if (!portal.ok) return NextResponse.json({ error: portal.error }, { status: 502 });
     return NextResponse.json({ url: portal.url, kind: "portal" });

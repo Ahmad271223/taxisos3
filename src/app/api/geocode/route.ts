@@ -48,7 +48,9 @@ export async function GET(req: Request) {
   if (reverse) {
     const lat = Number(searchParams.get("lat"));
     const lng = Number(searchParams.get("lng"));
-    if (!isFinite(lat) || !isFinite(lng)) {
+    // Nur `isFinite` liess 900/500 durch - Werte, die es auf der Erde nicht
+    // gibt und die der Anbieter trotzdem kostenpflichtig beantwortet.
+    if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
       return NextResponse.json({ results: [] });
     }
     const hit = await reverseGeocode(lat, lng);

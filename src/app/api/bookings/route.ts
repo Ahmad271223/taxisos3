@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { alarm } from "@/server/alarm";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { estimatePriceViaWith } from "@/lib/geo";
@@ -194,9 +195,28 @@ export async function POST(req: Request) {
     const code = d.promoCode.toUpperCase().replace(/\s+/g, "");
     const promo = await prisma.promoCode.findUnique({ where: { code } });
     if (promo && promoUsable(promo)) {
-      promoCode = code;
-      promoDiscount = promoDiscountAmount(promo, priceApprox);
-      await prisma.promoCode.update({ where: { code }, data: { usedCount: { increment: 1 } } }).catch(() => {});
+      // ATOMAR verbuchen. Vorher wurde erst geprueft und danach getrennt
+      // hochgezaehlt: bei maxUses 100 und usedCount 99 sahen zwei gleichzeitige
+      // Buchungen beide "noch frei" und bekamen beide den Rabatt - der Zaehler
+      // stand danach auf 101. Ausserdem verschluckte ein `.catch(() => {})`
+      // jeden Fehler beim Zaehlen, der Rabatt wurde also auch dann gewaehrt,
+      // wenn er gar nicht verbucht werden konnte.
+      //
+      // Die Bedingung im UPDATE selbst zu pruefen, laesst die Datenbank
+      // entscheiden: genau eine der beiden Anfragen aendert die Zeile.
+      const verbucht = await prisma.$executeRaw`
+        UPDATE "PromoCode"
+        SET "usedCount" = "usedCount" + 1
+        WHERE "code" = ${code}
+          AND "active" = true
+          AND ("maxUses" IS NULL OR "usedCount" < "maxUses")`;
+      if (verbucht === 1) {
+        promoCode = code;
+        promoDiscount = promoDiscountAmount(promo, priceApprox);
+      }
+      // Wurde nichts geaendert, war der Code in der Zwischenzeit aufgebraucht.
+      // Die Fahrt kommt dann ohne Rabatt zustande - das ist richtig so, ein
+      // Abbruch waere fuer den Fahrgast schlimmer als der fehlende Nachlass.
     }
   }
   const priceApproxNet = Math.max(0, Math.round((priceApprox - promoDiscount) * 100) / 100);
@@ -293,7 +313,9 @@ export async function POST(req: Request) {
   const paymentRef: string | null = null;
   const priceAuthorized: number | null = null;
 
-  const booking = await prisma.booking.create({
+  // Scheitert das Anlegen, waere ein bereits verbuchter Rabattcode verbraucht,
+  // ohne dass je eine Fahrt zustande kam. Deshalb wird er zurueckgegeben.
+  const bookingErstellen = () => prisma.booking.create({
     data: {
       companyId,
       customerName: d.customerName,
@@ -353,6 +375,18 @@ export async function POST(req: Request) {
     },
   });
 
+  let booking;
+  try {
+    booking = await bookingErstellen();
+  } catch (e) {
+    if (promoCode) {
+      await prisma.promoCode
+        .update({ where: { code: promoCode }, data: { usedCount: { decrement: 1 } } })
+        .catch(() => {});
+    }
+    throw e;
+  }
+
   // Firmen-Mobilitäts-Kontingent verbuchen (Anzahl + geschätzte Summe in Cent).
   if (corporateActive && corporateCode) {
     // Atomar und BEDINGT: Pruefung und Verbuchung in einer Anweisung. Zwei
@@ -372,6 +406,13 @@ export async function POST(req: Request) {
       await prisma.booking.delete({ where: { id: booking.id } }).catch((e) =>
         console.error("Firmen-Buchung ohne Budget konnte nicht entfernt werden:", booking.id, e?.message ?? e),
       );
+      // Die Fahrt kommt nicht zustande – der Rabattcode darf dadurch nicht
+      // verbraucht sein.
+      if (promoCode) {
+        await prisma.promoCode
+          .update({ where: { code: promoCode }, data: { usedCount: { decrement: 1 } } })
+          .catch(() => {});
+      }
       return NextResponse.json(
         { error: "Das Firmenbudget ist inzwischen aufgebraucht.", code: "CORPORATE_INVALID" },
         { status: 402 },
@@ -380,14 +421,25 @@ export async function POST(req: Request) {
   }
 
   if (!isScheduled) {
-    getDispatcher()?.dispatchBooking(booking.id).catch(() => {});
+    getDispatcher()
+      ?.dispatchBooking(booking.id)
+      // Der Fehler wurde frueher stillschweigend verworfen: die Fahrt stand
+      // in der Datenbank, aber niemand suchte je einen Fahrer, und die
+      // Anfrage meldete trotzdem Erfolg. Jetzt wird der Fehlschlag
+      // protokolliert und gemeldet, damit er nicht unbemerkt bleibt.
+      .catch((e: any) => {
+        console.error(`Vermittlung fehlgeschlagen (${booking.id}):`, e?.message ?? e);
+        alarm("warnung", `dispatch:${booking.id}`, "Vermittlung fehlgeschlagen", {
+          hinweis: `Fahrt ${booking.id} wurde angelegt, aber die Vermittlung schlug fehl: ${e?.message ?? e}`,
+        });
+      });
   }
 
   // Buchungsbestaetigung per SMS inkl. Tracking-Link. Genau EINE pro Buchung
   // (dedupeKey), damit ein Client-Retry keine zweite SMS ausloest.
   {
     const base = (process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
-    const link = `${base}/verfolgen/${booking.trackingToken ?? booking.id}`;
+    const link = `${base}/verfolgen/${booking.trackingToken}`;
     const when = isScheduled && booking.scheduledAt
       ? ` für ${new Date(booking.scheduledAt).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} Uhr`
       : "";

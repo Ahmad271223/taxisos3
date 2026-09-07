@@ -273,6 +273,211 @@ Link ins Stripe-Dashboard und der Erklaerung des Geldflusses. Ausserdem
 uebernimmt der Webhook jetzt `account.updated`: ohne das erfuhr die App nie,
 dass eine Firma freigeschaltet wurde, und buchte weiter aufs Plattform-Konto.
 
+**Vierter externer Bericht (#56-#108, behoben 2026-09-08).** Von 53 gemeldeten
+Punkten waren rund 30 echt. Ein knappes Drittel der Liste betraf Stellen, die
+beim zweiten und dritten Durchgang bereits behoben worden waren (Unterschrift,
+Bewertung, Koordinaten bei Event- und Einrichtungsfahrten) - der Pruefer sah
+einen aelteren Stand.
+
+*Datenschutz:*
+
+- **Der Krankenfahrten-Pool war das schwerste Leck.** Die Liste offener
+  Krankenfahrten geht an ALLE Zentralen - auch an solche, die mit der Fahrt
+  nichts zu tun haben und sie nie uebernehmen werden. Darin standen
+  Patientenname, die Art der Fahrt (Dialyse, Onkologie ...), der Name der
+  Einrichtung sowie Abhol- und Zieladresse vollstaendig. Das sind
+  Gesundheitsdaten namentlich benannter Menschen, Art. 9 DSGVO. Jetzt enthaelt
+  der Pool nur noch die grobe Lage (Postleitzahl und Ort), Zeit, Entfernung
+  und die Anforderungen ans Fahrzeug - genug fuer die Entscheidung
+  "kann ich das fahren?", zu wenig fuer alles andere. Alle Einzelheiten
+  bekommt erst, wer die Fahrt tatsaechlich uebernimmt.
+- Die Patientensuche schrieb den Suchbegriff ins Zugriffsprotokoll - gesucht
+  wird unter anderem nach Versicherungsnummer. Damit lagen dieselben sensiblen
+  Daten ein zweites Mal in der Datenbank. Jetzt wird nur noch vermerkt, DASS
+  gesucht wurde.
+- Der oeffentliche Firmen-Code verriet Restbudget, Restfahrten und das Limit je
+  Fahrt - sowohl ueber die Schnittstelle als auch auf der QR-Landeseite. Wer
+  einen Aufsteller fotografiert, konnte daraus die Ausgaben des Unternehmens
+  ablesen. Jetzt kommt nur noch zurueck, ob der Code gilt.
+- Vier CSV-Exporte (Krankenkassen-, Event-, Firmen- und Hotelabrechnung)
+  maskierten Anfuehrungszeichen, aber nicht fuehrende `=`, `+`, `-`, `@`. Excel
+  deutet solche Felder als FORMEL: ein Fahrgast, der sich `=HYPERLINK(...)`
+  nennt, laesst seinen Text in der Abrechnung der Zentrale ausfuehren. Zentral
+  behoben in `src/lib/csv.ts`.
+
+*Konten und Rechte:*
+
+- **Event-Unterkonten hatten alle Rechte des Hauptkontos.** Die Sitzung laeuft
+  aus Gruenden der Mandantentrennung unter der Kennung des Veranstalters, und
+  die Rolle wurde in KEINER Event-Route geprueft - eine Kraft mit der Rolle
+  "Buchhaltung" konnte Rabattcodes anlegen, Firmen-Codes vergeben und Fahrten
+  buchen. Auf der Hotel-Seite gab es die Pruefung laengst. Jetzt entscheidet
+  `portalCan()` in 15 Event-Routen ueber jeden schreibenden Zugriff.
+  Die Sitzungskennung bleibt bewusst die des Hauptkontos: sie traegt die
+  Mandantentrennung, und ein Umbau darauf haette jede Abfrage im Portal
+  beruehrt. Die Rechte haengen an `portalRole`.
+- **Jeder konnte sich als Klinik eintragen** und bekam sofort ein aktives
+  Konto, das Patientendaten anlegen und Krankenfahrten ausloesen darf. Im
+  Echtbetrieb entsteht das Konto jetzt gesperrt; freigeschaltet wird es ueber
+  `PATCH /api/super/institutions`, nachdem jemand die Einrichtung tatsaechlich
+  geprueft hat. Im Test- und Entwicklungsbetrieb bleibt die Selbstfreischaltung
+  an (`INSTITUTION_APPROVAL=0`), sonst liefe kein Testlauf durch.
+- Fahrerpasswoerter durften vier Zeichen lang sein, Einrichtungspasswoerter
+  sechs. Beides jetzt mindestens acht - dieselbe Untergrenze wie ueberall
+  sonst. (Zwoelf Zeichen und ein zweiter Faktor waeren fuer Einrichtungen
+  angemessen; das steht als offener Punkt in der Livegang-Checkliste.)
+- Zwei Sitzungs-Cookies (Event-Registrierung, Einrichtungs-Anmeldung) wurden
+  ohne `secure` gesetzt, waehrend die jeweilige Gegenstelle es korrekt tat.
+- Ohne Ratenbremse waren: Event- und Einrichtungs-Registrierung, die
+  Code-Pruefung, Sammelbuchungen (bis zu 30 Fahrten je Anfrage),
+  Krankenfahrt-Schnellauftraege und die Unterschrift (knapp 2 MB je Anfrage).
+  Alle haben jetzt eine.
+
+*Geld:*
+
+- **Doppelbelastung nach einem Absturz.** Zwischen der erfolgreichen Belastung
+  bei Stripe und dem Vermerk "BEZAHLT" in der Datenbank liegt ein Moment.
+  Stirbt der Prozess genau dort, galt die Fahrt weiter als offen und der
+  naechste Anlauf buchte ein zweites Mal ab. Jetzt tragen Belastung und
+  Reservierung einen Idempotenz-Schluessel aus Fahrt, Karte und Betrag: Stripe
+  erkennt die Wiederholung und liefert das erste Ergebnis, ohne erneut zu
+  belasten. Eine Zahlung mit einer ANDEREN Karte bleibt ein neuer Vorgang.
+- Zwei gleichzeitige Anlaeufe konnten zwei Kartenreservierungen erzeugen, von
+  denen nur eine in der Datenbank landete - die andere blockierte verwaist Geld
+  auf der Karte. Der Vorgang wird jetzt vor dem Stripe-Aufruf beansprucht.
+- `releaseHold()` loeschte die Vorgangsnummer auch dann, wenn die Freigabe bei
+  Stripe fehlschlug. Danach wusste niemand mehr, welche Reservierung offen war.
+  Jetzt wird nur bei Erfolg geloescht, sonst der Fehler vermerkt.
+- Eine Firma mit laufendem Abo konnte mit `{"action":"new"}` einen zweiten
+  Checkout starten und zwei Abos parallel bezahlen. Der Umweg ist entfernt;
+  Tarifwechsel laufen ueber das Stripe-Kundenportal.
+- Zwei gleichzeitige Anfragen konnten zwei Stripe-Kunden fuer dieselbe Firma
+  bzw. denselben Fahrgast anlegen - bedingtes Schreiben verhindert das.
+- Rabattcodes wurden geprueft und danach getrennt hochgezaehlt: bei maxUses 100
+  und usedCount 99 bekamen zwei gleichzeitige Buchungen beide den Rabatt.
+  Jetzt eine atomare, bedingte Verbuchung; scheitert die Buchung danach, wird
+  der Code wieder freigegeben.
+- Eine Zahlungsmethode wurde uebernommen, ohne bei Stripe zu pruefen, ob sie
+  ueberhaupt zum Zahlungskonto dieses Fahrgasts gehoert.
+- Das Entfernen einer Karte loeschte den lokalen Datensatz auch dann, wenn
+  Stripe die Karte gar nicht geloest hatte.
+
+*Betrieb:*
+
+- Das Fahrerlimit des Tarifs wurde gezaehlt und danach angelegt: zwei
+  gleichzeitige Anfragen kamen bei zehn erlaubten Fahrern auf elf. Da
+  PostgreSQL keine Sperre auf "Anzahl Zeilen" kennt, wird jetzt nach dem
+  Anlegen erneut gezaehlt und der ueberzaehlige Datensatz zurueckgenommen.
+- Eine Sammelbuchung ueber 30 Taxis lief ohne Transaktion: schlug die 18. fehl,
+  blieben 17 Fahrten stehen, waehrend die Anfrage einen Fehler meldete - beim
+  zweiten Versuch standen 47 in der Datenbank. Jetzt alles oder nichts; die
+  Vermittlung laeuft erst nach dem Festschreiben.
+- Fehler der Vermittlung wurden mit `.catch(() => {})` verschluckt: die Fahrt
+  stand in der Datenbank, niemand suchte einen Fahrer, und die Antwort meldete
+  Erfolg. Betraf normale Fahrten, Event-Sammelbuchungen und
+  Krankenfahrt-Schnellauftraege. Jetzt Protokoll und Alarm.
+- Ein geschlossener Notruf hielt nur fest, DASS er erledigt wurde - nicht von
+  wem. Jetzt mit eigenem Eintrag im Zugriffsprotokoll.
+- Die Einrichtungs-Abrechnung ordnete Fahrten nach ANLAGEDATUM ein: eine am
+  30.09. bestellte, am 05.10. gefahrene Fahrt landete in der
+  September-Rechnung. Jetzt nach dem Leistungsdatum. Ausserdem zog sie die
+  AKTUELLEN Firmendaten heran - eine Januar-Rechnung trug nach einem Umzug
+  ploetzlich die neue Anschrift. Jetzt aus den Snapshot-Feldern, wie beim
+  einzelnen Fahrtbeleg laengst ueblich.
+- Die Event-Abrechnung summierte abgeschlossene Fahrten und Schaetzpreise zu
+  einer Zahl, die wie eine Rechnungssumme aussah. Jetzt getrennt ausgewiesen
+  und der Export protokolliert.
+- "99:99" bestand die Pruefung einer Shuttle-Uhrzeit.
+
+*Bewusst nicht geaendert:* Der Chat gibt neben dem Verfolgungs-Token weiterhin
+die Auftragskennung zurueck (#88). Die Oberflaeche braucht sie, um eingehende
+Ereignisse zuzuordnen; seit `bookingRefWhereCustomer` ist die Kennung allein
+kein Zugang mehr. Ein eigener oeffentlicher Bezeichner waere sauberer und
+steht auf der Liste, ist aber kein Livegang-Hindernis.
+
+Geprueft durch `scripts/qa/haertung.js` (jetzt 78 Pruefungen).
+
+**Fuenfter externer Bericht (#109-#176, behoben 2026-09-08).** Rund ein Drittel
+der Liste war schon im vierten Durchgang erledigt (Einrichtungs-Registrierung,
+Patienten-Koordinaten, Hotel-CSV, verschluckte Vermittlungsfehler) - der
+Pruefer arbeitete erneut auf einem aelteren Stand. Der Rest war echt.
+
+*Der uebergreifende Befund stimmt:* Das Rollenmodell der Portale ist sauber
+definiert, aber die Routen wandten es nicht an. Im vierten Durchgang betraf das
+die Event-Seite, jetzt die Hotel-Seite - und zwar dieselbe Luecke:
+
+- Ein Concierge, der laut Modell ausschliesslich buchen darf, konnte die
+  Monatsabrechnung oeffnen, **einen ganzen Monat als bezahlt markieren**,
+  Gaestestammdaten lesen und die bevorzugten Taxiunternehmen aendern. Nur die
+  Hotel-BUCHUNG pruefte `portalCan()`. Jetzt tun es auch Abrechnung,
+  Gaesteliste und Einstellungen.
+- Das Markieren eines Monats als bezahlt haelt jetzt fest, WER das wann getan
+  hat - vorher stand dort nur "bezahlt".
+
+*Weitere echte Befunde:*
+
+- **Medizinische Nachweise: die interne Kennung war wieder ein Zugang.** Beim
+  Hochladen wurde nur geprueft, ob die angegebene Fahrt oder Serie EXISTIERT -
+  nicht, ob sie zum Absender gehoert. Wer eine fremde Kennung kannte, konnte
+  eine aerztliche Verordnung an die Fahrt eines fremden Menschen haengen. Genau
+  dieses Modell war bei den Buchungsrouten laengst entwertet worden; hier lebte
+  es weiter. Jetzt: angemeldete Kunden und Einrichtungen nur auf ihre eigenen
+  Vorgaenge, Gaeste ausschliesslich ueber den Verfolgungs-Token.
+- **Ein einmal benutzter Verifizierungscode galt weiter.** `consumedAt` wurde
+  gesetzt, aber nie geprueft - derselbe Code liess sich bis zum Ablauf beliebig
+  oft gegen ein frisches Nachweis-Token eintauschen. Ausserdem hatte die Route
+  keinerlei Bremse, obwohl jeder Versuch eine absichtlich rechenintensive
+  Pruefung ausloest, und der Fehlversuchszaehler wurde erst NACH der Pruefung
+  erhoeht: vier gleichzeitige Anfragen kamen gemeinsam am Limit vorbei.
+- **Eine gesperrte Einrichtung arbeitete bis zu sieben Tage weiter** - die
+  Sperre galt nur fuer neue Anmeldungen, der Ausweis im Browser lief weiter.
+  Bei Patientenakten ist das nicht hinnehmbar; `src/lib/kontoAktiv.ts` prueft
+  das jetzt bei jeder Anfrage (mit kurzem Zwischenspeicher).
+- **Jeder konnte sich als Hotel eintragen** - wie zuvor bei den Einrichtungen.
+  Passwort jetzt mindestens acht Zeichen, mit Ratenbremse.
+- Der Verfolgungslink fiel auf die interne Kennung zurueck, wenn kein Token da
+  war - ein Link, den der Gast anschliessend gar nicht verwenden darf.
+- Stripe Connect konnte bei zwei gleichzeitigen Anfragen **zwei
+  Auszahlungskonten** fuer dieselbe Firma anlegen.
+- Beim **Loeschen eines Fahrers** wurde zuerst geprueft und danach geloescht;
+  dazwischen konnte die Vermittlung ihm noch eine Fahrt zuweisen. Und die
+  Verknuepfung wurde bei ALLEN Fahrten geleert, auch bei zehn Jahre alten -
+  danach war nicht mehr feststellbar, wer eine Fahrt durchgefuehrt hat. Jetzt
+  wird der Fahrer erst stillgelegt und getrennt, und Name und Kennzeichen
+  werden vorher in die Fahrten geschrieben (`driverNameSnap`).
+- Sicherheitsrelevante Fahreraenderungen (Krankenfahrten erlaubt, P-Schein,
+  TUEV) werden protokolliert; die Nachweisfelder verlangen jetzt ein Datum
+  statt beliebigen Text.
+- Das Zugriffsprotokoll endete hart nach 200 Eintraegen - aeltere Zugriffe
+  waren ueber dieses Werkzeug nicht mehr auffindbar. Jetzt mit Blaettern.
+  Die Sichtbarkeitsluecke fuer Eintraege OHNE Firma bleibt BEWUSST bestehen:
+  sie allen Zentralen zu zeigen waere ein Leck ueber Mandantengrenzen hinweg.
+  Diese Zugriffe gehoeren in die Auskunft der Einrichtung und des
+  Plattformbetreibers.
+- Die Flug-Abfrage lief ohne erkennbare Adresse voellig ungebremst, obwohl
+  jede Anfrage beim Anbieter Geld kostet. Die oeffentliche Zonensuche hatte
+  ueberhaupt keine Bremse und keine feste Reihenfolge.
+- Serienfahrten: "99:99" war eine gueltige Uhrzeit, Datumsangaben wurden
+  ungeprueft uebernommen, "mit Rueckfahrt" ohne Rueckfahrzeit erzeugte
+  stillschweigend nur die Hinfahrt (bei einer Dialysefahrt: der Patient kommt
+  nicht nach Hause), und eine fehlende Fahrzeugklasse wurde automatisch zu
+  ROLLSTUHL. Fehler einzelner Serien verschwanden in einem leeren `catch`.
+- Hochgeladene Nachweise wurden nur nach der BEHAUPTUNG des Absenders geprueft;
+  jetzt zusaetzlich anhand der ersten Bytes der Datei. Nachweise an einer
+  Serie tauchten in der Prueflisten der Zentrale gar nicht auf.
+- Die Patientenliste holte den kompletten Bestand ohne Obergrenze.
+- Die Hotelabrechnung nutzte aktuelle statt historischer Firmendaten.
+- Der Tarif-Datensatz entstand beim LESEN (GET) - jetzt ohne Rennen per upsert.
+- Festpreisregeln nahmen Koordinaten ausserhalb der Erde an.
+- Der stillgelegte Provisionsweg lieferte ueber `?format=json` weiterhin
+  Provisionsbetraege aus dem alten Modell; die Felder sind jetzt entfernt.
+
+*Bewusst nicht geaendert:* Preisparameter duerfen weiterhin 0 sein (#133) - das
+ist eine legitime Entscheidung des Betreibers, kein Rechteproblem; eine
+Rueckfrage in der Oberflaeche waere der richtige Ort dafuer. Die Sitzung eines
+Portal-Unterkontos laeuft weiterhin unter der Kennung des Hauptkontos, weil sie
+die Mandantentrennung traegt; die Rechte haengen an `portalRole`.
+
 
 ---
 

@@ -97,14 +97,35 @@ export async function buildInstitutionStatement(
   const monthKey = `${y}-${String(m).padStart(2, "0")}`;
   const periodLabel = `${MONTHS_DE[m - 1]} ${y}`;
 
+  // ZEITRAUM = LEISTUNGSMONAT, nicht Anlagemonat.
+  //
+  // Frueher wurde nach `createdAt` gefiltert. Eine am 30.09. bestellte und am
+  // 05.10. gefahrene Fahrt landete damit in der September-Rechnung, obwohl die
+  // Leistung im Oktober erbracht wurde; eine im August angelegte Vorbestellung
+  // fuer Oktober tauchte sogar zwei Monate zu frueh auf. Fuer eine Rechnung
+  // zaehlt, WANN gefahren wurde:
+  //   - abgeschlossene Fahrten  -> Datum der Durchfuehrung (completedAt)
+  //   - geplante Fahrten        -> der geplante Termin (scheduledAt)
+  //   - alles ohne beides       -> Anlagedatum als letzter Rueckfall
   const bookings = await prisma.booking.findMany({
-    where: { institutionId, createdAt: { gte: start, lt: end } },
+    where: {
+      institutionId,
+      OR: [
+        { status: "ABGESCHLOSSEN", completedAt: { gte: start, lt: end } },
+        { status: { not: "ABGESCHLOSSEN" }, scheduledAt: { gte: start, lt: end } },
+        { status: { not: "ABGESCHLOSSEN" }, scheduledAt: null, createdAt: { gte: start, lt: end } },
+      ],
+    },
     orderBy: { createdAt: "asc" },
     select: {
       id: true, createdAt: true, completedAt: true, scheduledAt: true, status: true,
       patientName: true, customerName: true, pickupAddress: true, destAddress: true,
       fare: true, priceApprox: true, payerType: true, distanceMeters: true,
       companyId: true,
+      // Snapshot-Felder: die Firmendaten, wie sie zum Zeitpunkt der Fahrt
+      // galten. Ohne sie traegt eine alte Rechnung heutige Anschriften.
+      companyNameSnap: true, companyAddressSnap: true, companyPhoneSnap: true,
+      companyTaxIdSnap: true, companyVatIdSnap: true,
       company: { select: { id: true, name: true, address: true, phone: true, email: true, taxId: true, vatId: true } },
     },
   });
@@ -123,23 +144,45 @@ export async function buildInstitutionStatement(
   }));
 
   // ---- Abschnitte je Unternehmen ----
+  // Eine einmal erzeugte Rechnung muss beim erneuten Aufruf gleich aussehen.
+  // Vorher wurden die AKTUELLEN Firmendaten geladen: zog das Taxiunternehmen im
+  // Juni um oder aenderte seine Steuernummer, standen diese neuen Angaben
+  // ploetzlich auch auf der Januar-Rechnung. Beim einzelnen Fahrtbeleg war das
+  // laengst geloest (companyNameSnap & Co.) - hier zieht es jetzt nach.
   const nachFirma = new Map<string, { company: CompanySection["company"]; lines: StatementLine[] }>();
   bookings.forEach((b, i) => {
     const schluessel = b.companyId ?? "__offen__";
     if (!nachFirma.has(schluessel)) {
-      nachFirma.set(schluessel, { company: b.company ?? null, lines: [] });
+      const firma = b.company
+        ? {
+            id: b.company.id,
+            name: b.companyNameSnap ?? b.company.name,
+            address: b.companyAddressSnap ?? b.company.address,
+            phone: b.companyPhoneSnap ?? b.company.phone,
+            email: b.company.email,
+            taxId: b.companyTaxIdSnap ?? b.company.taxId,
+            vatId: b.companyVatIdSnap ?? b.company.vatId,
+          }
+        : null;
+      nachFirma.set(schluessel, { company: firma, lines: [] });
     }
     nachFirma.get(schluessel)!.lines.push(lines[i]);
   });
 
-  const instKurz = institutionId.slice(-4).toUpperCase();
+  // Vier Zeichen je Kennung koennen kollidieren - zwei verschiedene
+  // Einrichtungen bekaemen dieselbe Rechnungsnummer. Bis es einen eigenen,
+  // fortlaufenden Rechnungsbestand in der Datenbank gibt (der korrekte Weg,
+  // siehe memory/PRD.md), nutzen wir zehn Zeichen je Kennung: das ist bei
+  // cuid-Kennungen praktisch eindeutig und bleibt fuer dieselbe Kombination
+  // aus Monat, Firma und Einrichtung stabil.
+  const instKurz = institutionId.slice(-10).toUpperCase();
   const sections: CompanySection[] = [...nachFirma.values()]
     .sort((a, b) => (a.company?.name ?? "￿").localeCompare(b.company?.name ?? "￿"))
     .map(({ company, lines: sl }) => {
       const fertig = sl.filter((l) => l.billable);
       return {
         company,
-        invoiceNo: company ? `KF-${monthKey.replace("-", "")}-${company.id.slice(-4).toUpperCase()}-${instKurz}` : null,
+        invoiceNo: company ? `KF-${monthKey.replace("-", "")}-${company.id.slice(-10).toUpperCase()}-${instKurz}` : null,
         lines: sl,
         completed: fertig.length,
         totalBillable: round2(fertig.reduce((s, l) => s + (l.amount ?? 0), 0)),

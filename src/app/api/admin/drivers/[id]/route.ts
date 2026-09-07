@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logAccess } from "@/lib/accessLog";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
@@ -19,13 +20,13 @@ const schema = z.object({
   medicalAllowed: z.boolean().optional(),
   hasRamp: z.boolean().optional(),
   hasStretcher: z.boolean().optional(),
-  pScheinUntil: z.string().max(20).optional().nullable(),
+  pScheinUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Bitte JJJJ-MM-TT").optional().nullable().or(z.literal("")),
   wheelchairTrained: z.boolean().optional(),
   qualifications: z.string().max(300).optional().nullable(),
-  licenseUntil: z.string().max(20).optional().nullable(),
-  concessionUntil: z.string().max(20).optional().nullable(),
-  insuranceUntil: z.string().max(20).optional().nullable(),
-  tuevUntil: z.string().max(20).optional().nullable(),
+  licenseUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Bitte JJJJ-MM-TT").optional().nullable().or(z.literal("")),
+  concessionUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Bitte JJJJ-MM-TT").optional().nullable().or(z.literal("")),
+  insuranceUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Bitte JJJJ-MM-TT").optional().nullable().or(z.literal("")),
+  tuevUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Bitte JJJJ-MM-TT").optional().nullable().or(z.literal("")),
   active: z.boolean().optional(),
 });
 
@@ -55,6 +56,23 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (vehicleClass != null) data.vehicleClass = normalizeClass(vehicleClass);
   const driver = await prisma.driver.update({ where: { id: params.id }, data });
 
+  // Wer hat einem Fahrer erlaubt, Krankenfahrten zu uebernehmen? Wer hat den
+  // P-Schein-Ablauf verschoben? Das war bisher nirgends festgehalten.
+  const wichtig = ["active", "medicalAllowed", "hasRamp", "hasStretcher", "wheelchairTrained",
+    "pScheinUntil", "licenseUntil", "concessionUntil", "insuranceUntil", "tuevUntil"] as const;
+  const geaendert = wichtig.filter((k) => (parsed.data as any)[k] !== undefined);
+  if (geaendert.length) {
+    await logAccess({
+      actorType: "ADMIN",
+      companyId: session.companyId,
+      actorId: session.companyId,
+      action: "UPDATE",
+      entity: "BOOKING",
+      entityId: driver.id,
+      detail: `Fahrer ${driver.name}: ${geaendert.map((k) => `${k}=${String((parsed.data as any)[k])}`).join(", ")}`,
+    });
+  }
+
   // Eine Deaktivierung muss SOFORT wirken: offene Verbindungen des Fahrers
   // werden getrennt und er verschwindet aus der Disposition. Sonst faehrt er
   // mit seiner bereits offenen Sitzung einfach weiter.
@@ -82,22 +100,68 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
   if (!existing || existing.companyId !== session.companyId) {
     return NextResponse.json({ error: "Nicht gefunden" }, { status: 404 });
   }
-  // Aktive Auftraege blockieren das Loeschen.
+  // ZUERST stilllegen, dann pruefen. Vorher wurde gezaehlt, dann geloescht -
+  // dazwischen konnte die Vermittlung dem Fahrer noch eine Fahrt zuweisen, die
+  // ihren Fahrer sofort wieder verlor. Ein deaktivierter Fahrer wird nicht mehr
+  // disponiert (siehe Vermittlung), das Zeitfenster ist damit zu.
+  await prisma.driver.update({ where: { id: existing.id }, data: { active: false } });
+  const rt0 = getRuntime();
+  try {
+    await rt0?.dispatcher.setStatus(existing.id, "OFFLINE");
+  } catch {
+    /* Der Fahrer wird ohnehin geloescht. */
+  }
+  try {
+    rt0?.io.in(`driver:${existing.id}`).disconnectSockets(true);
+  } catch {
+    /* siehe oben */
+  }
+
   const activeCount = await prisma.booking.count({
     where: { driverId: existing.id, status: { in: ["ZUGEWIESEN", "AKTIV"] } },
   });
   if (activeCount > 0) {
+    // Wieder freigeben – der Fahrer bleibt im Dienst.
+    await prisma.driver.update({ where: { id: existing.id }, data: { active: true } });
     return NextResponse.json(
       { error: "Fahrer hat noch laufende Aufträge. Bitte zuerst abschließen oder stornieren." },
       { status: 409 },
     );
   }
-  // Historie behalten – nur Verknuepfung zum Fahrer aufloesen.
+
+  // HISTORIE SICHERN, BEVOR die Verknüpfung fällt.
+  //
+  // Der Kommentar sagte „Historie behalten", tatsächlich wurde bei ALLEN
+  // Fahrten `driverId` geleert – auch bei längst abgeschlossenen. Danach war
+  // nicht mehr feststellbar, wer eine Fahrt vor zwei Jahren durchgeführt hat:
+  // für Beschwerden, Versicherungsfälle und Krankenfahrten ein echter Verlust.
+  //
+  // Die Belege kennen dafür bereits `driverNameSnap`/`driverPlateSnap`. Gesetzt
+  // werden die aber erst beim Abschluss einer Fahrt – ältere und abgebrochene
+  // Fahrten haben sie nicht. Deshalb werden sie hier nachgetragen, solange der
+  // Fahrer noch existiert. Die Fahrt weiß danach dauerhaft, wer sie gefahren
+  // hat, ohne dass der Personendatensatz erhalten bleiben muss.
+  await prisma.booking.updateMany({
+    where: { driverId: existing.id, driverNameSnap: null },
+    data: { driverNameSnap: existing.name, driverPlateSnap: existing.vehiclePlate ?? null },
+  });
+
   await prisma.booking.updateMany({
     where: { driverId: existing.id },
     data: { driverId: null },
   });
   await prisma.driver.delete({ where: { id: params.id } });
+
+  await logAccess({
+    actorType: "ADMIN",
+    companyId: session.companyId,
+    actorId: session.companyId,
+    action: "CANCEL",
+    entity: "BOOKING",
+    entityId: existing.id,
+    detail: `Fahrer ${existing.name} gelöscht (Fahrtenhistorie über Namens-Schnappschuss erhalten)`,
+  });
+
   return NextResponse.json({ ok: true });
 }
 

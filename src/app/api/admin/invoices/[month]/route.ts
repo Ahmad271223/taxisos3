@@ -49,7 +49,20 @@ export async function GET(req: Request, { params }: { params: { month: string } 
   }
 
   if (url.searchParams.get("format") === "json") {
-    return NextResponse.json(data);
+    // Die Umsatzuebersicht darf diesen Weg weiter nutzen. Die Felder der ALTEN
+    // Provisionsabrechnung duerfen dabei aber nicht mehr durchrutschen: das
+    // heutige Modell kennt 0 % Provision je Fahrt, und zwei nebeneinander
+    // lebende Finanzlogiken sind gefaehrlicher als eine fehlende Zahl. Wer
+    // versehentlich die alte Rechnung anzeigt, bekaeme sonst Betraege, die es
+    // nicht gibt.
+    const { platformFee, platformFeeRate, commissionRate, ...umsatz } = data as any;
+    return NextResponse.json({
+      ...umsatz,
+      // Ausdruecklich, damit kein Aufrufer die fehlenden Felder als "0" rät.
+      provisionsmodellStillgelegt: true,
+      platformFee: 0,
+      platformFeeRate: 0,
+    });
   }
 
   const pdf = await invoicePdf(data);

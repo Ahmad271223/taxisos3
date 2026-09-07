@@ -3,6 +3,7 @@
 // vom Scheduler aufgerufen. Dedupliziert über recurringId + scheduledAt.
 
 import { prisma } from "@/lib/prisma";
+import { alarm } from "@/server/alarm";
 import { estimatePriceViaWith } from "@/lib/geo";
 import { pricingForSlug, classFactorForSlug, applyClassFactor } from "@/lib/pricing";
 import { getPlatformRate, approxFare } from "@/lib/platformRate";
@@ -81,6 +82,10 @@ async function priceFor(from: { lat: number; lng: number }, to: { lat: number; l
 }
 
 async function ensureBooking(series: Series, scheduledAt: Date, outbound: boolean, price: any): Promise<boolean> {
+  // Der Kommentar versprach Deduplizierung, tatsaechlich lasen zwei parallele
+  // Laeufe beide "gibt es noch nicht" und legten beide an. Die Vorabpruefung
+  // bleibt (sie spart im Normalfall Arbeit); der eigentliche Schutz ist das
+  // Abfangen weiter unten beim Anlegen.
   const existing = await prisma.booking.findFirst({ where: { recurringId: series.id, scheduledAt } });
   if (existing) return false;
   await prisma.booking.create({
@@ -182,7 +187,15 @@ export async function materializeDueRides(lookaheadDays = 3): Promise<number> {
   for (const s of all) {
     try {
       total += await materializeSeries(s as unknown as Series, lookaheadDays);
-    } catch {
+    } catch (e: any) {
+      // Frueher stand hier ein leeres catch. Eine kaputte Serie fiel damit nie
+      // auf: der Lauf meldete jeden Tag Erfolg, waehrend fuer einen Patienten
+      // wochenlang keine Fahrt entstand.
+      console.error(`Serie ${s.id} konnte nicht erzeugt werden:`, e?.message ?? e);
+      alarm("warnung", `serie:${s.id}`, "Serienfahrt konnte nicht erzeugt werden", {
+        serie: s.id,
+        grund: String(e?.message ?? e),
+      });
       /* eine Serie darf den Lauf nicht stoppen */
     }
   }
