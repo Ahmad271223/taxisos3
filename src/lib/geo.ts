@@ -126,7 +126,10 @@ export async function geocode(query: string, limit = 6): Promise<GeocodeResult[]
   const p = geoProvider();
   try {
     if (p === "google") return await geocodeGoogle(query, limit, biasCenter());
-  } catch {
+  } catch (e: any) {
+    // Sichtbar machen, statt still leer zu liefern: eine stumme Adresssuche
+    // sieht fuer den Fahrgast aus wie "keine Treffer", ist aber ein Ausfall.
+    console.warn("Google Geocoding fehlgeschlagen:", e?.message ?? e, e?.cause?.message ? `(${e.cause.message})` : "");
     return []; // Google konfiguriert -> NICHT auf freie Dienste ausweichen (ToS)
   }
   // Frei (nur Dev/Test): Photon -> Nominatim.
@@ -184,7 +187,7 @@ export async function routeBetween(from: GeoPoint, to: GeoPoint): Promise<RouteR
     try {
       return await routeGoogle([from, to]);
     } catch (e: any) {
-      console.warn("Google Routes fehlgeschlagen:", e?.message ?? e);
+      console.warn("Google Routes fehlgeschlagen:", e?.message ?? e, e?.cause?.message ? `(${e.cause.message})` : "");
       return luftlinienSchaetzung([from, to]);
     }
   }
@@ -236,7 +239,7 @@ export async function routeVia(points: GeoPoint[]): Promise<RouteResult> {
     try {
       return await routeGoogle(pts);
     } catch (e: any) {
-      console.warn("Google Routes (Mehrziel) fehlgeschlagen:", e?.message ?? e);
+      console.warn("Google Routes (Mehrziel) fehlgeschlagen:", e?.message ?? e, e?.cause?.message ? `(${e.cause.message})` : "");
       return luftlinienSchaetzung(pts);
     }
   }
