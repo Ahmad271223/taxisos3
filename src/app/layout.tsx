@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans, Manrope } from "next/font/google";
-import "leaflet/dist/leaflet.css";
 import "./globals.css";
 import { CookieNotice } from "@/components/CookieNotice";
 import { ChunkRecovery } from "@/components/ChunkRecovery";

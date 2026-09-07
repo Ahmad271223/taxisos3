@@ -25,13 +25,19 @@ ab. Das ist Absicht — jeder Punkt hat einen konkreten Schaden dahinter.
 - [ ] **Domain mit HTTPS** in `APP_BASE_URL` und `ALLOWED_ORIGINS`.
 - [ ] **`SMS_DISABLED` und `ENABLE_SIMULATOR` ausschalten**, sonst läuft der
       Echtbetrieb mit Testfahrern.
+- [ ] **Google Maps — zwei Schlüssel** aus der Google Cloud Console (Abrechnungskonto
+      ist Pflicht, 200 $ Freikontingent/Monat):
+      `GOOGLE_MAPS_API_KEY` (Server: Geocoding API + Routes API, auf diese zwei
+      APIs eingeschränkt) und `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` (Browser: Maps
+      JavaScript API, auf `taxisos3.onrender.com` und die eigene Domain
+      eingeschränkt). Der Browser-Schlüssel wird beim Build eingebacken —
+      nach jeder Änderung neu deployen. Seit dem 07.09.2026 gibt es keine
+      andere Karte mehr: ohne diese Schlüssel verweigert die Startsperre den
+      Echtbetrieb.
 
 ## B. Ohne das solltest du nicht starten
 
-- [ ] **Kartendienst lizenzieren** (Mapbox oder LocationIQ). Die kostenlosen
-      OSM-Dienste erlauben **keine gewerbliche Nutzung** und drosseln — im
-      Test ist die Routenberechnung deshalb schon zeitweise ausgefallen. Das
-      ist ein Lizenz-, kein Technikproblem.
+- ~~Kartendienst lizenzieren~~ → erledigt durch Google Maps (siehe Abschnitt A).
 - [ ] **Bezahlter Hosting-Plan** (Render). Der kostenlose Plan hat **keine**
       Wiederherstellungspunkte — es gibt dort schlicht keine Sicherung.
 - [ ] **Wiederherstellung einmal proben.** Ablauf in
@@ -42,7 +48,7 @@ ab. Das ist Absicht — jeder Punkt hat einen konkreten Schaden dahinter.
       solange kein Weg gesetzt ist, landen Alarme nur im Protokoll. Der Server
       sagt beim Start ausdrücklich, wenn das der Fall ist.
 - [ ] **AV-Verträge abschließen** — Stripe, Twilio, Resend, Render,
-      Kartendienst. Liste mit Fundstellen: `memory/DSGVO/Auftragsverarbeiter.md`.
+      Google. Liste mit Fundstellen: `memory/DSGVO/Auftragsverarbeiter.md`.
       Bei Render **Region Frankfurt** wählen, nicht die Voreinstellung Oregon.
 - [ ] **DSGVO-Entwürfe prüfen lassen.** Verarbeitungsverzeichnis,
       Löschkonzept und TOM liegen unter `memory/DSGVO/` — als Entwurf, nicht

@@ -314,6 +314,31 @@ node scripts/qa/cleanup.js      # Testdaten entfernen
 
 ---
 
+## 10a. Karte, Adresssuche, Routen: Google Maps
+
+Seit 07.09.2026 ist Google Maps Platform der **einzige** Kartendienst. Leaflet,
+Mapbox und LocationIQ sind entfernt. Aufbau:
+
+- `src/lib/geoGoogle.ts`: Geocoding API (Adresse <-> Koordinate) und Routes API
+  (Strecke, verkehrsabhaengige Fahrzeit, Streckenverlauf; auch Mehrziel).
+  Server-Schluessel `GOOGLE_MAPS_API_KEY`, verlaesst den Server nie.
+- `src/components/GoogleMap.tsx` / `GoogleLocationPicker.tsx`: die sichtbare
+  Karte (Advanced Markers, Marker werden per id aktualisiert statt neu
+  erzeugt). Browser-Schluessel `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`, auf die
+  Domain eingeschraenkt, wird beim Build eingebacken.
+- `Map.tsx`/`LocationPicker.tsx`: ohne Schluessel ein klarer Hinweis statt
+  leerer Flaeche. Die Startsperre lehnt den Echtbetrieb ohne beide
+  Schluessel ab.
+- Ohne Google-Schluessel greifen fuer Adresssuche/Routen die freien
+  OSM-Dienste - NUR fuer Entwicklung und Pruefreihen (keine gewerbliche
+  Nutzung erlaubt). Bei Google-Fehlern wird geschaetzt (Luftlinie x 1,35),
+  nie auf die freien Dienste ausgewichen.
+
+Geprueft: `scripts/qa/google_maps.js` (Weiche, Startsperre, Streckendekoder mit
+Googles Beispielwert; mit Schluessel zusaetzlich echte Anfragen).
+
+---
+
 ## 10b. Belege und Rechnungen
 
 Alle vier Belegarten stellen im Namen des **Taxiunternehmens** aus, nicht der

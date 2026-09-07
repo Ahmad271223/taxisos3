@@ -131,21 +131,17 @@ services:
         sync: false
 
       # ---- Karten und Routen ------------------------------------------------
-      # Google Maps (nach der Umstellung): der NEXT_PUBLIC_-Schluessel wird
-      # zur BUILD-Zeit eingebacken - VOR dem ersten Build setzen und im
-      # Google-Cloud-Projekt auf die eigene Domain einschraenken.
+      # Google Maps ist die EINZIGE Karte. Zwei Schluessel:
+      #   GOOGLE_MAPS_API_KEY              Server (Geocoding API + Routes API)
+      #   NEXT_PUBLIC_GOOGLE_MAPS_API_KEY  Browser (Maps JavaScript API), auf die
+      #     Domain eingeschraenkt; wird zur BUILD-Zeit eingebacken -> vor dem
+      #     Build setzen, jede Aenderung braucht einen neuen Build.
       - key: GOOGLE_MAPS_API_KEY
         sync: false
       - key: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
         sync: false
-      # Bisherige Anbieter (bleiben als Rueckfall nutzbar):
-      - key: MAPBOX_TOKEN
-        sync: false
-      - key: LOCATIONIQ_KEY
-        sync: false
-      - key: NEXT_PUBLIC_MAP_TILES_URL
-        sync: false
-      - key: NEXT_PUBLIC_MAP_TILES_ATTRIB
+      # Optional: eigene Karten-ID aus der Cloud Console (Styling); sonst DEMO_MAP_ID.
+      - key: NEXT_PUBLIC_GOOGLE_MAP_ID
         sync: false
 
       # ---- Sonstiges --------------------------------------------------------

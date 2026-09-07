@@ -56,14 +56,15 @@ und die Aufsichtsbehörden prüfen genau dort besonders genau.
 | **Drittland** | US-Anbieter; mit EU-Region und SCC vertretbar |
 | **Wichtig** | Das ist der Auftragsverarbeiter mit dem größten Datenumfang. Wenn hier etwas fehlt, hilft an keiner anderen Stelle Sorgfalt. |
 
-## 5. Karten- und Routendienst (Mapbox oder LocationIQ)
+## 5. Google Maps Platform (Google Ireland Ltd.)
 
 | | |
 |---|---|
-| **Zweck** | Adresssuche, Routenberechnung |
-| **Daten** | Abhol- und Zieladressen, Koordinaten — **ohne** Namen |
-| **Abzuschließen** | DPA des gewählten Anbieters |
-| **Zusätzlich** | Die kostenlosen OSM-Dienste erlauben **keine gewerbliche Nutzung**. Das ist unabhängig vom Datenschutz zu klären, sonst ist der Betrieb schlicht nicht lizenziert. |
+| **Zweck** | Karte in Buchung, Verfolgung und Dashboards; Adresssuche; Routen und Ankunftszeiten |
+| **Daten** | Abhol- und Zieladressen, Koordinaten, Fahrerpositionen (auf der Karte) — **ohne** Namen. Im Browser zusätzlich die üblichen Aufrufdaten (IP) des Nutzers an Google |
+| **Abzuschließen** | Google Maps Platform Terms of Service + Google Cloud Data Processing Addendum (im Cloud-Projekt unter *Compliance* annehmen und ablegen) |
+| **Drittland** | US-Mutterkonzern; Standardvertragsklauseln im DPA enthalten |
+| **Hinweis** | Weil die Karte im Browser des Nutzers lädt, gehört Google in die Datenschutzerklärung der Website (Empfänger, Zweck, Drittland). Cookie-Banner: Google Maps setzt beim reinen Kartenaufruf keine Werbecookies, die Einbindung ist aber als Drittdienst zu nennen. |
 
 ## 6. Aviationstack (Flugdaten)
 
@@ -100,7 +101,7 @@ Verantwortlichkeit** (Art. 26). In den Vertrag gehören mindestens:
 - [ ] Twilio DPA angenommen und abgelegt
 - [ ] Resend DPA angefordert und abgelegt
 - [ ] Render DPA abgelegt, **Region Frankfurt** bestätigt
-- [ ] Kartendienst lizenziert und DPA abgelegt
+- [ ] Google Maps Platform: Abrechnung aktiv, DPA angenommen, Schlüssel auf Domain/APIs eingeschränkt
 - [ ] Mustervertrag für Taxiunternehmen mit Art.-26-Regelung
 - [ ] Datenschutzerklärung auf der Website, die diese Empfänger benennt
 - [ ] Einwilligungstext für Krankenfahrten (Art. 9) anwaltlich geprüft

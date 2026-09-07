@@ -17,19 +17,6 @@ body {
   font-feature-settings: "ss01", "cv01";
 }
 
-/* Leaflet karte fuellt ihren Container */
-.leaflet-container {
-  width: 100%;
-  height: 100%;
-  background: #eef2f7;
-  z-index: 0;
-  font-family: inherit;
-}
-.leaflet-control-attribution {
-  font-size: 10px;
-  opacity: 0.6;
-}
-
 /* dezenter Scrollbalken */
 * {
   scrollbar-width: thin;

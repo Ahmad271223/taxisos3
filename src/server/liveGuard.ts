@@ -117,11 +117,18 @@ export function collectFindings(env = process.env): GuardFinding[] {
   }
 
   // --- Fremddienste ---------------------------------------------------------
-  if (!has(env.MAPBOX_TOKEN) && !has(env.LOCATIONIQ_KEY) && !has(env.GOOGLE_MAPS_KEY)) {
+  if (!has(env.GOOGLE_MAPS_API_KEY)) {
     f.push({
-      fatal: false, key: "MAPBOX_TOKEN",
-      problem: "Adresssuche und Routen laufen über die kostenlosen OSM-Dienste. Deren Nutzungsbedingungen erlauben KEINE gewerbliche Nutzung, und sie drosseln bei Last.",
-      fix: "Kostenpflichtigen Anbieter buchen (Mapbox, LocationIQ oder Google) und den Schlüssel eintragen.",
+      fatal: true, key: "GOOGLE_MAPS_API_KEY",
+      problem: "Adresssuche und Routen wuerden ueber die kostenlosen OSM-Dienste laufen. Deren Nutzungsbedingungen erlauben KEINE gewerbliche Nutzung, und sie drosseln bei Last.",
+      fix: "Google-Cloud-Projekt: Geocoding API + Routes API aktivieren, Server-Schluessel erzeugen und als GOOGLE_MAPS_API_KEY eintragen.",
+    });
+  }
+  if (!has(env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY)) {
+    f.push({
+      fatal: true, key: "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY",
+      problem: "Es gibt keine Karte: Buchung, Verfolgung und Dashboards zeigen an ihrer Stelle nur einen Hinweis.",
+      fix: "Browser-Schluessel (Maps JavaScript API, auf die eigene Domain eingeschraenkt) als NEXT_PUBLIC_GOOGLE_MAPS_API_KEY eintragen - VOR dem Build, der Wert wird eingebacken.",
     });
   }
   if (!has(env.AVIATIONSTACK_KEY)) {

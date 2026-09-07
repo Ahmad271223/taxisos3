@@ -1,5 +1,10 @@
-// Geokodierung (Photon/Komoot + Nominatim-Fallback), Routing/Distanz (OSRM)
-// und Preisberechnung. Alle Dienste sind frei und ohne API-Key nutzbar.
+// Geokodierung, Routing/Distanz und Preisberechnung.
+//
+// Im Betrieb laeuft alles ueber Google Maps Platform (lib/geoGoogle.ts).
+// Ohne Google-Schluessel greifen die freien OSM-Dienste (Photon/Nominatim/
+// OSRM) - NUR fuer Entwicklung und Tests; deren Nutzungsbedingungen erlauben
+// keine gewerbliche Last, und die Startsperre lehnt den Echtbetrieb ohne
+// Google ab.
 
 export interface GeoPoint {
   lat: number;
@@ -30,25 +35,17 @@ export interface PriceEstimate {
 const PHOTON = "https://photon.komoot.io";
 const NOMINATIM = "https://nominatim.openstreetmap.org";
 const OSRM = "https://router.project-osrm.org";
+import { googleConfigured, geocodeGoogle, reverseGeocodeGoogle, routeGoogle } from "./geoGoogle";
+
 const USER_AGENT = "TaxiConnect/0.1 (Taxi-Dispatch Hannover)";
 
-// --- Geocoder/Router-Anbieter ---------------------------------------------
-// Kommerziell nutzbarer Anbieter via Env. Ohne Key -> freie OSM-Dienste
-// (Photon/Nominatim/OSRM) als Fallback (nur Entwicklung/Tests; deren ToS
-// untersagen kommerzielle Last). Auto-Auswahl: Mapbox > LocationIQ > frei,
-// oder explizit per GEO_PROVIDER.
-const MAPBOX_TOKEN = process.env.MAPBOX_TOKEN;
-const LOCATIONIQ_KEY = process.env.LOCATIONIQ_KEY;
-const LOCATIONIQ_REGION = process.env.LOCATIONIQ_REGION ?? "eu1";
-
-type GeoProvider = "mapbox" | "locationiq" | "free";
+// --- Anbieter ---------------------------------------------------------------
+type GeoProvider = "google" | "free";
 
 function geoProvider(): GeoProvider {
   const p = (process.env.GEO_PROVIDER ?? "").toLowerCase();
-  if (p === "mapbox" || p === "locationiq" || p === "free") return p as GeoProvider;
-  if (MAPBOX_TOKEN) return "mapbox";
-  if (LOCATIONIQ_KEY) return "locationiq";
-  return "free";
+  if (p === "google" || p === "free") return p as GeoProvider;
+  return googleConfigured() ? "google" : "free";
 }
 
 // Ist ein kommerzieller Anbieter konfiguriert?
@@ -56,16 +53,8 @@ export function geocoderConfigured(): boolean {
   return geoProvider() !== "free";
 }
 
-// Directions-URL je Anbieter. Mapbox- UND LocationIQ-Routing liefern OSRM-Format,
-// daher ein gemeinsamer Parser.
+// Routen-URL der freien OSRM-Instanz (nur Dev/Test; Betrieb: Google).
 function directionsUrl(coords: string): string {
-  const p = geoProvider();
-  if (p === "mapbox") {
-    return `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?overview=full&geometries=geojson&access_token=${MAPBOX_TOKEN}`;
-  }
-  if (p === "locationiq") {
-    return `https://${LOCATIONIQ_REGION}.locationiq.com/v1/directions/driving/${coords}?overview=full&geometries=geojson&key=${LOCATIONIQ_KEY}`;
-  }
   return `${OSRM}/route/v1/driving/${coords}?overview=full&geometries=geojson`;
 }
 
@@ -132,44 +121,13 @@ async function geocodeNominatim(query: string, limit: number): Promise<GeocodeRe
   return data.map((d) => ({ label: d.display_name, lat: Number(d.lat), lng: Number(d.lon) }));
 }
 
-// LocationIQ-Suche (Nominatim-kompatibles Format) – via API-Key.
-async function geocodeLocationIQ(query: string, limit: number): Promise<GeocodeResult[]> {
-  const url = `https://${LOCATIONIQ_REGION}.locationiq.com/v1/search?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(
-    query,
-  )}&format=json&limit=${limit}&countrycodes=de&accept-language=de&addressdetails=0`;
-  const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
-  if (!res.ok) return [];
-  const data = (await res.json()) as Array<{ display_name: string; lat: string; lon: string }>;
-  return (Array.isArray(data) ? data : []).map((d) => ({ label: d.display_name, lat: Number(d.lat), lng: Number(d.lon) }));
-}
-
-// Mapbox Geocoding v6 (GeoJSON) – via Access-Token, auf Hannover gebiast.
-async function geocodeMapbox(query: string, limit: number): Promise<GeocodeResult[]> {
-  const c = biasCenter();
-  const url = `https://api.mapbox.com/search/geocode/v6/forward?q=${encodeURIComponent(
-    query,
-  )}&access_token=${MAPBOX_TOKEN}&country=de&language=de&limit=${limit}&proximity=${c.lng},${c.lat}`;
-  const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
-  if (!res.ok) return [];
-  const data = (await res.json()) as { features?: any[] };
-  const out: GeocodeResult[] = [];
-  for (const f of data.features ?? []) {
-    const coords = f.geometry?.coordinates;
-    if (!coords) continue;
-    const label = f.properties?.full_address ?? f.properties?.name ?? f.properties?.place_formatted ?? "";
-    out.push({ label, lat: coords[1], lng: coords[0] });
-  }
-  return out;
-}
-
 export async function geocode(query: string, limit = 6): Promise<GeocodeResult[]> {
   if (!query || query.trim().length < 2) return [];
   const p = geoProvider();
   try {
-    if (p === "mapbox") return await geocodeMapbox(query, limit);
-    if (p === "locationiq") return await geocodeLocationIQ(query, limit);
+    if (p === "google") return await geocodeGoogle(query, limit, biasCenter());
   } catch {
-    return []; // kommerzieller Anbieter konfiguriert -> NICHT auf freie Dienste ausweichen (ToS)
+    return []; // Google konfiguriert -> NICHT auf freie Dienste ausweichen (ToS)
   }
   // Frei (nur Dev/Test): Photon -> Nominatim.
   try {
@@ -189,23 +147,8 @@ export async function geocode(query: string, limit = 6): Promise<GeocodeResult[]
 export async function reverseGeocode(lat: number, lng: number): Promise<GeocodeResult | null> {
   const p = geoProvider();
   try {
-    if (p === "mapbox") {
-      const url = `https://api.mapbox.com/search/geocode/v6/reverse?longitude=${lng}&latitude=${lat}&access_token=${MAPBOX_TOKEN}&language=de`;
-      const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
-      if (res.ok) {
-        const d = (await res.json()) as { features?: any[] };
-        const f = d.features?.[0];
-        if (f) {
-          const label = f.properties?.full_address ?? f.properties?.name ?? "";
-          return { label, lat: f.geometry?.coordinates?.[1] ?? lat, lng: f.geometry?.coordinates?.[0] ?? lng };
-        }
-      }
-      return null;
-    }
-    const base =
-      p === "locationiq"
-        ? `https://${LOCATIONIQ_REGION}.locationiq.com/v1/reverse?key=${LOCATIONIQ_KEY}&lat=${lat}&lon=${lng}&format=json&accept-language=de`
-        : `${NOMINATIM}/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=de`;
+    if (p === "google") return await reverseGeocodeGoogle(lat, lng);
+    const base = `${NOMINATIM}/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=de`;
     const res = await fetch(base, { headers: { "User-Agent": USER_AGENT, "Accept-Language": "de" } });
     if (res.ok) {
       const d = (await res.json()) as { display_name?: string; lat?: string; lon?: string };
@@ -223,9 +166,28 @@ export async function geocodeOne(query: string): Promise<GeocodeResult | null> {
   return results[0] ?? null;
 }
 
+// Luftlinie x 1,35 bei 30 km/h - der Rueckfall, wenn kein Routendienst antwortet.
+function luftlinienSchaetzung(pts: GeoPoint[]): RouteResult {
+  let straight = 0;
+  for (let i = 1; i < pts.length; i++) straight += haversineMeters(pts[i - 1], pts[i]);
+  const distanceMeters = Math.round(straight * 1.35);
+  const durationSeconds = Math.round((distanceMeters / 1000 / 30) * 3600);
+  return { distanceMeters, durationSeconds, geometry: pts.map((p) => [p.lat, p.lng] as [number, number]) };
+}
+
 // Strassen-Route fuer Distanz, Fahrzeit und Streckenverlauf. Faellt bei Fehler
 // auf eine Luftlinien-Schaetzung zurueck.
 export async function routeBetween(from: GeoPoint, to: GeoPoint): Promise<RouteResult> {
+  if (geoProvider() === "google") {
+    // Bei Google-Fehlern NICHT auf den freien OSRM-Dienst ausweichen (ToS),
+    // sondern schaetzen - genau wie bei den anderen bezahlten Anbietern.
+    try {
+      return await routeGoogle([from, to]);
+    } catch (e: any) {
+      console.warn("Google Routes fehlgeschlagen:", e?.message ?? e);
+      return luftlinienSchaetzung([from, to]);
+    }
+  }
   const url = directionsUrl(`${from.lng},${from.lat};${to.lng},${to.lat}`);
   try {
     const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
@@ -269,6 +231,15 @@ export async function routeVia(points: GeoPoint[]): Promise<RouteResult> {
     return { distanceMeters: 0, durationSeconds: 0, geometry: [[p.lat, p.lng]] };
   }
   if (pts.length === 2) return routeBetween(pts[0], pts[1]);
+
+  if (geoProvider() === "google") {
+    try {
+      return await routeGoogle(pts);
+    } catch (e: any) {
+      console.warn("Google Routes (Mehrziel) fehlgeschlagen:", e?.message ?? e);
+      return luftlinienSchaetzung(pts);
+    }
+  }
 
   const coords = pts.map((p) => `${p.lng},${p.lat}`).join(";");
   const url = directionsUrl(coords);

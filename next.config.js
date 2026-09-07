@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // react-leaflet v4 ist nicht StrictMode-sicher (doppeltes Mounten im Dev ->
-  // "Map container is already initialized"). StrictMode ist nur ein Dev-Hilfsmittel
-  // ohne Produktionswirkung -> deaktiviert, damit die Karte sauber lädt.
+  // Die Google-Karte wird einmalig in einem Effekt aufgebaut; das doppelte
+  // Mounten des StrictMode (nur Dev) wuerde sie zweimal initialisieren.
+  // StrictMode hat keine Produktionswirkung -> deaktiviert.
   reactStrictMode: false,
   // Frueher wurden Lint- und Typfehler beim Bauen ignoriert. Der Typcheck des
   // Projekts ist inzwischen fehlerfrei – ein neuer Fehler soll den Build
