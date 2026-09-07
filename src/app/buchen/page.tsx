@@ -21,7 +21,8 @@ function Tile({ href, testid, title, desc, children }: { href: string; testid: s
   );
 }
 
-export default function PlatformBookingPage({ searchParams }: { searchParams?: { class?: string; driver?: string; to?: string } }) {
+export default function PlatformBookingPage({ searchParams }: { searchParams?: { class?: string; driver?: string; to?: string; toLat?: string; toLng?: string } }) {
+  const zahl = (v?: string) => (v != null && v !== "" && Number.isFinite(Number(v)) ? Number(v) : undefined);
   return (
     <main className="min-h-screen bg-white">
       <header className="sticky top-0 z-10 border-b border-ink-100 bg-white/95 backdrop-blur">
@@ -74,7 +75,7 @@ export default function PlatformBookingPage({ searchParams }: { searchParams?: {
         </div>
 
         <div className="card mt-6 p-6">
-          <BookingForm initialVehicleClass={searchParams?.class} initialDriverId={searchParams?.driver} initialDestination={searchParams?.to} />
+          <BookingForm initialVehicleClass={searchParams?.class} initialDriverId={searchParams?.driver} initialDestination={searchParams?.to} initialDestLat={zahl(searchParams?.toLat)} initialDestLng={zahl(searchParams?.toLng)} />
         </div>
 
         <div className="mt-6 flex flex-col items-center gap-1.5 text-[13px] text-ink-500">

@@ -23,11 +23,17 @@ interface AddrState {
 
 type Step = "details" | "confirm";
 
-export function BookingForm({ scheduled = false, companySlug, initialVehicleClass, initialDriverId, initialDestination }: { scheduled?: boolean; companySlug?: string; initialVehicleClass?: string; initialDriverId?: string; initialDestination?: string }) {
+export function BookingForm({ scheduled = false, companySlug, initialVehicleClass, initialDriverId, initialDestination, initialDestLat, initialDestLng }: { scheduled?: boolean; companySlug?: string; initialVehicleClass?: string; initialDriverId?: string; initialDestination?: string; initialDestLat?: number; initialDestLng?: number }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("details");
   const [pickup, setPickup] = useState<AddrState>({ address: "" });
-  const [dest, setDest] = useState<AddrState>({ address: initialDestination ?? "" });
+  // Kommt das Ziel von der Live-Karte, sind die Koordinaten schon bekannt -
+  // dann muss der Fahrgast die Adresse nicht erneut aus der Liste waehlen.
+  const [dest, setDest] = useState<AddrState>(
+    initialDestination && initialDestLat != null && initialDestLng != null
+      ? { address: initialDestination, lat: initialDestLat, lng: initialDestLng }
+      : { address: initialDestination ?? "" },
+  );
   // Mehrziel-Vorabplanung (Phase 2e): Zwischenstopps zwischen Abholung und Ziel.
   const [stops, setStops] = useState<AddrState[]>([]);
   const [name, setName] = useState("");

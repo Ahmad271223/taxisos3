@@ -314,6 +314,22 @@ node scripts/qa/cleanup.js      # Testdaten entfernen
 
 ---
 
+## 9b. Startseite = Live-Karte
+
+Seit 07.09.2026 ist die Live-Karte (`LiveTaxiMap`) die Startseite `/`. Wer
+die Adresse aufruft, sieht sofort die verfuegbaren Taxis, sucht oben ein Ziel
+und bestellt mit einem Tipp. Die fruehere Vorstellungsseite (Ablauf, Firmen-
+Werbung) liegt unter `/info` und ist ueber den Info-Knopf oben links erreichbar.
+
+Das Suchfeld oben liefert waehrend des Tippens Vorschlaege (300 ms Ruhe, dann
+eine Anfrage an `/api/geocode`) - Adressen UND Orte wie "C&A" oder ein
+Friseur, dank Places. Eine Auswahl fuehrt direkt ins Buchungsformular mit
+gesetztem Ziel samt Koordinaten (`/buchen?to=&toLat=&toLng=`); der Fahrgast
+tippt die Adresse kein zweites Mal. Pflichtlinks (Impressum, Datenschutz, AGB)
+und die Zugaenge fuer Firmen/Fahrer stehen im unteren Bereich der Karte.
+
+---
+
 ## 10a. Karte, Adresssuche, Routen: Google Maps
 
 Seit 07.09.2026 ist Google Maps Platform der **einzige** Kartendienst. Leaflet,

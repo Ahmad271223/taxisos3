@@ -18,6 +18,7 @@ const prisma = new PrismaClient();
 // Öffentliche Seiten: müssen ohne Anmeldung ausgeliefert werden.
 const OEFFENTLICH = [
   ["/", "Startseite"],
+  ["/info", "Infoseite (Ablauf, Unternehmen)"],
   ["/buchen", "Taxi bestellen"],
   ["/buchen/flughafen", "Flughafen-Transfer"],
   ["/buchen/gruppe", "Gruppe/Event"],
@@ -153,7 +154,8 @@ async function main() {
   // =========================================================================
   section("7) Wichtige Seiten liefern echten Inhalt, keine leere Hülle");
   const inhalte = [
-    ["/", ["Taxi", "buchen"], "Startseite bewirbt die Buchung"],
+    ["/", ["Taxi bestellen", "Wohin"], "Startseite ist die Live-Karte mit Suche und Bestellung"],
+    ["/info", ["Taxi", "registrieren"], "Infoseite bewirbt Buchung und Registrierung"],
     ["/buchen", ["Abholadresse", "Zieladresse"], "Buchungsformular enthält beide Adressfelder"],
     ["/taxis", ["Taxi", "Karte"], "Live-Karte nennt Taxis"],
     ["/registrieren", ["Unternehmen", "Passwort"], "Registrierung fragt Firmendaten ab"],

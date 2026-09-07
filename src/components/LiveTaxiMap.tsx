@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Brand } from "@/components/Brand";
 import { VehicleIcon } from "@/components/VehicleIcon";
-import { haversineMeters } from "@/lib/geo";
+import { haversineMeters, type GeocodeResult } from "@/lib/geo";
 import type { MapMarker } from "@/components/Map";
 
 const Map = dynamic(() => import("@/components/Map"), { ssr: false });
@@ -32,6 +32,10 @@ export function LiveTaxiMap() {
   const [selected, setSelected] = useState<any | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [whereTo, setWhereTo] = useState("");
+  // Live-Vorschlaege fuer das Suchfeld oben - Adressen UND Orte ("C&A", "Friseur Linden").
+  const [vorschlaege, setVorschlaege] = useState<GeocodeResult[]>([]);
+  const [ziel, setZiel] = useState<GeocodeResult | null>(null);
+  const [sucheOffen, setSucheOffen] = useState(false);
   const [me, setMe] = useState<{ name: string } | null>(null);
   const [userLoc, setUserLoc] = useState<UserLoc | null>(null);
 
@@ -111,9 +115,44 @@ export function LiveTaxiMap() {
     return list;
   }, [markers, userLoc]);
 
+  // Vorschlaege waehrend des Tippens: 300 ms Ruhe abwarten, dann EINE Anfrage.
+  // Frueher passierte beim Tippen gar nichts - erst "Weiter" fuehrte ins
+  // Formular, wo die Adresse erneut eingegeben werden musste.
+  useEffect(() => {
+    const q = whereTo.trim();
+    if (ziel && ziel.label === whereTo) return; // gerade ausgewaehlt, nicht erneut suchen
+    if (q.length < 2) {
+      setVorschlaege([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      fetch(`/api/geocode?q=${encodeURIComponent(q)}`)
+        .then((r) => (r.ok ? r.json() : { results: [] }))
+        .then((d) => {
+          setVorschlaege(d.results ?? []);
+          setSucheOffen(true);
+        })
+        .catch(() => setVorschlaege([]));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [whereTo, ziel]);
+
+  // Auswahl fuehrt direkt ins Formular - Ziel samt Koordinaten sind dann schon
+  // gesetzt, der Fahrgast tippt die Adresse kein zweites Mal.
+  function zielWaehlen(r: GeocodeResult) {
+    setZiel(r);
+    setWhereTo(r.label);
+    setVorschlaege([]);
+    setSucheOffen(false);
+    router.push(`/buchen?to=${encodeURIComponent(r.label)}&toLat=${r.lat}&toLng=${r.lng}`);
+  }
+
   function submitWhereTo(e: React.FormEvent) {
     e.preventDefault();
     const q = whereTo.trim();
+    if (ziel && ziel.label === whereTo) return zielWaehlen(ziel);
+    // Ohne ausdrueckliche Auswahl den ersten Vorschlag nehmen - das ist, was gemeint ist.
+    if (vorschlaege[0]) return zielWaehlen(vorschlaege[0]);
     router.push(q ? `/buchen?to=${encodeURIComponent(q)}` : "/buchen");
   }
 
@@ -142,14 +181,17 @@ export function LiveTaxiMap() {
       {/* TOP BAR – schlank, ohne Emoji */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
         <div className="pointer-events-auto mx-auto flex max-w-3xl items-center justify-between gap-2 px-4 pt-4">
+          {/* Die Karte IST die Startseite - ein "Zurueck" fuehrte ins Leere.
+              Links liegt deshalb der Weg zur Infoseite (Ablauf, Unternehmen). */}
           <Link
-            href="/"
+            href="/info"
             data-testid="live-back"
             className="grid h-11 w-11 place-items-center rounded-full bg-white text-ink-900 shadow-card ring-1 ring-ink-200 hover:bg-ink-50"
-            aria-label="Zurück"
+            aria-label="Über TaxiOS"
           >
             <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none">
-              <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+              <path d="M12 11v5M12 8h.01" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
             </svg>
           </Link>
 
@@ -193,8 +235,17 @@ export function LiveTaxiMap() {
             <input
               data-testid="live-search-input"
               value={whereTo}
-              onChange={(e) => setWhereTo(e.target.value)}
-              placeholder="Wohin möchten Sie?"
+              onChange={(e) => {
+                setWhereTo(e.target.value);
+                setZiel(null);
+              }}
+              onFocus={() => vorschlaege.length > 0 && setSucheOffen(true)}
+              onBlur={() => setTimeout(() => setSucheOffen(false), 150)}
+              autoComplete="off"
+              role="combobox"
+              aria-expanded={sucheOffen && vorschlaege.length > 0}
+              aria-controls="live-search-results"
+              placeholder="Wohin möchten Sie? Adresse oder Ort, z. B. C&A"
               className="min-w-0 flex-1 bg-transparent text-base font-semibold text-ink-900 placeholder:text-ink-400 focus:outline-none"
             />
             <button
@@ -205,6 +256,32 @@ export function LiveTaxiMap() {
               Weiter
             </button>
           </form>
+          {sucheOffen && vorschlaege.length > 0 && (
+            <ul
+              id="live-search-results"
+              role="listbox"
+              data-testid="live-search-results"
+              className="mt-2 max-h-72 overflow-auto rounded-2xl bg-white p-1.5 shadow-float ring-1 ring-ink-200"
+            >
+              {vorschlaege.map((r) => (
+                <li key={`${r.lat},${r.lng}`}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={false}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => zielWaehlen(r)}
+                    className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-ink-50"
+                  >
+                    <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-ink-100 text-ink-700">
+                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none"><path d="M12 21s-6-5.5-6-11a6 6 0 1 1 12 0c0 5.5-6 11-6 11Z" stroke="currentColor" strokeWidth="2"/><circle cx="12" cy="10" r="2.2" stroke="currentColor" strokeWidth="2"/></svg>
+                    </span>
+                    <span className="min-w-0 text-sm font-semibold leading-snug text-ink-900">{r.label}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           {fastest && !selectedLive && (
             <div className="mt-2 flex items-center justify-center gap-2 text-xs font-semibold text-ink-900" data-testid="fastest-eta">
               <span className="rounded-full bg-white px-3 py-1 shadow-card ring-1 ring-ink-200">
@@ -267,6 +344,18 @@ export function LiveTaxiMap() {
                   <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </Link>
+
+              {/* Die Live-Karte ist die Startseite: Zugaenge fuer Unternehmen und
+                  die Pflichtlinks (Impressum, Datenschutz, AGB) gehoeren deshalb hierher. */}
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-ink-400" data-testid="live-footer-links">
+                <Link href="/registrieren" className="hover:text-ink-900">Firma registrieren</Link>
+                <Link href="/admin/login" className="hover:text-ink-900">Firmen-Login</Link>
+                <Link href="/fahrer/login" className="hover:text-ink-900">Fahrer-Login</Link>
+                <span aria-hidden="true">·</span>
+                <Link href="/impressum" className="hover:text-ink-900">Impressum</Link>
+                <Link href="/datenschutz" className="hover:text-ink-900">Datenschutz</Link>
+                <Link href="/agb" className="hover:text-ink-900">AGB</Link>
+              </div>
             </div>
           </div>
         </div>
