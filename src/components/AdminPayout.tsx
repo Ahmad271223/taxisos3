@@ -27,19 +27,42 @@ interface Connect {
   mock: boolean;
 }
 
-// Stripe nennt die offenen Punkte in eigener Sprache. Die haeufigsten
-// uebersetzen wir, damit die Zentrale weiss, was sie nachreichen muss.
-const NACHWEIS_TEXT: Record<string, string> = {
-  "individual.verification.document": "Ausweisdokument der vertretungsberechtigten Person",
-  "company.verification.document": "Registerauszug des Unternehmens",
-  "external_account": "Bankverbindung (IBAN) für die Auszahlung",
-  "business_profile.url": "Internetadresse oder Beschreibung des Unternehmens",
-  "individual.address.line1": "Anschrift der vertretungsberechtigten Person",
-  "tax_id": "Steuernummer bzw. Umsatzsteuer-Identifikationsnummer",
-};
+// Stripe nennt die offenen Punkte in technischer Form ("representative.dob.day").
+// Fuer eine Zentrale ist das unbrauchbar, deshalb uebersetzen wir sie in
+// Klartext und fassen zusammen, was ohnehin in einem Schritt erfasst wird:
+// aus fuenfzehn kryptischen Zeilen werden so fuenf verstaendliche.
+const NACHWEIS_REGELN: Array<[RegExp, string]> = [
+  [/verification\.(document|additional_document)/, "Ausweisdokument zur Identitätsprüfung"],
+  [/^external_account/, "Bankverbindung (IBAN) für die Auszahlung"],
+  [/^business_profile/, "Angaben zum Unternehmen (Tätigkeit, Internetadresse)"],
+  [/^business_type/, "Rechtsform (Einzelunternehmen, GmbH, …)"],
+  [/^tos_acceptance/, "Zustimmung zu den Bedingungen von Stripe"],
+  [/^(company|individual)\.(tax_id|vat_id)|^tax_id/, "Steuernummer bzw. Umsatzsteuer-Identifikationsnummer"],
+  [/(representative|individual|person)\.address/, "Anschrift der vertretungsberechtigten Person"],
+  [/(representative|individual|person)\.dob/, "Geburtsdatum der vertretungsberechtigten Person"],
+  [
+    /(representative|individual|person)\.(first_name|last_name|email|phone|title|relationship)/,
+    "Name, E-Mail und Telefonnummer der vertretungsberechtigten Person",
+  ],
+  [/^company\.(name|address|phone)/, "Name und Anschrift des Unternehmens"],
+];
 
 function nachweis(key: string): string {
-  return NACHWEIS_TEXT[key] ?? key;
+  for (const [muster, text] of NACHWEIS_REGELN) {
+    if (muster.test(key)) return text;
+  }
+  return key;
+}
+
+// Mehrere Stripe-Punkte fallen oft auf denselben Klartext (Vorname, Nachname,
+// E-Mail ...). Doppelte Zeilen waeren nur Rauschen.
+function nachweisListe(keys: string[]): string[] {
+  const gesehen: string[] = [];
+  for (const k of keys) {
+    const text = nachweis(k);
+    if (!gesehen.includes(text)) gesehen.push(text);
+  }
+  return gesehen;
 }
 
 export function AdminPayout() {
@@ -48,11 +71,25 @@ export function AdminPayout() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Ohne Anmeldung liefert die Schnittstelle 401. Wird das nicht behandelt,
+  // steht die Seite fuer immer auf "Laedt ..." - ohne Meldung und ohne Ausweg.
+  const [abgemeldet, setAbgemeldet] = useState(false);
+
   const load = useCallback(() => {
     fetch("/api/admin/connect")
-      .then((r) => (r.ok ? r.json() : null))
+      .then(async (r) => {
+        if (r.status === 401) {
+          setAbgemeldet(true);
+          return null;
+        }
+        if (!r.ok) {
+          setError("Der Status konnte nicht geladen werden. Bitte später erneut versuchen.");
+          return null;
+        }
+        return r.json();
+      })
       .then((d) => d && setData(d))
-      .catch(() => {});
+      .catch(() => setError("Netzwerkfehler. Bitte prüfen Sie Ihre Verbindung."));
   }, []);
 
   useEffect(() => {
@@ -80,8 +117,29 @@ export function AdminPayout() {
     setBusy(false);
   }
 
+  if (abgemeldet) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-ink-50 px-5">
+        <div className="max-w-md text-center">
+          <p className="font-display text-xl font-extrabold text-ink-900">Bitte melden Sie sich an</p>
+          <p className="mt-2 text-ink-600">Das Auszahlungskonto sehen nur angemeldete Unternehmen.</p>
+          <Link
+            href="/admin/login"
+            className="mt-5 inline-block rounded-2xl bg-ink-900 px-5 py-3 font-bold text-white"
+          >
+            Zur Anmeldung
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
   if (!data) {
-    return <main className="grid min-h-screen place-items-center bg-ink-50 text-ink-500">Lädt …</main>;
+    return (
+      <main className="grid min-h-screen place-items-center bg-ink-50 px-5 text-center text-ink-500">
+        {error ? <span className="font-semibold text-red-700">{error}</span> : "Lädt …"}
+      </main>
+    );
   }
 
   const c: Connect = data.connect ?? {};
@@ -163,8 +221,8 @@ export function AdminPayout() {
             <div className="mt-4 rounded-2xl bg-amber-50 p-4">
               <p className="font-bold text-amber-900">Stripe fehlen noch folgende Angaben:</p>
               <ul data-testid="payout-requirements" className="mt-2 list-disc pl-5 text-sm text-amber-900">
-                {c.requirementsDue.map((r) => (
-                  <li key={r}>{nachweis(r)}</li>
+                {nachweisListe(c.requirementsDue).map((r) => (
+                  <li key={r}>{r}</li>
                 ))}
               </ul>
             </div>

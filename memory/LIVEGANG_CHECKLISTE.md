@@ -22,9 +22,25 @@ ab. Das ist Absicht — jeder Punkt hat einen konkreten Schaden dahinter.
       über das Plattform-Konto und müssten von Hand weitergereicht werden.
       Jede Firma richtet ihr Konto danach selbst ein unter
       **Dashboard → Auszahlung** (`/admin/auszahlung`).
-- [ ] **Twilio auf ein bezahltes Konto** umstellen (`TWILIO_ACCOUNT_SID`).
-      Aktuell Trial: SMS nur an verifizierte Nummern, mit Testhinweis im Text,
-      rund 50 am Tag.
+- [x] **Twilio auf ein bezahltes Konto** umgestellt (07.09.2026). Konto steht
+      auf *Full* und ist aktiv. Damit: SMS an **jede** Nummer, kein
+      Testhinweis mehr im Text, kein Tageslimit.
+- [x] **Absender `TWILIO_FROM=Altstadttax`** (alphanumerisch, geprüft:
+      zugestellt in unter 4 Sekunden). Hintergrund:
+      - Die mitgelieferte US-Nummer (+1 517…) taugt für Deutschland nicht —
+        deutsche Netze filtern SMS von US-Rufnummern häufig weg.
+      - Alphanumerische Absender brauchen in Deutschland keine Voranmeldung,
+        sind aber auf **11 Zeichen** begrenzt. `altstadttaxi` hat 12 und wird
+        von Twilio abgelehnt (Fehler 21212), deshalb `Altstadttax`.
+        Saubere Alternative, falls die Abkürzung stört: `Altstadt`.
+      - Der Empfänger kann auf einen alphanumerischen Absender nicht antworten.
+        Für Bestätigungen und Codes ohne Belang; wer Rückantworten braucht,
+        müsste eine deutsche Rufnummer kaufen (Nachweis der Anschrift nötig).
+- [ ] **Twilio-Werte bei Render eintragen** — dort fehlen sie noch komplett:
+      `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM=Altstadttax`.
+      Solange sie fehlen, verschickt die Live-App **keine** SMS.
+- [ ] **US-Nummer freigeben**, falls nicht gebraucht (Twilio → Phone Numbers).
+      Sie kostet rund 1 $ im Monat und wird als Absender nicht mehr verwendet.
 - [ ] **`AUTH_SECRET`** mit mindestens 32 zufälligen Zeichen setzen. Nicht der
       Standardwert — diese Sperre ist **nicht umgehbar**, weil sich mit einem
       erratbaren Geheimnis beliebige Sitzungen fälschen ließen.
