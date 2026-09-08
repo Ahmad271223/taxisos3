@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { anlegenOderKollision } from "@/lib/eindeutig";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, signSession, CUSTOMER_COOKIE } from "@/lib/auth";
@@ -60,15 +61,25 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Diese E-Mail ist bereits registriert." }, { status: 409 });
   }
 
-  const customer = await prisma.customer.create({
-    data: {
-      name: d.name,
-      email,
-      phone: d.phone,
-      passwordHash: await hashPassword(d.password),
-      phoneVerifiedAt: telBestaetigt,
-    },
-  });
+  // Die Pruefung oben ist nicht atomar: zwei gleichzeitige Anmeldungen sehen
+  // beide "frei". Die Datenbank faengt das ab - bisher aber als ungefangener
+  // Fehler und damit als Serverfehler beim Nutzer.
+  const passwortHash = await hashPassword(d.password);
+  const angelegt = await anlegenOderKollision(() =>
+    prisma.customer.create({
+      data: {
+        name: d.name,
+        email,
+        phone: d.phone,
+        passwordHash: passwortHash,
+        phoneVerifiedAt: telBestaetigt,
+      },
+    }),
+  );
+  if (!angelegt.ok) {
+    return NextResponse.json({ error: "Diese E-Mail ist bereits registriert." }, { status: 409 });
+  }
+  const customer = angelegt.wert;
 
   const token = signSession({ sub: customer.id, role: "CUSTOMER", name: customer.name, username: customer.email, companyId: "", phone: customer.phone });
   const res = NextResponse.json({ ok: true, name: customer.name, email: customer.email });

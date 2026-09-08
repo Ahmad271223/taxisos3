@@ -37,20 +37,37 @@ async function adminSnapshot(dispatcher: Dispatcher, companyId: string) {
       lng: l?.lng ?? d.lng,
     });
   });
-  const bookings = await prisma.booking.findMany({
-    where: { companyId, status: { in: ["OFFEN", "ZUGEWIESEN", "AKTIV"] } },
-    include: { driver: true, card: true },
-    orderBy: { createdAt: "desc" },
-  });
-  const scheduled = await prisma.booking.findMany({
-    where: { companyId, isScheduled: true, status: { notIn: ["ABGESCHLOSSEN", "STORNIERT"] } },
-    include: { driver: true, card: true },
-    orderBy: { scheduledAt: "asc" },
-  });
+  // OBERGRENZE. Dieser Schnappschuss geht bei jedem Verbinden und bei jeder
+  // Aktualisierung ueber die Leitung. Ohne Grenze holt eine Firma mit vielen
+  // Vorbestellungen jedes Mal ihren gesamten Bestand - und der Bildschirm der
+  // Zentrale zeigt ohnehin nur die naechsten Auftraege. Die Zahl der insgesamt
+  // vorhandenen wird mitgeschickt, damit die Oberflaeche ehrlich sagen kann,
+  // dass es mehr sind.
+  const SCHNAPPSCHUSS_MAX = 200;
+  const [bookings, scheduled, bookingsGesamt, scheduledGesamt] = await Promise.all([
+    prisma.booking.findMany({
+      where: { companyId, status: { in: ["OFFEN", "ZUGEWIESEN", "AKTIV"] } },
+      include: { driver: true, card: true },
+      orderBy: { createdAt: "desc" },
+      take: SCHNAPPSCHUSS_MAX,
+    }),
+    prisma.booking.findMany({
+      where: { companyId, isScheduled: true, status: { notIn: ["ABGESCHLOSSEN", "STORNIERT"] } },
+      include: { driver: true, card: true },
+      orderBy: { scheduledAt: "asc" },
+      take: SCHNAPPSCHUSS_MAX,
+    }),
+    prisma.booking.count({ where: { companyId, status: { in: ["OFFEN", "ZUGEWIESEN", "AKTIV"] } } }),
+    prisma.booking.count({
+      where: { companyId, isScheduled: true, status: { notIn: ["ABGESCHLOSSEN", "STORNIERT"] } },
+    }),
+  ]);
   return {
     drivers,
     bookings: bookings.map((b) => bookingDTO(b)),
     scheduled: scheduled.map((b) => bookingDTO(b)),
+    // Damit die Zentrale merkt, wenn die Liste gekuerzt ist.
+    counts: { bookings: bookingsGesamt, scheduled: scheduledGesamt, limit: SCHNAPPSCHUSS_MAX },
   };
 }
 

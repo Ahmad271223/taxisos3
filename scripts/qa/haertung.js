@@ -262,7 +262,11 @@ async function main() {
   const textZiel = await ziel({ address: "Nirgendwo", lat: "52.4", lng: "9.7" });
   check("Koordinaten als Text abgelehnt", textZiel.status === 400, textZiel.status);
   const weit = await ziel({ address: "Muenchen Hbf", lat: 48.1402, lng: 11.5600 });
-  check("Ziel jenseits von 300 km abgelehnt", weit.status === 400, weit.status);
+  // 409: die Anfrage ist wohlgeformt, sie widerspricht nur den Grenzen dieser
+  // Fahrt - wie "bereits bezahlt" und "zu viele Zwischenstopps" in derselben
+  // Route. Seit dem 09.09.2026 wird die GESAMTE Strecke gemessen, nicht mehr
+  // der Abstand jedes Punktes zur Abholung.
+  check("Ziel jenseits von 300 km abgelehnt", weit.status === 409, weit.status);
   check("Mit Hinweis auf die Zentrale", /Zentrale/i.test(weit.body?.error ?? ""), weit.body?.error);
 
   const bezahlt = await fahrtInDb({ trackingStatus: "BEENDET", paymentStatus: "BEZAHLT" });

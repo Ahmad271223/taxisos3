@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseStops } from "@/lib/stops";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getDispatcher } from "@/server/runtime";
@@ -113,13 +114,35 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   // Plausibilitaet: das neue Ziel muss im Umkreis der Abholung liegen.
-  const zuWeit = [parsed.data.dest, parsed.data.addStop].some(
-    (p) => p && luftlinieKm(booking.pickupLat, booking.pickupLng, p.lat, p.lng) > MAX_ENTFERNUNG_KM,
-  );
-  if (zuWeit) {
+  // DIE GANZE STRECKE ZAEHLT, nicht der einzelne Punkt.
+  //
+  // Vorher wurde jeder neue Punkt nur gegen die Abholung geprueft. Mit einem
+  // Zickzack liess sich die Grenze aushebeln: Stopp 280 km westlich, dann
+  // 280 km oestlich, dann wieder westlich - jeder Punkt fuer sich "nah genug",
+  // die tatsaechliche Fahrt aber weit ueber tausend Kilometer.
+  //
+  // Gemessen wird deshalb die Kette Abholung -> Stopps -> Ziel, so wie der
+  // Wagen sie abfaehrt. Die Luftlinie ist dabei die untere Schranke: die
+  // gefahrene Strecke ist immer laenger, nie kuerzer.
+  const bisherigeStopps = parseStops(booking.stops);
+  const kette: { lat: number; lng: number }[] = [
+    { lat: booking.pickupLat, lng: booking.pickupLng },
+    ...bisherigeStopps.map((s) => ({ lat: s.lat, lng: s.lng })),
+    ...(parsed.data.addStop ? [{ lat: parsed.data.addStop.lat, lng: parsed.data.addStop.lng }] : []),
+    parsed.data.dest
+      ? { lat: parsed.data.dest.lat, lng: parsed.data.dest.lng }
+      : { lat: booking.destLat, lng: booking.destLng },
+  ];
+  let gesamtKm = 0;
+  for (let i = 1; i < kette.length; i++) {
+    gesamtKm += luftlinieKm(kette[i - 1].lat, kette[i - 1].lng, kette[i].lat, kette[i].lng);
+  }
+  if (gesamtKm > MAX_ENTFERNUNG_KM) {
     return NextResponse.json(
-      { error: `Das Ziel liegt weiter als ${MAX_ENTFERNUNG_KM} km entfernt. Bitte rufen Sie die Zentrale an.` },
-      { status: 400 },
+      {
+        error: `Die gesamte Strecke wäre mit rund ${Math.round(gesamtKm)} km länger als ${MAX_ENTFERNUNG_KM} km. Bitte rufen Sie die Zentrale an.`,
+      },
+      { status: 409 },
     );
   }
 

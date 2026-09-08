@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { anlegenOderKollision } from "@/lib/eindeutig";
 import { aboGesperrt } from "@/lib/firmaAktiv";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -117,12 +118,18 @@ export async function POST(req: Request) {
     );
   }
 
-  const driver = await prisma.driver.create({
+  // Der Benutzername ist plattformweit eindeutig. Die Pruefung weiter oben ist
+  // nicht atomar - zwei gleichzeitige Anlagen sehen beide "frei".
+  // Den Hash VOR dem Anlegen berechnen: die Kollisionshuelle ist bewusst
+  // synchron, damit sie nichts anderes als das Anlegen umschliesst.
+  const passwortHash = await hashPassword(d.password);
+  const angelegt = await anlegenOderKollision(() =>
+    prisma.driver.create({
     data: {
       companyId: session.companyId,
       name: d.name,
       username: d.username,
-      passwordHash: await hashPassword(d.password),
+      passwordHash: passwortHash,
       phone: d.phone ?? null,
       vehicleModel: d.vehicleModel ?? null,
       vehiclePlate: d.vehiclePlate ?? null,
@@ -140,8 +147,13 @@ export async function POST(req: Request) {
       insuranceUntil: d.insuranceUntil ?? null,
       tuevUntil: d.tuevUntil ?? null,
       status: "OFFLINE",
-    },
-  });
+      },
+    }),
+  );
+  if (!angelegt.ok) {
+    return NextResponse.json({ error: "Benutzername ist bereits vergeben." }, { status: 409 });
+  }
+  const driver = angelegt.wert;
 
   // NACHKONTROLLE: Oben wurde gezaehlt, hier angelegt. Zwei gleichzeitige
   // Anfragen sahen beide "noch ein Platz frei" (etwa 9 von 10) und legten

@@ -170,17 +170,6 @@ export async function POST(req: Request) {
     }
     companyId = company.id;
 
-    // Eine im Dashboard DEAKTIVIERTE Fahrzeugklasse war serverseitig weiterhin
-    // buchbar: `enabled` wurde geladen, aber nirgends ausgewertet. Wer die
-    // Klasse abschaltet, will sie nicht anbieten - dann darf sie auch nicht
-    // bestellt werden.
-    const klasse = await classFactorForSlug(d.company, normalizeClass(d.vehicleClass));
-    if (klasse.enabled === false) {
-      return NextResponse.json(
-        { error: "Diese Fahrzeugklasse bietet das Unternehmen derzeit nicht an.", code: "CLASS_DISABLED" },
-        { status: 409 },
-      );
-    }
   }
 
   // Plattform-Tarif (Standard) bzw. Firmen-Tarif, falls explizit Firma gewählt.
@@ -202,6 +191,20 @@ export async function POST(req: Request) {
 
   const vehicleClass = normalizeClass(d.vehicleClass);
   const classF = await classFactorForSlug(d.company ?? undefined, vehicleClass);
+
+  // Eine im Dashboard DEAKTIVIERTE Fahrzeugklasse war serverseitig weiterhin
+  // buchbar: `enabled` wurde geladen, aber nirgends ausgewertet. Wer die Klasse
+  // abschaltet, will sie nicht anbieten - dann darf sie auch nicht bestellt
+  // werden. Die Pruefung haengt bewusst an DIESER Abfrage: eine zweite,
+  // identische kostete jede Buchung einen zusaetzlichen Gang zur Datenbank.
+  // Sie gilt nur bei ausdruecklich gewaehltem Unternehmen - bei der offenen
+  // Plattformbuchung entscheidet die Vermittlung, wer fahren kann.
+  if (d.company && classF.enabled === false) {
+    return NextResponse.json(
+      { error: "Diese Fahrzeugklasse bietet das Unternehmen derzeit nicht an.", code: "CLASS_DISABLED" },
+      { status: 409 },
+    );
+  }
   // Meet & Greet Aufschlag (Airport): flughafenabhängig, in den Preis einrechnen.
   const mgFee = meetGreetFee(d.meetGreet, d.pickupAddress, d.destAddress);
   let priceMin = applyClassFactor(estimate.priceMin, classF) + mgFee;

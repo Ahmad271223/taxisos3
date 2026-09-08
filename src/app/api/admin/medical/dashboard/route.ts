@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logAccess } from "@/lib/accessLog";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
 import { medicalLabel, documentValidity } from "@/lib/medical";
@@ -140,6 +141,18 @@ export async function GET() {
   const byType = [...typeMap.values()].sort((a, b) => b.count - a.count);
 
   const monthLabel = new Intl.DateTimeFormat("de-DE", { month: "long", year: "numeric" }).format(monthStart);
+
+  // Diese Auswertung schluesselt Krankenfahrten nach Krankenkasse, Einrichtung
+  // und Fahrtart auf - ein Zugriff auf Gesundheitsdaten im Ueberblick. Die
+  // uebrigen medizinischen Wege protokollieren laengst; hier fehlte es.
+  await logAccess({
+    actorType: "ADMIN",
+    companyId,
+    actorId: companyId,
+    action: "VIEW",
+    entity: "MEDICAL_DOCUMENT",
+    detail: `Krankenfahrten-Auswertung ${monthLabel} (${monthRides.length} Fahrten)`,
+  });
 
   return NextResponse.json({ monthLabel, kpis, byPayer, byInstitution, byType, warnings });
 }

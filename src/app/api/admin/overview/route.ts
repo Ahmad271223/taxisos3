@@ -4,6 +4,11 @@ import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
+// Obergrenze fuer die Kennzahlen-Abfrage. Wird sie erreicht, sind die Zahlen
+// unvollstaendig - dann sagt die Antwort das auch, statt eine zu kleine Summe
+// als Tatsache auszugeben.
+const KENNZAHL_MAX = 5000;
+
 export async function GET() {
   const session = requireRole("ADMIN");
   if (!session) {
@@ -29,13 +34,21 @@ export async function GET() {
   startOfMonth.setHours(0, 0, 0, 0);
 
   const [todays, month, cancelled30d, company] = await Promise.all([
+    // Nur die vier Felder, die wirklich gebraucht werden - nicht der ganze
+    // Datensatz. Bei wenigen hundert Fahrten im Monat ist die Summierung in
+    // Node voellig in Ordnung und deutlich lesbarer als vier
+    // Aggregat-Abfragen mit Sonderfaellen; entscheidend ist, dass nicht mehr
+    // Spalten uebertragen werden als noetig. Die Obergrenze verhindert, dass
+    // aus einem Ausreisser-Monat ein Speicherproblem wird.
     prisma.booking.findMany({
       where: { companyId, status: "ABGESCHLOSSEN", completedAt: { gte: startOfDay } },
       select: { fare: true, platformFee: true, companyNet: true, paymentStatus: true, paymentMethod: true },
+      take: KENNZAHL_MAX,
     }),
     prisma.booking.findMany({
       where: { companyId, status: "ABGESCHLOSSEN", completedAt: { gte: startOfMonth } },
       select: { fare: true, platformFee: true, companyNet: true, paymentStatus: true, paymentMethod: true },
+      take: KENNZAHL_MAX,
     }),
     prisma.booking.count({
       where: {
@@ -91,6 +104,8 @@ export async function GET() {
   }
 
   return NextResponse.json({
+    // Ehrlich sagen, wenn die Kennzahlen an der Obergrenze abgeschnitten sind.
+    kennzahlenVollstaendig: todays.length < KENNZAHL_MAX && month.length < KENNZAHL_MAX,
     company: company
       ? { name: company.name, slug: company.slug, cityTier: company.cityTier }
       : null,
