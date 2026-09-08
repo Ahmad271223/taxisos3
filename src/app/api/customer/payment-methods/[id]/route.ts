@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { kontoGesperrt } from "@/lib/kundeGesperrt";
 import { requireRole } from "@/lib/session";
 import { setDefaultCard, removeCard, listCards } from "@/lib/customerCards";
 
@@ -8,6 +9,8 @@ export const dynamic = "force-dynamic";
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   const session = requireRole("CUSTOMER");
   if (!session) return NextResponse.json({ error: "Bitte melden Sie sich an." }, { status: 401 });
+  const gesperrt = await kontoGesperrt(session.sub);
+  if (gesperrt) return gesperrt;
 
   let json: any = {};
   try {
@@ -28,6 +31,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
   const session = requireRole("CUSTOMER");
   if (!session) return NextResponse.json({ error: "Bitte melden Sie sich an." }, { status: 401 });
+  const gesperrt = await kontoGesperrt(session.sub);
+  if (gesperrt) return gesperrt;
 
   const res = await removeCard(session.sub, params.id);
   if (!res.ok) {

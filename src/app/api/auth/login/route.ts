@@ -13,8 +13,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Ungültige Anfrage" }, { status: 400 });
   }
   const { username, password, role } = body ?? {};
-  const identifier = (username ?? body?.email ?? "").trim();
-  if (!identifier || !password) {
+  // Typen pruefen, BEVOR irgendetwas damit gemacht wird: `{"username":{}}`
+  // liess frueher `.trim()` auf einem Objekt laufen und beendete die Anfrage
+  // mit einem Serverfehler - noch vor jeder Anmelde- oder Bremslogik.
+  const roh = typeof username === "string" ? username : typeof body?.email === "string" ? body.email : "";
+  const identifier = roh.trim();
+  if (!identifier || typeof password !== "string" || !password) {
     return NextResponse.json({ error: "Zugangsdaten erforderlich" }, { status: 400 });
   }
 

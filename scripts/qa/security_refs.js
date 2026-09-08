@@ -333,7 +333,12 @@ async function main() {
   check("KEINE Telefonnummer in der Liste", !/customerPhone/.test(alsText) && !alsText.includes("+4915100000777"));
   check("KEIN Fahrgastname in der Liste", !/customerName/.test(alsText) && !alsText.includes("Geheim Person"));
   check("Keine medizinischen Angaben", !/patientName|medicalType|medicalLabel/.test(alsText));
-  check("Zeit und Strecke bleiben sichtbar", /scheduledAt/.test(alsText) && /pickupAddress/.test(alsText));
+  // Seit dem 08.09.2026 steht in dieser Liste nur noch die grobe Lage: sie geht
+  // an ALLE Fahrer der Plattform, bevor jemand die Fahrt angenommen hat. Mit
+  // vollstaendigen Anschriften stand dort faktisch "Wohnung X faehrt zum
+  // Dialysezentrum Y".
+  check("Zeit und grobe Lage bleiben sichtbar", /scheduledAt/.test(alsText) && /pickupArea/.test(alsText));
+  check("KEINE genaue Anschrift in der Liste", !/pickupAddress|destAddress/.test(alsText));
   mSock.close();
 
   gast.close(); kSock.close(); fremdSock.close(); adminSock.close(); fSock?.close();

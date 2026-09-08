@@ -3,7 +3,7 @@ import { logAccess } from "@/lib/accessLog";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
-import { driverAdmin } from "@/server/serialize";
+import { driverAdmin, bookingDTO } from "@/server/serialize";
 import { normalizeClass } from "@/lib/vehicleClasses";
 import { getRuntime } from "@/server/runtime";
 
@@ -67,7 +67,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       companyId: session.companyId,
       actorId: session.companyId,
       action: "UPDATE",
-      entity: "BOOKING",
+      entity: "DRIVER",
       entityId: driver.id,
       detail: `Fahrer ${driver.name}: ${geaendert.map((k) => `${k}=${String((parsed.data as any)[k])}`).join(", ")}`,
     });
@@ -104,7 +104,29 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
   // dazwischen konnte die Vermittlung dem Fahrer noch eine Fahrt zuweisen, die
   // ihren Fahrer sofort wieder verlor. Ein deaktivierter Fahrer wird nicht mehr
   // disponiert (siehe Vermittlung), das Zeitfenster ist damit zu.
+  // REIHENFOLGE: erst gegen NEUE Zuweisungen sperren, dann pruefen, und erst
+  // ganz zum Schluss die Verbindung trennen.
+  //
+  // Das Deaktivieren allein stoert eine laufende Fahrt nicht - der Fahrer
+  // behaelt seine Verbindung und kann sie zu Ende bringen. Vorher wurde er
+  // sofort getrennt und offline gesetzt, und ERST DANACH fiel auf, dass er
+  // gerade jemanden faehrt: die Fahrt verlor GPS, Chat und Statusmeldungen,
+  // obwohl das Loeschen anschliessend mit 409 abgelehnt wurde.
   await prisma.driver.update({ where: { id: existing.id }, data: { active: false } });
+
+  const activeCount = await prisma.booking.count({
+    where: { driverId: existing.id, status: { in: ["ZUGEWIESEN", "AKTIV"] } },
+  });
+  if (activeCount > 0) {
+    // Sperre zuruecknehmen - der Fahrer bleibt unangetastet im Dienst.
+    await prisma.driver.update({ where: { id: existing.id }, data: { active: true } });
+    return NextResponse.json(
+      { error: "Fahrer hat noch laufende Aufträge. Bitte zuerst abschließen oder stornieren." },
+      { status: 409 },
+    );
+  }
+
+  // Ab hier steht fest, dass er wirklich geloescht wird.
   const rt0 = getRuntime();
   try {
     await rt0?.dispatcher.setStatus(existing.id, "OFFLINE");
@@ -115,18 +137,6 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
     rt0?.io.in(`driver:${existing.id}`).disconnectSockets(true);
   } catch {
     /* siehe oben */
-  }
-
-  const activeCount = await prisma.booking.count({
-    where: { driverId: existing.id, status: { in: ["ZUGEWIESEN", "AKTIV"] } },
-  });
-  if (activeCount > 0) {
-    // Wieder freigeben – der Fahrer bleibt im Dienst.
-    await prisma.driver.update({ where: { id: existing.id }, data: { active: true } });
-    return NextResponse.json(
-      { error: "Fahrer hat noch laufende Aufträge. Bitte zuerst abschließen oder stornieren." },
-      { status: 409 },
-    );
   }
 
   // HISTORIE SICHERN, BEVOR die Verknüpfung fällt.
@@ -157,7 +167,7 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
     companyId: session.companyId,
     actorId: session.companyId,
     action: "CANCEL",
-    entity: "BOOKING",
+    entity: "DRIVER",
     entityId: existing.id,
     detail: `Fahrer ${existing.name} gelöscht (Fahrtenhistorie über Namens-Schnappschuss erhalten)`,
   });
@@ -191,7 +201,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   ]);
   return NextResponse.json({
     driver: driverAdmin(driver),
-    activeBooking,
+    // Nicht der rohe Datensatz: das DTO entscheidet, was nach aussen darf.
+    activeBooking: activeBooking ? bookingDTO(activeBooking) : null,
     ratings: { avg: agg._avg.rating ?? null, count: agg._count.rating ?? 0 },
     recent,
   });

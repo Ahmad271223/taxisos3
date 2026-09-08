@@ -83,10 +83,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Vermittlung gerade nicht erreichbar. Bitte in einer Minute erneut versuchen." }, { status: 503 });
   }
   // Rate-Limit (nur hinter Proxy/Ingress): Buchungs-Spam bremsen.
+  // Auch OHNE erkennbare Adresse bremsen. Vorher lief die Kernroute der
+  // gesamten App in diesem Fall voellig ungebremst - und jede erfolgreiche
+  // Anfrage erzeugt einen Datensatz, eine Routenberechnung, eine Vermittlung,
+  // Socket-Verkehr und eine SMS.
   const ip = clientIp(req);
-  if (ip) {
-    const r = rateLimit(`book:ip:${ip}`, 30, 10 * 60_000);
-    if (!r.ok) return NextResponse.json({ error: "Zu viele Buchungen. Bitte später erneut." }, { status: 429 });
+  // Der Topf ohne Adresse ist GEMEINSAM fuer alle Anfragen, bei denen sich kein
+  // Absender feststellen laesst - er darf deshalb nicht so eng sein wie das
+  // Limit je Adresse, sonst bremst eine einzelne Stosszeit den ganzen Betrieb
+  // aus. 500 Bestellungen in zehn Minuten liegen weit ueber jedem realen
+  // Andrang (der Lasttest fuehrt 120 gleichzeitige vor) und stoppen trotzdem
+  // eine Flut. Im Echtbetrieb hinter Render greift ohnehin fast immer das
+  // Limit je Adresse (TRUSTED_PROXY_HOPS).
+  const bremse = ip
+    ? rateLimit(`book:ip:${ip}`, 30, 10 * 60_000)
+    : rateLimit("book:ohne-adresse", 500, 10 * 60_000);
+  if (!bremse.ok) {
+    return NextResponse.json({ error: "Zu viele Buchungen. Bitte später erneut." }, { status: 429 });
   }
 
   let json: any;
@@ -110,7 +123,15 @@ export async function POST(req: Request) {
     const cust = await prisma.customer.findUnique({ where: { id: customerSession.sub } });
     if (cust) {
       customerId = cust.id;
-      if (normalizeTarget("SMS", cust.phone) === normalizeTarget("SMS", d.customerPhone)) {
+      // `phoneVerifiedAt` fehlte in dieser Bedingung: eine im Konto
+      // gespeicherte, aber NIE bestaetigte Nummer galt allein deshalb als
+      // bestaetigt, weil sie mit der eingegebenen uebereinstimmt. Damit liess
+      // sich die SMS-Bestaetigung vollstaendig umgehen - Nummer im Profil
+      // aendern (dort wird sie unbestaetigt gesetzt) und einfach buchen.
+      if (
+        cust.phoneVerifiedAt &&
+        normalizeTarget("SMS", cust.phone) === normalizeTarget("SMS", d.customerPhone)
+      ) {
         phoneAlreadyVerified = true;
       }
     }
@@ -137,6 +158,15 @@ export async function POST(req: Request) {
     const company = await prisma.company.findUnique({ where: { slug: d.company } });
     if (!company) {
       return NextResponse.json({ error: "Unbekanntes Unternehmen" }, { status: 404 });
+    }
+    // Eine alte Firmen-Adresse nahm bisher weiter Buchungen an, auch wenn das
+    // Abo gekuendigt oder ueberfaellig war. Der Fahrgast wartete dann auf ein
+    // Unternehmen, das gar keine Fahrer mehr vermitteln darf.
+    if (["GEKUENDIGT", "UEBERFAELLIG"].includes(company.subscriptionStatus ?? "")) {
+      return NextResponse.json(
+        { error: "Dieses Unternehmen nimmt derzeit keine Buchungen an.", code: "COMPANY_INACTIVE" },
+        { status: 409 },
+      );
     }
     companyId = company.id;
   }
@@ -287,6 +317,24 @@ export async function POST(req: Request) {
   let scheduledAt = d.scheduledAt ? new Date(d.scheduledAt) : null;
   if (d.flightDirection === "ARRIVAL" && flightScheduledAt) {
     scheduledAt = airportPickupTime(flightScheduledAt, "ARRIVAL", flightDelayMinutes);
+  }
+  // Eine Vorbestellung in der VERGANGENHEIT wurde bisher klaglos als
+  // Sofortfahrt vermittelt: `isScheduled` wird schlicht false, und der Wagen
+  // faehrt jetzt los statt gestern. Wer sich im Datum vertippt, bekommt also
+  // ungewollt sofort ein Taxi vor die Tuer.
+  if (scheduledAt && scheduledAt.getTime() < Date.now() - 60_000) {
+    return NextResponse.json(
+      { error: "Der gewünschte Zeitpunkt liegt in der Vergangenheit." },
+      { status: 400 },
+    );
+  }
+  // Rueckfahrt vor der Hinfahrt ergibt keine Fahrt, sondern ein Chaos in der
+  // Disposition.
+  if (d.returnAt && scheduledAt && new Date(d.returnAt).getTime() <= scheduledAt.getTime()) {
+    return NextResponse.json(
+      { error: "Die Rückfahrt muss nach der Hinfahrt liegen." },
+      { status: 400 },
+    );
   }
   const isScheduled = !!scheduledAt && scheduledAt.getTime() > Date.now() + 60_000;
 
@@ -451,11 +499,28 @@ export async function POST(req: Request) {
   }
 
   // Automatische Rückfahrt (Phase B): zweite, geplante Buchung mit vertauschter
-  // Strecke zum gewünschten Zeitpunkt. Zahlung als CASH (kein zweiter Karten-Hold).
+  // Strecke zum gewünschten Zeitpunkt.
+  //
+  // ZAHLUNGSART: Frueher stand hier hart "CASH" - mit der Begruendung, keinen
+  // zweiten Karten-Hold zu erzeugen. Fuer den Fahrgast bedeutete das aber: die
+  // Hinfahrt zahlt die Firma oder die Karte, und fuer die Rueckfahrt soll er
+  // ploetzlich bar bezahlen. Bei einer Krankenfahrt auf Firmenkonto ist das
+  // schlicht falsch. Die Zahlungsart wird jetzt uebernommen; reserviert wird
+  // weiterhin erst, wenn die Rueckfahrt live geht (prepareRidePayment) - es
+  // entsteht also trotzdem kein zweiter Hold im Voraus.
+  //
+  // FEHLER HIER DARF DIE ANFRAGE NICHT MEHR SCHEITERN LASSEN: Die Hinfahrt ist
+  // zu diesem Zeitpunkt angelegt, vermittelt und per SMS bestaetigt. Ein
+  // Fehlschlag der Rueckfahrt gab bisher einen Serverfehler zurueck - der
+  // Fahrgast sah "Buchung fehlgeschlagen", klickte erneut und hatte am Ende
+  // ZWEI Hinfahrten. Jetzt wird die Hinfahrt bestaetigt und die Rueckfahrt
+  // ehrlich als nicht angelegt gemeldet.
   let returnBookingId: string | null = null;
+  let returnError: string | null = null;
   if (d.returnAt) {
     const retAt = new Date(d.returnAt);
     if (retAt.getTime() > Date.now() + 60_000) {
+      try {
       const ret = await prisma.booking.create({
         data: {
           companyId,
@@ -483,12 +548,26 @@ export async function POST(req: Request) {
           tariff: estimate.tariff,
           status: "OFFEN",
           trackingStatus: "GEPLANT",
-          paymentMethod: "CASH",
+          paymentMethod,
+          paymentStatus: corporateActive ? "FIRMA" : paymentMethod === "CARD" ? "KARTE_HINTERLEGT" : "OFFEN",
+          cardId,
+          // Firmenfahrt: auch die Rueckfahrt laeuft ueber dasselbe Firmenkonto.
+          ...(corporateActive && corporateCode ? { corporateCode } : {}),
         },
       });
       returnBookingId = ret.id;
+      } catch (e: any) {
+        console.error(`Rueckfahrt zu ${booking.id} konnte nicht angelegt werden:`, e?.message ?? e);
+        alarm("warnung", `rueckfahrt:${booking.id}`, "Rueckfahrt konnte nicht angelegt werden", {
+          hinweis: `Die Hinfahrt ${booking.id} laeuft, die gewuenschte Rueckfahrt fehlt.`,
+        });
+        returnError = "Die Hinfahrt ist gebucht. Die Rückfahrt konnte nicht angelegt werden – bitte separat buchen.";
+      }
     }
   }
 
-  return NextResponse.json({ id: booking.id, returnBookingId, booking: bookingDTO(booking) }, { status: 201 });
+  return NextResponse.json(
+    { id: booking.id, returnBookingId, returnError, booking: bookingDTO(booking) },
+    { status: 201 },
+  );
 }

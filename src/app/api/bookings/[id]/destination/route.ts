@@ -32,6 +32,9 @@ function luftlinieKm(aLat: number, aLng: number, bLat: number, bLng: number): nu
 // Mutwille. Der Fahrgast soll in so einem Fall die Zentrale anrufen.
 const MAX_ENTFERNUNG_KM = 300;
 
+// Dieselbe Obergrenze wie beim Buchen (stops.max(8)).
+const MAX_STOPPS = 8;
+
 const schema = z
   .object({
     // Neues Endziel ...
@@ -87,6 +90,26 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       { error: "Bitte ein neues Ziel oder einen Zwischenstopp angeben.", details: parsed.error.flatten() },
       { status: 400 },
     );
+  }
+
+  // Zwischenstopps: dieselbe Obergrenze wie beim Buchen. Ueber die
+  // Zieländerung liessen sich sonst beliebig viele nachschieben - die
+  // Zehnerbremse begrenzt nur das Tempo, nicht die Gesamtzahl.
+  if (parsed.data.addStop) {
+    const bisher = (() => {
+      try {
+        const roh = JSON.parse((booking.stops as string) ?? "[]");
+        return Array.isArray(roh) ? roh.length : 0;
+      } catch {
+        return 0;
+      }
+    })();
+    if (bisher >= MAX_STOPPS) {
+      return NextResponse.json(
+        { error: `Mehr als ${MAX_STOPPS} Zwischenstopps sind nicht möglich. Bitte rufen Sie die Zentrale an.` },
+        { status: 409 },
+      );
+    }
   }
 
   // Plausibilitaet: das neue Ziel muss im Umkreis der Abholung liegen.

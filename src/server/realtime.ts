@@ -2,6 +2,7 @@
 // Session-Cookie aus dem Handshake (httpOnly, kein Token im JS noetig).
 
 import type { Server as IOServer, Socket } from "socket.io";
+import { rateLimit } from "../lib/ratelimit";
 import { prisma } from "../lib/prisma";
 import { verifySession, SESSION_COOKIE, ADMIN_COOKIE, DRIVER_COOKIE, CUSTOMER_COOKIE } from "../lib/auth";
 import type { Dispatcher } from "./dispatch";
@@ -161,6 +162,10 @@ async function driverState(driverId: string) {
 const OFFENE_VORBESTELLUNGEN_MAX = Number(process.env.OPEN_SCHEDULED_MAX ?? 200);
 let deckelGemeldet = 0;
 
+// Nur diese Fahraktionen kennt der Server. Alles andere wird abgelehnt statt
+// stillschweigend als Erfolg quittiert.
+const FAHRT_AKTIONEN = new Set(["arrived", "start", "complete", "cancel", "noshow"]);
+
 const FAHRER_STATUS = new Set(["FREI", "PAUSE", "OFFLINE"]);
 
 function koordinateGueltig(lat: unknown, lng: unknown): lat is number {
@@ -224,8 +229,25 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
     // so kann ein Browser weiterhin gleichzeitig als Firma UND als Fahrer
     // verbunden sein.
     if (!wantRole) {
-      if (verifySession(parseCookie(cookieHeader, DRIVER_COOKIE))) wantRole = "driver";
-      else if (verifySession(parseCookie(cookieHeader, ADMIN_COOKIE))) wantRole = "admin";
+      // NICHT RATEN, wenn mehrere Ausweise im selben Browser liegen.
+      //
+      // Frueher gewann hier immer der Fahrer, waehrend /api/auth/me umgekehrt
+      // immer den Firmenchef bevorzugte. Wer beides in zwei Reitern offen
+      // hatte, bekam je nach Weg eine andere Identitaet - genau die
+      // Vermischung, die sich so schwer nachstellen laesst. Liegen beide vor,
+      // MUSS der Client sagen, als wer er sich verbindet.
+      const alsFahrer = !!verifySession(parseCookie(cookieHeader, DRIVER_COOKIE));
+      const alsChef = !!verifySession(parseCookie(cookieHeader, ADMIN_COOKIE));
+      if (alsFahrer && alsChef) {
+        socket.emit("auth:error", {
+          code: "ROLE_REQUIRED",
+          error: "Mehrere Anmeldungen in diesem Browser. Bitte die Seite neu laden.",
+        });
+        socket.disconnect(true);
+        return;
+      }
+      if (alsFahrer) wantRole = "driver";
+      else if (alsChef) wantRole = "admin";
     }
     const adminSession =
       wantRole === "admin"
@@ -280,13 +302,28 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
       // Anmelde-Ausweis im Browser laeuft erst nach sieben Tagen ab. Ohne
       // diese Pruefung koennte ein deaktivierter Fahrer bis dahin weiter
       // Auftraege annehmen.
+      // FAIL CLOSED. Zwei Luecken auf einmal:
+      //  - Ein GELOESCHTER Fahrer lieferte `null` und kam damit durch, obwohl
+      //    sein Ausweis noch sieben Tage gilt. Er landete danach sogar wieder
+      //    im Arbeitsspeicher der Vermittlung.
+      //  - Ein Datenbankfehler lieferte ebenfalls `null` - eine kurze Stoerung
+      //    haette also jede Pruefung ausgehebelt.
+      // Im Zweifel wird abgewiesen; der Fahrer sieht eine ehrliche Meldung.
       const fahrerKonto = await prisma.driver
-        .findUnique({ where: { id: driverId }, select: { active: true } })
+        .findUnique({
+          where: { id: driverId },
+          select: { active: true, company: { select: { subscriptionStatus: true } } },
+        })
         .catch(() => null);
-      if (fahrerKonto && fahrerKonto.active === false) {
+      const aboGesperrt = ["GEKUENDIGT", "UEBERFAELLIG"].includes(
+        fahrerKonto?.company?.subscriptionStatus ?? "",
+      );
+      if (!fahrerKonto || fahrerKonto.active === false || aboGesperrt) {
         socket.emit("auth:error", {
           code: "DRIVER_INACTIVE",
-          error: "Ihr Zugang wurde deaktiviert. Bitte wenden Sie sich an Ihre Zentrale.",
+          error: aboGesperrt
+            ? "Das Abo Ihres Unternehmens ist nicht aktiv. Bitte wenden Sie sich an Ihre Zentrale."
+            : "Ihr Zugang ist nicht mehr gültig. Bitte wenden Sie sich an Ihre Zentrale.",
         });
         socket.disconnect(true);
         return;
@@ -321,6 +358,11 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
       // Polling auf WebSocket umschaltet), haette der Fahrer sonst ein ewig
       // ladendes Dashboard – ohne Fehlermeldung und ohne Wiederholung.
       socket.on("driver:sync", async (_p: unknown, ack?: (r: any) => void) => {
+        // Jeder Aufruf loest mehrere Datenbankabfragen aus. Ein kaputter oder
+        // boeswilliger Client konnte hunderte pro Sekunde schicken.
+        if (!rateLimit(`sync:driver:${driverId}`, 10, 10_000).ok) {
+          return ack?.({ ok: false, error: "Zu viele Anfragen." });
+        }
         try {
           const zustand = await driverState(driverId);
           socket.emit("driver:state", zustand);
@@ -348,8 +390,16 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
         // Nur die Zustaende, die ein Fahrer selbst setzen darf. Alles andere
         // (BESETZT, RESERVIERT) vergibt die Vermittlung.
         if (!FAHRER_STATUS.has(p?.status)) return ack?.({ ok: false, error: "Ungueltiger Status." });
-        await dispatcher.setStatus(driverId, p.status).catch(() => {});
-        ack?.({ ok: true });
+        // Frueher wurde jeder Fehler verschluckt und trotzdem Erfolg gemeldet:
+        // die App zeigte "Sie sind frei", waehrend der Server etwas anderes
+        // wusste. Jetzt bekommt der Fahrer die Wahrheit - auch die Absage,
+        // wenn er waehrend einer laufenden Fahrt auf FREI gehen will.
+        try {
+          await dispatcher.setStatus(driverId, p.status);
+          ack?.({ ok: true });
+        } catch (e: any) {
+          ack?.({ ok: false, error: e?.message ?? "Status konnte nicht gesetzt werden." });
+        }
       });
 
       socket.on("driver:respond", async (p: { bookingId: string; accept: boolean }, ack?: (r: any) => void) => {
@@ -359,6 +409,15 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
       });
 
       socket.on("driver:trip", async (p: { bookingId: string; action: any }, ack?: (r: any) => void) => {
+        // Zur Laufzeit kam hier alles an. Eine erfundene Aktion traf keinen
+        // Zweig, wurde am Ende aber trotzdem mit "ok" quittiert - die App
+        // glaubte, etwas bewirkt zu haben.
+        if (!FAHRT_AKTIONEN.has(p?.action)) {
+          return ack?.({ ok: false, error: "Unbekannte Aktion." });
+        }
+        if (typeof p?.bookingId !== "string" || !p.bookingId) {
+          return ack?.({ ok: false, error: "Fahrt fehlt." });
+        }
         const r = await dispatcher.tripAction(driverId, p.bookingId, p.action);
         socket.emit("driver:state", await driverState(driverId));
         ack?.(r);
@@ -485,15 +544,35 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
     });
 
     // ---- Admin-Aktionen ----
-    socket.on("admin:cancel", async (p: { bookingId: string }) => {
-      if (socket.data.role !== "ADMIN") return;
-      // Mandantencheck
-      const b = await prisma.booking.findUnique({ where: { id: p.bookingId } });
-      if (!b || b.companyId !== socket.data.companyId) return;
-      await dispatcher.cancelBooking(p.bookingId).catch(() => {});
+    socket.on("admin:cancel", async (p: { bookingId: string }, ack?: (r: any) => void) => {
+      // Ohne Rueckmeldung glaubte die Zentrale, storniert zu haben, waehrend
+      // die Fahrt weiterlief - jeder Fehler wurde stillschweigend verworfen.
+      if (socket.data.role !== "ADMIN") return ack?.({ ok: false, error: "Nicht berechtigt." });
+      const b = await prisma.booking.findUnique({ where: { id: p?.bookingId } });
+      if (!b || b.companyId !== socket.data.companyId) {
+        return ack?.({ ok: false, error: "Fahrt nicht gefunden." });
+      }
+      try {
+        await dispatcher.cancelBooking(p.bookingId, { actorType: "ADMIN" });
+        const danach = await prisma.booking.findUnique({
+          where: { id: p.bookingId },
+          select: { status: true },
+        });
+        if (danach?.status !== "STORNIERT") {
+          return ack?.({ ok: false, error: "Die Fahrt konnte nicht mehr storniert werden." });
+        }
+        ack?.({ ok: true });
+      } catch (e: any) {
+        console.error(`Storno durch die Zentrale fehlgeschlagen (${p.bookingId}):`, e?.message ?? e);
+        ack?.({ ok: false, error: "Stornierung fehlgeschlagen. Bitte erneut versuchen." });
+      }
     });
 
     socket.on("admin:refresh", async () => {
+      // Erzeugt einen vollstaendigen Firmen-Schnappschuss (alle Fahrer, alle
+      // aktiven und geplanten Fahrten) - ohne Bremse ein Hebel, um die
+      // Datenbank aus einem angemeldeten Konto heraus lahmzulegen.
+      if (!rateLimit(`refresh:admin:${socket.data.companyId ?? socket.id}`, 6, 10_000).ok) return;
       if (socket.data.role !== "ADMIN" || !socket.data.companyId) return;
       socket.emit("admin:snapshot", await adminSnapshot(dispatcher, socket.data.companyId));
     });

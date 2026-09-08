@@ -13,7 +13,9 @@ export type AccessEntity =
   | "PATIENT"
   | "RECURRING"
   | "INSTITUTION"
-  | "SOS";
+  | "SOS"
+  // DRIVER: Aenderungen an Fahrerrechten und -nachweisen.
+  | "DRIVER";
 
 export async function logAccess(e: {
   actorType: "ADMIN" | "INSTITUTION" | "CUSTOMER" | "SYSTEM";

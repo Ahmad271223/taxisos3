@@ -25,10 +25,18 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   // anderen Karten – auch schon waehrend der Fahrt, wenn die Deckungspruefung
   // beim Start fehlgeschlagen ist.
   const failed = isCard && b.paymentStatus === "FEHLGESCHLAGEN";
+  // Nur der angemeldete Karteninhaber selbst.
+  const istEigentuemer = !!b.customerId && getSession("customer")?.sub === b.customerId;
   const alternatives =
-    failed && b.customerId
+    failed && istEigentuemer
+      // NUR fuer den angemeldeten Eigentuemer. Diese Route ist auch ueber den
+      // Verfolgungs-Link erreichbar - der wandert per SMS durch fremde Haende.
+      // Wer einen Link zu einer fehlgeschlagenen Kartenzahlung hatte, bekam
+      // vorher die Liste ALLER hinterlegten Karten des Kontos: Marke, letzte
+      // vier Ziffern, interne Kennung, Ablauf. Das gehoert niemandem ausser
+      // dem Karteninhaber selbst.
       ? await prisma.customerCard.findMany({
-          where: { customerId: b.customerId },
+          where: { customerId: b.customerId as string },
           orderBy: { isDefault: "desc" },
         })
       : [];
@@ -167,9 +175,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   getDispatcher()?.refreshBooking?.(b.id).catch?.(() => {});
 
   if (!result.ok && result.status === "FEHLGESCHLAGEN") {
-    const cards = b.customerId
-      ? await prisma.customerCard.findMany({ where: { customerId: b.customerId }, orderBy: { isDefault: "desc" } })
-      : [];
+    // Auch in der Fehlerantwort: die Kartenliste nur an den angemeldeten
+    // Eigentuemer, nicht an jeden, der den Verfolgungs-Link kennt.
+    const cards =
+      b.customerId && getSession("customer")?.sub === b.customerId
+        ? await prisma.customerCard.findMany({ where: { customerId: b.customerId }, orderBy: { isDefault: "desc" } })
+        : [];
     return NextResponse.json(
       {
         ok: false,

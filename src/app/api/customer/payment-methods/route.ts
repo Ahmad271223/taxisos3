@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { kontoGesperrt } from "@/lib/kundeGesperrt";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
 import {
@@ -93,6 +94,11 @@ export async function POST() {
 export async function PUT(req: Request) {
   const session = requireRole("CUSTOMER");
   if (!session) return NextResponse.json({ error: "Bitte melden Sie sich an." }, { status: 401 });
+  // Die Sperre galt bisher nur beim ANLEGEN einer Karte. Wer bereits
+  // angemeldet war, konnte danach weiter Karten hinterlegen und wechseln -
+  // obwohl sein Konto gesperrt ist.
+  const gesperrt = await kontoGesperrt(session.sub);
+  if (gesperrt) return gesperrt;
 
   let json: any;
   try {

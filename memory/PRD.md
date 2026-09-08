@@ -478,6 +478,110 @@ Rueckfrage in der Oberflaeche waere der richtige Ort dafuer. Die Sitzung eines
 Portal-Unterkontos laeuft weiterhin unter der Kennung des Hauptkontos, weil sie
 die Mandantentrennung traegt; die Rechte haengen an `portalRole`.
 
+**Sechster externer Bericht (#177-#269, bearbeitet 2026-09-08).** Diesmal
+gezielt Firmenchef, Fahrer und Fahrgast. Der schwerste Fund war eine
+vollstaendige Angriffskette, und zwei Befunde haben sich bei der Pruefung als
+Fehleinschaetzung erwiesen - dazu unten mehr, denn daraus folgt eine Regel fuer
+kuenftige Berichte.
+
+*Die Angriffskette (#236-#243, #266/#267):*
+
+Die Liste offener Vorbestellungen liefert jedem Fahrer die internen Kennungen -
+er musste also nichts erraten. Und `reserveScheduled()` nahm jede Kennung an:
+geprueft wurde nur "ist eine Vorbestellung und hat noch keinen Fahrer". NICHT
+geprueft wurden Betriebsart (der Krankenfahrten-Pool ist ausdruecklich der
+Zentrale vorbehalten), Zustand (eine STORNIERTE Fahrt liess sich wieder auf
+ZUGEWIESEN setzen), Fahrzeugklasse, Krankenbefoerderung, Rampe und Tragestuhl.
+Ein Standardwagen ohne Krankenbefoerderung konnte sich damit eine Dialysefahrt
+greifen. `assignFromPool()` hatte dieselbe Luecke von der anderen Seite: die
+Zentrale konnte eine Krankenfahrt einem ungeeigneten Fahrer zuweisen, und zwei
+gleichzeitige Zuweisungen gaben demselben Fahrer zwei Sofortfahrten - im
+Speicher ueberlebte nur eine, die andere verschwand aus der Steuerung.
+
+Jetzt gibt es EINE zentrale Eignungspruefung (`eignungPruefen`) fuer alle drei
+Wege in eine Fahrt - automatische Vermittlung, Selbstreservierung, Zuweisung
+durch die Zentrale - plus atomare Anspruchsnahme und eine Pruefung, dass der
+Fahrer nicht schon eine Fahrt hat. Die offene Liste zeigt ausserdem nur noch
+die grobe Lage statt vollstaendiger Anschriften (#265): sie ging plattformweit
+an alle Fahrer und verriet faktisch "Wohnung X faehrt zum Dialysezentrum Y".
+
+*Weitere echte Befunde:*
+
+- **Die Fahrt hatte keine Zustandsmaschine (#189).** Die Reihenfolge steckte
+  allein in den Schaltflaechen der App: ein manipulierter Client konnte direkt
+  "abgeschlossen" senden, ohne je angekommen zu sein - und damit die gesamte
+  Geldlogik ausloesen. Erlaubte Uebergaenge werden jetzt serverseitig erzwungen.
+- **Doppelter Fahrtabschluss (#190).** Zwei fast gleichzeitige "beendet" liefen
+  beide durch Abrechnung und Bonuspunkte; die Punkte wurden zweimal
+  gutgeschrieben. Der Abschluss wird jetzt atomar beansprucht.
+- **Storno konnte einen Abschluss ueberschreiben (#207/#208).** Zwischen der
+  Pruefung in der Route und dem Schreibvorgang konnte der Fahrer die Fahrt
+  beenden; das Storno machte daraus wieder STORNIERT - mitsamt Fahrpreis und
+  Beleg. Die Bedingung steckt jetzt im UPDATE selbst.
+- **Geloeschte Fahrer als Geister (#230/#231/#247).** Der Echtzeitkanal prueft
+  beim Verbinden `active === false` - ein GELOESCHTER Fahrer lieferte `null`
+  und kam durch, ebenso bei einem Datenbankfehler. Er landete danach sogar
+  wieder im Arbeitsspeicher der Vermittlung, ohne in der Datenbank zu
+  existieren. Jetzt fail-closed, und es entstehen keine Fahrer mehr aus dem
+  Nichts.
+- **Kartendaten im Verfolgungslink (#202).** Wer einen Link zu einer
+  fehlgeschlagenen Kartenzahlung hatte, bekam Marke, letzte vier Ziffern und
+  interne Kennung ALLER hinterlegten Karten des Kontos. Jetzt nur noch fuer den
+  angemeldeten Karteninhaber.
+- **Die Reitervermischung (#200/#201/#246)** hatte zwei gegenlaeufige
+  Ursachen: `/api/auth/me` lieferte bei mehreren Anmeldungen immer den
+  Firmenchef, der Echtzeitkanal immer den Fahrer - und der alte, rollenlose
+  Ausweis blieb beim bereichsweisen Abmelden liegen, auf den beide
+  zurueckfallen. Jetzt: kein generisches `session` mehr, der alte Ausweis wird
+  immer entfernt, und bei mehreren Rollen muss der Client sagen, als wer er
+  sich verbindet.
+- Rueckfahrt: wurde immer als BARZAHLUNG angelegt, auch wenn die Hinfahrt die
+  Firma oder die Karte zahlt (#183) - bei einer Krankenfahrt sollte der Patient
+  ploetzlich selbst zahlen. Und ein Fehler beim Anlegen liess die Anfrage
+  scheitern, obwohl die Hinfahrt schon vermittelt und per SMS bestaetigt war;
+  der Fahrgast klickte erneut und hatte zwei Hinfahrten (#184).
+- Eine Vorbestellung in der Vergangenheit wurde als Sofortfahrt vermittelt
+  (#181), eine Rueckfahrt durfte vor der Hinfahrt liegen (#182).
+- Die SMS-Bestaetigung liess sich umgehen: eine im Konto gespeicherte, NIE
+  bestaetigte Nummer galt als bestaetigt, sobald sie mit der eingegebenen
+  uebereinstimmte (#180).
+- Weiter behoben: Buchung bei gekuendigter Firma (#209), Login mit einem Objekt
+  statt Text (#253), gesperrte Kunden in der Kartenverwaltung (#214),
+  Passwort-Durchprobieren im Profil (#254), Fahrer-Loeschen trennte die
+  Verbindung BEVOR auffiel, dass eine Fahrt laeuft (#260), Stopp-Obergrenze bei
+  der Zieländerung (#249), stiller Erfolg bei fehlgeschlagenem Statuswechsel
+  (#188), Storno der Zentrale ohne Rueckmeldung (#229), Status nach Funkloch
+  (#232), ungebremste Socket-Aufrufe (#233/#234), erfundene Fahraktionen
+  (#248), Audit-Kategorie DRIVER statt BOOKING (#259), rohe Datensaetze im
+  Fahrerdetail (#268).
+
+*Zwei Befunde waren FALSCH - und der Weg dorthin ist die eigentliche Lehre:*
+
+**#185 (angeblich kritisch): "Eine bei Firma A gebuchte Fahrt kann von Firma B
+uebernommen werden, und der Preis wurde mit A's Tarif berechnet."** Der zweite
+Teil stimmt nicht: `respondToOffer()` berechnet den Preis bei der Annahme mit
+dem Tarif der ANNEHMENDEN Firma neu. Damit ist der Kern des Vorwurfs hinfaellig
+- die Firmenkennung auf einer Fahrt ist der Ausgangspunkt, nicht eine Bindung.
+Der firmenuebergreifende Marktplatz ist die Architektur, und fuer feste Flotten
+gibt es `preferredCompanyIds`.
+
+Ich hatte den Befund zunaechst uebernommen und eine harte Firmenbindung
+eingebaut. Der Lasttest hat sie widerlegt: nur noch 60 von 120 Bestellungen
+wurden rechtzeitig angenommen. Ein zweiter Versuch (gewaehlte Firma in den
+ersten beiden Phasen bevorzugen) verzoegerte die Annahme um bis zu 30 Sekunden
+und fiel ebenfalls durch. Beides wurde wieder entfernt.
+
+**#193 (Fahrer kann sich waehrend der Fahrt selbst auf FREI setzen)** ist echt,
+aber meine erste Fassung stuetzte sich auf die Merkliste im Arbeitsspeicher.
+Die kann Eintraege enthalten, zu denen es keine laufende Fahrt mehr gibt - ein
+Fahrer haette sich dann NIE wieder frei melden koennen und waere stumm aus der
+Vermittlung gefallen. Geprueft wird jetzt die Datenbank, und nur bei einem
+Fahrtstatus, der wirklich "unterwegs" bedeutet.
+
+**Regel daraus:** Ein Befund wird erst uebernommen, wenn seine Begruendung im
+Code nachgewiesen ist - nicht, weil er plausibel klingt. Und jede Aenderung an
+der Vermittlung geht durch `loadtest_heavy`, bevor sie bleibt.
+
 
 ---
 

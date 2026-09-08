@@ -168,12 +168,34 @@ export function messageDTO(m: any) {
  * noetig ist. Name und Rufnummer bekommt der Fahrer erst NACH dem Annehmen
  * ueber den regulaeren Auftragsstand.
  */
+/**
+ * Grobe Lage aus einer Anschrift: Postleitzahl und Ort, ohne Strasse und
+ * Hausnummer. Fuer die Entscheidung "will ich diese Fahrt?" genuegt das.
+ */
+function grobeLage(adresse: string | null | undefined): string {
+  const a = (adresse ?? "").trim();
+  if (!a) return "Raum Hannover";
+  const plzOrt = a.match(/\b\d{5}\s+[^,]+/);
+  if (plzOrt) return plzOrt[0].trim();
+  const teile = a.split(",").map((s) => s.trim()).filter(Boolean);
+  if (teile.length > 1) return teile[teile.length - 1];
+  return "Raum Hannover";
+}
+
 export function offeneFahrtDTO(b: any) {
   return {
+    // Die Kennung bleibt: der Fahrer muss sagen koennen, WELCHE Fahrt er
+    // reservieren will. Sie allein oeffnet nichts mehr - reserveScheduled()
+    // prueft seit dem 08.09.2026 Betriebsart, Zustand, Firma, Fahrzeugklasse
+    // und die medizinischen Anforderungen.
     id: b.id,
     scheduledAt: iso(b.scheduledAt),
-    pickupAddress: b.pickupAddress,
-    destAddress: b.destAddress,
+    // NUR die grobe Lage. Diese Liste geht an ALLE Fahrer der Plattform, bevor
+    // irgendjemand die Fahrt angenommen hat. Mit vollstaendigen Anschriften
+    // stand dort faktisch "Wohnung X faehrt zum Dialysezentrum Y" - auch ohne
+    // Namen ein Gesundheitsdatum. Die genaue Adresse gibt es nach der Annahme.
+    pickupArea: grobeLage(b.pickupAddress),
+    destArea: grobeLage(b.destAddress),
     vehicleClass: b.vehicleClass ?? null,
     distanceMeters: b.distanceMeters ?? null,
     priceApprox: b.priceApprox ?? null,

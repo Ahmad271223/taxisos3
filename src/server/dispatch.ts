@@ -45,6 +45,11 @@ const NEAR_COMPLETION_METERS = 300;
 // berechnen – sonst wuerde jede GPS-Meldung eine Routenabfrage ausloesen.
 const ETA_REFRESH_MS = 20_000;
 const ETA_REFRESH_METERS = 200;
+// Wie weit darf ein ausdruecklich gewuenschter Fahrer entfernt sein? Grosszuegiger
+// als die normale Phase (der Fahrgast hat ihn bewusst gewaehlt), aber nicht
+// unbegrenzt - sonst faehrt ein Wagen 40 Minuten zur Abholung.
+const WUNSCHFAHRER_MAX_M = Number(process.env.WUNSCHFAHRER_MAX_M ?? 15_000);
+
 const SCHEDULED_LEAD_MS = 5 * 60_000;
 // Vorlauf fuer die Fahrer-Rueckfrage ("Fahrt weiterhin durchfuehren?").
 const DRIVER_CONFIRM_LEAD_MS = 30 * 60_000;
@@ -239,7 +244,22 @@ export class Dispatcher {
     const d = await prisma.driver.findUnique({ where: { id: driverId } });
     if (!d) return;
     const prev = this.live.get(driverId);
-    const status = prev && prev.status !== "OFFLINE" ? prev.status : "PAUSE";
+    // Nach einem kurzen Funkloch stand der Fahrer auf PAUSE, obwohl er einen
+    // Fahrgast im Wagen hatte: die Trennung setzt OFFLINE, und beim Zurueck-
+    // kommen wurde daraus pauschal PAUSE. Die Zentrale sah dann einen
+    // pausierenden Fahrer mit laufender Fahrt. Die Vermittlung weiss aber noch,
+    // was er gerade faehrt - also danach richten.
+    const laufend = this.driverActiveBooking.has(driverId);
+    const reserviert = !laufend && (await prisma.booking.count({
+      where: { driverId, isReserved: true, status: { in: ["ZUGEWIESEN", "OFFEN"] } },
+    }).catch(() => 0)) > 0;
+    const status = laufend
+      ? "BESETZT"
+      : reserviert
+        ? "RESERVIERT"
+        : prev && prev.status !== "OFFLINE"
+          ? prev.status
+          : "PAUSE";
     this.live.set(driverId, {
       id: d.id,
       companyId: d.companyId,
@@ -294,15 +314,30 @@ export class Dispatcher {
       live.lastSeen = Date.now();
       live.online = true;
     } else {
+      // Frueher entstand hier aus dem Nichts ein Fahrer im Speicher - auch fuer
+      // einen laengst GELOESCHTEN Fahrer, dessen alter Ausweis noch gueltig
+      // war. Der stand danach "online" in der Vermittlung, ohne in der
+      // Datenbank zu existieren. Deshalb erst nachsehen, ob es ihn wirklich
+      // gibt, und die echten Fahrzeugdaten uebernehmen statt Standardwerte.
+      const echt = await prisma.driver
+        .findUnique({
+          where: { id: driverId },
+          select: {
+            id: true, active: true, companyId: true, name: true, vehicleClass: true,
+            medicalAllowed: true, hasRamp: true, hasStretcher: true,
+          },
+        })
+        .catch(() => null);
+      if (!echt || echt.active === false) return;
       live = {
         id: driverId,
-        companyId: "",
-        name: "",
+        companyId: echt.companyId,
+        name: echt.name,
         status: "PAUSE",
-        vehicleClass: "STANDARD",
-        medicalAllowed: false,
-        hasRamp: false,
-        hasStretcher: false,
+        vehicleClass: echt.vehicleClass ?? "STANDARD",
+        medicalAllowed: !!echt.medicalAllowed,
+        hasRamp: !!echt.hasRamp,
+        hasStretcher: !!echt.hasStretcher,
         lat,
         lng,
         online: true,
@@ -349,7 +384,109 @@ export class Dispatcher {
     }
   }
 
+  /**
+   * Darf DIESER Fahrer DIESE Fahrt uebernehmen?
+   *
+   * Die automatische Vermittlung prueft das beim Zusammenstellen der Kandidaten.
+   * Die beiden ANDEREN Wege in eine Fahrt pruefen es bisher nicht: der Fahrer
+   * reserviert eine Vorbestellung selbst, und die Zentrale weist eine Pool-Fahrt
+   * zu. Damit konnte ein Fahrer ohne Krankenbefoerderung, ohne Rampe und mit dem
+   * falschen Fahrzeug eine Dialysefahrt uebernehmen. Deshalb hier einmal
+   * zentral, fuer alle drei Wege.
+   */
+  private async eignungPruefen(
+    driverId: string,
+    booking: {
+      companyId: string | null;
+      vehicleClass: string;
+      medicalType: string | null;
+      requiresRamp: boolean | null;
+      requiresStretcher: boolean | null;
+    },
+  ): Promise<{ ok: true; companyId: string } | { ok: false; reason: string }> {
+    const d = await prisma.driver.findUnique({
+      where: { id: driverId },
+      select: {
+        id: true,
+        active: true,
+        companyId: true,
+        vehicleClass: true,
+        medicalAllowed: true,
+        hasRamp: true,
+        hasStretcher: true,
+        company: { select: { subscriptionStatus: true } },
+      },
+    });
+    if (!d) return { ok: false, reason: "Fahrer nicht gefunden." };
+    if (d.active === false) return { ok: false, reason: "Dieser Zugang ist deaktiviert." };
+    if (d.company && ["GEKUENDIGT", "UEBERFAELLIG"].includes(d.company.subscriptionStatus ?? "")) {
+      return { ok: false, reason: "Das Abo dieses Unternehmens ist nicht aktiv." };
+    }
+    // BEWUSST KEINE Firmenpruefung: Der Krankenfahrten-Pool ist ausdruecklich
+    // fuer alle Zentralen offen ("die erste, die zuweist, bekommt die Fahrt"),
+    // und offene Vorbestellungen sind der firmenuebergreifende Marktplatz. Wer
+    // uebernimmt, wird zur Firma der Fahrt - und der Preis wird dabei mit
+    // seinem Tarif neu berechnet. Was hier zaehlt, sind die Faehigkeiten.
+    if (normalizeClass(d.vehicleClass) !== normalizeClass(booking.vehicleClass)) {
+      return { ok: false, reason: "Ihr Fahrzeug passt nicht zur angefragten Klasse." };
+    }
+    if (booking.medicalType && !d.medicalAllowed) {
+      return { ok: false, reason: "Fuer Krankenfahrten ist dieser Fahrer nicht freigegeben." };
+    }
+    if (booking.requiresRamp && !d.hasRamp) return { ok: false, reason: "Diese Fahrt benoetigt eine Rampe." };
+    if (booking.requiresStretcher && !d.hasStretcher) {
+      return { ok: false, reason: "Diese Fahrt benoetigt einen Tragestuhl." };
+    }
+    return { ok: true, companyId: d.companyId };
+  }
+
+  /**
+   * Hat der Fahrer gerade schon eine Fahrt am Hals?
+   *
+   * Die Fahrt selbst wird atomar beansprucht, der FAHRER aber nicht: zwei
+   * gleichzeitige Zuweisungen konnten demselben Fahrer zwei Sofortfahrten
+   * geben. Im Speicher merkt sich der Dispatcher nur EINE davon - die andere
+   * verschwand aus der Steuerung, obwohl sie in der Datenbank auf ihn lief.
+   */
+  private async hatAktiveFahrt(driverId: string, ausser?: string): Promise<boolean> {
+    const imSpeicher = this.driverActiveBooking.get(driverId);
+    if (imSpeicher && imSpeicher !== ausser) return true;
+    const offen = await prisma.booking.count({
+      where: {
+        driverId,
+        status: { in: ["ZUGEWIESEN", "AKTIV"] },
+        ...(ausser ? { id: { not: ausser } } : {}),
+      },
+    });
+    return offen > 0;
+  }
+
   async setStatus(driverId: string, status: string): Promise<void> {
+    // Waehrend einer laufenden Fahrt darf sich niemand selbst auf FREI setzen.
+    // Sonst laesst sich die Regel umgehen, dass ein besetzter Fahrer erst kurz
+    // vor dem Ziel wieder Angebote bekommt - und die Zentrale saehe einen
+    // freien Fahrer, der in Wahrheit einen Fahrgast im Wagen hat.
+    if (status === "FREI") {
+      // Waehrend einer laufenden Fahrt darf sich niemand selbst auf FREI
+      // setzen: sonst laesst sich die Regel umgehen, dass ein besetzter Fahrer
+      // erst kurz vor dem Ziel wieder Angebote bekommt, und die Zentrale saehe
+      // einen freien Fahrer mit Fahrgast im Wagen.
+      //
+      // Geprueft wird die DATENBANK, nicht die Merkliste im Arbeitsspeicher:
+      // die kann nach Neustarts, verwaisten Zuweisungen oder abgebrochenen
+      // Vorgaengen Eintraege enthalten, zu denen es keine laufende Fahrt mehr
+      // gibt - der Fahrer koennte sich dann nie wieder frei melden.
+      const laeuft = await prisma.booking.count({
+        where: {
+          driverId,
+          status: { in: ["ZUGEWIESEN", "AKTIV"] },
+          trackingStatus: { in: ["FAHRER_UNTERWEGS", "FAHRER_ANGEKOMMEN", "FAHRT_LAEUFT"] },
+        },
+      });
+      if (laeuft > 0) {
+        throw new Error("Sie haben eine laufende Fahrt. Bitte zuerst abschliessen.");
+      }
+    }
     const live = this.live.get(driverId);
     if (live) live.status = status;
     const updated = await prisma.driver.update({
@@ -504,8 +641,27 @@ export class Dispatcher {
     // anfragen (ohne Radius-/Klassenfilter – der Kunde hat es selbst gewählt).
     // Ist es nicht (mehr) frei verfügbar, Markierung löschen und normal weiter.
     if (phaseIndex === 0 && b.requestedDriverId) {
+      // Auch der Wunschfahrer muss passen. Frueher galt "der Kunde hat ihn
+      // selbst gewaehlt" als Freibrief: ein Rollstuhltaxi einer anderen Firma,
+      // 20 km entfernt, konnte eine Standardfahrt bekommen. Der Fahrgast tippt
+      // ein Auto auf der Karte an - er kennt weder Fahrzeugklasse noch Firma.
       const td = this.getLiveDrivers().find(
-        (d) => d.id === b.requestedDriverId && d.online && d.lat != null && d.lng != null && d.status === "FREI" && !declined.has(d.id) && (!needsMedical || d.medicalAllowed) && (!needsRamp || d.hasRamp) && (!needsStretcher || d.hasStretcher),
+        (d) =>
+          d.id === b.requestedDriverId &&
+          d.online &&
+          d.lat != null &&
+          d.lng != null &&
+          d.status === "FREI" &&
+          !declined.has(d.id) &&
+          // Firma bewusst NICHT: der Fahrgast hat dieses Auto auf der Karte
+          // angetippt, quer ueber alle Unternehmen - das ist der Sinn der
+          // Live-Karte. Fahrzeugklasse, medizinische Eignung und eine
+          // vernuenftige Entfernung muessen aber stimmen.
+          normalizeClass(d.vehicleClass) === wantClass &&
+          haversineMeters(pickup, { lat: d.lat, lng: d.lng }) <= WUNSCHFAHRER_MAX_M &&
+          (!needsMedical || d.medicalAllowed) &&
+          (!needsRamp || d.hasRamp) &&
+          (!needsStretcher || d.hasStretcher),
       );
       if (td) {
         candidates = [{ d: td, dist: haversineMeters(pickup, { lat: td.lat!, lng: td.lng! }) }];
@@ -513,6 +669,22 @@ export class Dispatcher {
         await prisma.booking.update({ where: { id: bookingId }, data: { requestedDriverId: null } }).catch(() => {});
       }
     }
+
+    // ZUR FIRMENWAHL (Bericht #185): Bucht ein Fahrgast ueber /c/<firma>, steht
+    // dessen Kennung auf der Fahrt - aber das ist BEWUSST keine Bindung.
+    //
+    // Der Bericht argumentierte, der Preis werde mit dem Tarif der gewaehlten
+    // Firma berechnet und die Fahrt dann von einer anderen gefahren. Der erste
+    // Teil stimmt nicht: bei der Annahme rechnet respondToOffer() den Preis mit
+    // dem Tarif der ANNEHMENDEN Firma neu. Ein Fahrgast zahlt also nie den
+    // Tarif der einen Firma fuer die Fahrt einer anderen.
+    //
+    // Ein Versuch, die gewaehlte Firma wenigstens zuerst zu fragen, wurde
+    // wieder entfernt: er verzoegert die firmenuebergreifende Annahme um bis zu
+    // zwei Phasen (30 s). Im Lasttest wurden dadurch nur noch 60 von 120
+    // Bestellungen rechtzeitig angenommen. Fuer den Fahrgast zaehlt, dass
+    // ueberhaupt jemand kommt. Wer eine feste Flotte will, hat dafuer
+    // preferredCompanyIds (siehe unten).
 
     // Hotel Smart Fleet Routing: in den ersten Phasen bevorzugt die Whitelist-
     // Flotte anfragen. Gibt es dort Fahrer im Radius -> nur diese; sonst normaler
@@ -869,6 +1041,23 @@ export class Dispatcher {
     // ein spaeter eintreffendes Event duerfen den Zustand nicht zurueckdrehen.
     if (b.status === "ABGESCHLOSSEN" || b.status === "STORNIERT") return { ok: false };
 
+    // REIHENFOLGE ERZWINGEN. Bisher pruefte der Server nur, DASS die Fahrt dem
+    // Fahrer gehoert und noch laeuft - die Reihenfolge lag allein in den
+    // Schaltflaechen der App. Ein manipulierter Client konnte damit direkt
+    // "abgeschlossen" senden, ohne je angekommen oder losgefahren zu sein, und
+    // die gesamte Geldlogik lief los: Fahrpreis, Abbuchung, Punkte, Beleg.
+    const ERLAUBT: Record<string, string[]> = {
+      arrived: ["FAHRER_UNTERWEGS"],
+      start: ["FAHRER_ANGEKOMMEN"],
+      complete: ["FAHRT_LAEUFT"],
+      // Absagen und Nichtantritt sind bis zum Fahrtbeginn moeglich.
+      cancel: ["FAHRER_GEFUNDEN", "FAHRER_UNTERWEGS", "FAHRER_ANGEKOMMEN", "GEPLANT", "RESERVIERT_FAHRER"],
+      noshow: ["FAHRER_ANGEKOMMEN", "FAHRER_UNTERWEGS"],
+    };
+    const erlaubteVorzustaende = ERLAUBT[action];
+    if (!erlaubteVorzustaende) return { ok: false };
+    if (!erlaubteVorzustaende.includes(b.trackingStatus)) return { ok: false };
+
     if (action === "arrived") {
       await prisma.booking.update({
         where: { id: bookingId },
@@ -922,8 +1111,14 @@ export class Dispatcher {
       // Barzahlung: gar keine Trinkgeld-Abfrage, Fahrt ist einfach beendet.
       const isCardRide = b.paymentMethod === "CARD" && b.paymentStatus === "KARTE_HINTERLEGT";
 
-      await prisma.booking.update({
-        where: { id: bookingId },
+      // ATOMAR ABSCHLIESSEN. Zwei fast gleichzeitige "Fahrt beendet" (Doppel-
+      // tipp, Wiederholung nach Funkloch) lasen vorher beide "laeuft noch" und
+      // liefen beide durch die gesamte Geldlogik: Abrechnung der Firmenfahrt,
+      // Bonuspunkte, Beleg. Die Punkte wurden dabei zweimal gutgeschrieben.
+      // Die Bedingung im UPDATE laesst genau einen Aufruf gewinnen; der zweite
+      // bricht hier ab, bevor irgendetwas mit Geld passiert.
+      const abschluss = await prisma.booking.updateMany({
+        where: { id: bookingId, status: { notIn: ["ABGESCHLOSSEN", "STORNIERT"] } },
         data: {
           status: "ABGESCHLOSSEN",
           trackingStatus: "BEENDET",
@@ -947,6 +1142,10 @@ export class Dispatcher {
           ...(isCardRide ? { tipPromptedAt: new Date() } : {}),
         },
       });
+      // Ein anderer Aufruf war schneller - dann ist die Fahrt bereits sauber
+      // abgeschlossen und alles Weitere waere eine Doppelbuchung.
+      if (abschluss.count !== 1) return { ok: false };
+
       this.driverActiveBooking.delete(driverId);
       this.driverActiveBookingDest.delete(driverId);
       this.driverNearCompletion.delete(driverId);
@@ -1086,23 +1285,57 @@ export class Dispatcher {
     const b = await prisma.booking.findUnique({ where: { id: bookingId } });
     if (!b || !b.isScheduled) return { ok: false, reason: "Keine Vorbestellung." };
     if (b.driverId) return { ok: false, reason: "Bereits reserviert." };
+
+    // NUR Fahrten, die zur Selbstbedienung gedacht sind.
+    //
+    // Frueher genuegte "ist eine Vorbestellung und hat noch keinen Fahrer".
+    // Der Fahrer bekommt die Kennungen offener Vorbestellungen ohnehin in
+    // seiner Liste - er musste also nichts erraten. Damit konnte er auch
+    // Fahrten an sich ziehen, die ausdruecklich der Zentrale vorbehalten sind
+    // (dispatchMode ADMIN = Krankenfahrten-Pool), und sogar solche einer
+    // fremden Firma.
+    if (b.dispatchMode !== "AUTO") {
+      return { ok: false, reason: "Diese Fahrt vergibt die Zentrale." };
+    }
+    // Ein endgueltiger Zustand bleibt endgueltig: eine stornierte oder bereits
+    // gefahrene Vorbestellung liess sich vorher wieder auf ZUGEWIESEN setzen.
+    if (b.status !== "OFFEN") {
+      return { ok: false, reason: "Diese Fahrt ist nicht mehr offen." };
+    }
+
+    // Passt der Fahrer ueberhaupt zu dieser Fahrt? (Firma, Fahrzeugklasse,
+    // Krankenbefoerderung, Rampe, Tragestuhl, aktiver Zugang, aktives Abo.)
+    const eignung = await this.eignungPruefen(driverId, b);
+    if (!eignung.ok) return { ok: false, reason: eignung.reason };
     const live = this.live.get(driverId);
     // Wie assignFromPool: der trackingStatus MUSS explizit gesetzt werden.
     // Eine faellige Vorbestellung steht nach dem Sweep auf "SUCHE" – bliebe sie
     // dabei, haelt driverState() sie fuer die laufende Fahrt und das
     // Fahrer-Dashboard blockiert (alle Trip-/Status-Buttons disabled).
     const immediate = !(b.isScheduled && b.scheduledAt && b.scheduledAt.getTime() > Date.now() + SCHEDULED_LEAD_MS);
-    await prisma.booking.update({
-      where: { id: bookingId },
+    // Eine Fahrt fuer uebermorgen darf man sich auch waehrend einer laufenden
+    // Fahrt vormerken - das ist der Sinn von Vorbestellungen. Nur eine SOFORT
+    // faellige Fahrt darf nicht dazukommen, solange schon eine laeuft.
+    if (immediate && (await this.hatAktiveFahrt(driverId))) {
+      return { ok: false, reason: "Sie haben bereits eine laufende Fahrt." };
+    }
+    // ATOMAR beanspruchen: Zwei Fahrer lasen vorher beide "noch frei" und
+    // schrieben nacheinander ihre Kennung hinein - der zweite gewann, der
+    // erste hatte die Fahrt aber schon in seiner App. Die Bedingung im UPDATE
+    // laesst die Datenbank entscheiden, und der Verlierer bekommt eine ehrliche
+    // Absage. Die Firma wird nur gesetzt, wenn die Fahrt noch keine hat.
+    const anspruch = await prisma.booking.updateMany({
+      where: { id: bookingId, driverId: null, status: "OFFEN", dispatchMode: "AUTO" },
       data: {
         driverId,
-        companyId: live?.companyId ?? undefined,
+        ...(b.companyId ? {} : { companyId: eignung.companyId }),
         status: "ZUGEWIESEN",
         ...(immediate
           ? { trackingStatus: "FAHRER_UNTERWEGS", isReserved: false, acceptedAt: new Date() }
           : { trackingStatus: "GEPLANT", isReserved: true }),
       },
     });
+    if (anspruch.count !== 1) return { ok: false, reason: "Diese Fahrt wurde gerade vergeben." };
     if (immediate) {
       // Faellige Fahrt: wird sofort zum aktuellen Auftrag des Fahrers.
       void this.checkFunds(bookingId);
@@ -1134,6 +1367,26 @@ export class Dispatcher {
   // werden direkt zum aktuellen Auftrag des Fahrers; Vorbestellungen bleiben
   // GEPLANT und werden vom Sweep zur Fahrtzeit live geschaltet.
   async assignFromPool(bookingId: string, driverId: string, companyId: string): Promise<{ ok: boolean; reason?: string }> {
+    // EIGNUNG ZUERST. Die Fahrt wurde bisher atomar beansprucht, ueber den
+    // FAHRER aber nichts geprueft: die Zentrale konnte eine Dialysefahrt mit
+    // Rampenbedarf einem Standardwagen ohne Krankenbefoerderung geben. Die
+    // Route davor prueft nur, dass der Fahrer zur eigenen Firma gehoert.
+    const vorab = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: { companyId: true, vehicleClass: true, medicalType: true, requiresRamp: true, requiresStretcher: true },
+    });
+    if (!vorab) return { ok: false, reason: "Fahrt nicht gefunden." };
+    // Pool-Fahrten haben noch keine Firma - die Zentrale, die zuweist, wird es.
+    const eignung = await this.eignungPruefen(driverId, { ...vorab, companyId: vorab.companyId ?? null });
+    if (!eignung.ok) return { ok: false, reason: eignung.reason };
+
+    // Auch den FAHRER beanspruchen, nicht nur die Fahrt. Zwei gleichzeitige
+    // Zuweisungen gaben demselben Fahrer sonst zwei Sofortfahrten; im Speicher
+    // ueberlebte nur die zweite, die erste verschwand aus der Steuerung.
+    if (await this.hatAktiveFahrt(driverId, bookingId)) {
+      return { ok: false, reason: "Dieser Fahrer hat bereits eine laufende Fahrt." };
+    }
+
     // Atomarer Claim: nur wenn noch im Pool (ADMIN, offen, ohne Fahrer).
     const claim = await prisma.booking.updateMany({
       where: { id: bookingId, dispatchMode: "ADMIN", status: "OFFEN", driverId: null },
@@ -1204,8 +1457,23 @@ export class Dispatcher {
     if (b.paymentMethod === "CARD") {
       paymentStatus = await chargeCancellationFee(bookingId, fee);
     }
-    await prisma.booking.update({
-      where: { id: bookingId },
+    // ENDZUSTAND SCHUETZEN. Die aufrufenden Routen pruefen zwar vorher, aber
+    // zwischen ihrer Pruefung und diesem Schreibvorgang vergeht Zeit: der
+    // Fahrer kann in derselben Sekunde "angekommen" oder "Fahrt beendet"
+    // gedrueckt haben. Vorher hat das Storno eine bereits ABGESCHLOSSENE Fahrt
+    // ueberschrieben - mitsamt Fahrpreis, Zahlung und Beleg.
+    //
+    // Ein Kunden-Storno ist ausserdem nur zulaessig, solange der Fahrer noch
+    // nicht da ist; diese Regel gehoert in dieselbe Bedingung, sonst nutzt sie
+    // die Vorpruefung der Route allein nichts.
+    const stornoAnspruch = await prisma.booking.updateMany({
+      where: {
+        id: bookingId,
+        status: { notIn: ["ABGESCHLOSSEN", "STORNIERT"] },
+        ...(actorType === "CUSTOMER"
+          ? { trackingStatus: { notIn: ["FAHRER_ANGEKOMMEN", "FAHRT_LAEUFT", "BEENDET"] } }
+          : {}),
+      },
       data: {
         status: "STORNIERT",
         trackingStatus: "STORNIERT",
@@ -1219,6 +1487,12 @@ export class Dispatcher {
         paymentStatus,
       },
     });
+    if (stornoAnspruch.count !== 1) {
+      // Die Fahrt wurde in der Zwischenzeit abgeschlossen oder ist bereits
+      // storniert. Nichts weiter tun - vor allem keine Stornogebuehr buchen
+      // und keinen Protokolleintrag schreiben, der nie stattgefunden hat.
+      return;
+    }
     await prisma.cancellationLog.create({
       data: { bookingId, actorType, reason: opts.reason ?? null },
     });

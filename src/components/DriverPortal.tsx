@@ -754,7 +754,14 @@ export function DriverPortal() {
                 <div key={b.id} className="flex items-center justify-between gap-3 rounded-xl bg-ink-50 p-3 text-sm">
                   <div>
                     <p className="font-semibold">{formatDateTime(b.scheduledAt)}</p>
-                    <p className="text-ink-600">{b.pickupAddress} → {b.destAddress}</p>
+                    {/* Vor der Reservierung bewusst nur die grobe Lage: diese
+                        Liste sehen alle Fahrer der Plattform. Die genaue
+                        Adresse steht im Auftrag, sobald er dir gehört. */}
+                    <p className="text-ink-600">{b.pickupArea} → {b.destArea}</p>
+                    <p className="text-xs text-ink-400">
+                      {b.distanceMeters ? `${(b.distanceMeters / 1000).toFixed(1)} km · ` : ""}
+                      genaue Adresse nach dem Reservieren
+                    </p>
                   </div>
                   <button onClick={() => reserve(b.id)} className="btn-primary shrink-0 text-sm">Reservieren</button>
                 </div>

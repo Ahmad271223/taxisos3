@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { rateLimit } from "@/lib/ratelimit";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
@@ -91,6 +92,15 @@ export async function PATCH(req: Request) {
       return NextResponse.json(
         { error: "Bitte das aktuelle Passwort angeben.", code: "PASSWORT_ERFORDERLICH" },
         { status: 403 },
+      );
+    }
+    // Ohne Bremse liess sich hier aus einer gestohlenen Sitzung heraus das
+    // Passwort durchprobieren - und jede Pruefung ist absichtlich rechen-
+    // intensiv, also zugleich ein Hebel gegen den Server.
+    if (!rateLimit(`profil-passwort:${c.id}`, 10, 10 * 60_000).ok) {
+      return NextResponse.json(
+        { error: "Zu viele Versuche. Bitte später erneut." },
+        { status: 429 },
       );
     }
     if (!(await verifyPassword(d.currentPassword, c.passwordHash))) {

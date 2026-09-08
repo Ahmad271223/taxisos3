@@ -9,6 +9,11 @@ export async function POST(req: Request) {
   const scope = new URL(req.url).searchParams.get("scope");
   const res = NextResponse.json({ ok: true });
   const clear = (name: string) => res.cookies.set(name, "", { httpOnly: true, path: "/", maxAge: 0 });
+  // Der alte, rollenlose Ausweis wird IMMER entfernt - auch beim
+  // bereichsweisen Abmelden. Sonst blieb er liegen, und getSession() faellt
+  // fuer Firmenchef und Fahrer darauf zurueck: der Nutzer meldete sich ab und
+  // war im naechsten Moment wieder (oder in einem anderen Konto) angemeldet.
+  clear(SESSION_COOKIE);
   if (scope === "driver") clear(DRIVER_COOKIE);
   else if (scope === "admin") clear(ADMIN_COOKIE);
   else if (scope === "customer") clear(CUSTOMER_COOKIE);
