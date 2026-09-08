@@ -8,6 +8,7 @@
 // Beide nutzen unterschiedliche Stripe-Kunden, Produkte und Code-Pfade.
 
 import { prisma } from "./prisma";
+import { firmaVergessen } from "@/lib/firmaAktiv";
 import { PLANS, getPlan, type Plan } from "./plans";
 
 type StripeLike = any;
@@ -171,6 +172,8 @@ export async function createBillingPortal(companyId: string): Promise<{ ok: bool
  * Abo-Zustand aus Stripe uebernehmen. Wird vom Webhook und beim Oeffnen der
  * Abo-Seite aufgerufen, damit der lokale Stand nie veraltet.
  */
+// Nach jeder Aenderung den Zwischenspeicher der Abo-Sperre leeren, damit
+// eine Zahlung sofort wieder freischaltet.
 export async function syncSubscription(companyId: string): Promise<void> {
   const client = await getClient();
   if (!client) return;

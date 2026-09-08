@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { rateLimit } from "@/lib/ratelimit";
+import { aboGesperrt } from "@/lib/firmaAktiv";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
@@ -42,14 +44,28 @@ function grobeLage(adresse: string | null | undefined): string {
 // Jetzt enthaelt der Pool nur noch, was fuer die Entscheidung noetig ist:
 // grobe Lage, Zeit, Entfernung und die Anforderungen ans Fahrzeug. Wer
 // zuweist, sieht ueber die normale Auftragsansicht sofort alles Weitere.
-export async function GET() {
+export async function GET(req: Request) {
   const session = requireRole("ADMIN");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
 
-  const rows = await prisma.booking.findMany({
+  // BLAETTERN statt abschneiden. Vorher endete die Liste hart bei 100: bei mehr
+  // offenen Krankenfahrten verschwanden die uebrigen lautlos aus der Ansicht -
+  // niemand haette gemerkt, dass Dialyse- oder Reha-Fahrten unbearbeitet
+  // liegen. Jetzt sagt die Antwort, ob es weitergeht.
+  const url = new URL(req.url);
+  const limit = Math.min(200, Math.max(10, parseInt(url.searchParams.get("limit") ?? "100", 10) || 100));
+  const cursor = url.searchParams.get("cursor") || null;
+
+  const gefunden = await prisma.booking.findMany({
     where: { dispatchMode: "ADMIN", status: "OFFEN", driverId: null },
-    orderBy: [{ scheduledAt: "asc" }, { createdAt: "asc" }],
-    take: 100,
+    orderBy: [{ scheduledAt: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+  });
+  const weitere = gefunden.length > limit;
+  const rows = weitere ? gefunden.slice(0, limit) : gefunden;
+  const offenGesamt = await prisma.booking.count({
+    where: { dispatchMode: "ADMIN", status: "OFFEN", driverId: null },
   });
 
   const pool = rows.map((b) => ({
@@ -70,7 +86,22 @@ export async function GET() {
     distanceMeters: b.distanceMeters ?? null,
     createdAt: b.createdAt.toISOString(),
   }));
-  return NextResponse.json({ pool });
+  // Der Pool zeigt Fahrten FREMDER Einrichtungen quer ueber alle Zentralen.
+  // Auch in der datensparsamen Fassung gehoert dieser Zugriff protokolliert.
+  await logAccess({
+    actorType: "ADMIN",
+    companyId: session.companyId,
+    actorId: session.companyId,
+    action: "VIEW",
+    entity: "BOOKING",
+    detail: `Krankenfahrten-Pool eingesehen (${rows.length} von ${offenGesamt})`,
+  });
+
+  return NextResponse.json({
+    pool,
+    total: offenGesamt,
+    nextCursor: weitere ? rows[rows.length - 1]?.id ?? null : null,
+  });
 }
 
 const assignSchema = z.object({ bookingId: z.string(), driverId: z.string() });
@@ -79,8 +110,17 @@ const assignSchema = z.object({ bookingId: z.string(), driverId: z.string() });
 export async function POST(req: Request) {
   const session = requireRole("ADMIN");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  // Abo-Sperre: gekuendigt oder ueberfaellig -> keine betriebsrelevanten
+  // Aenderungen mehr. Lesen bleibt erlaubt (Rechnungen, Belege, Abo-Seite).
+  const abo = await aboGesperrt(session.companyId);
+  if (abo) return abo;
   let json: any;
   try { json = await req.json(); } catch { return NextResponse.json({ error: "Ungültige Anfrage" }, { status: 400 }); }
+  // Ohne Bremse liesse sich der firmenuebergreifende Pool im Sekundentakt
+  // leerraeumen.
+  if (!rateLimit(`pool-assign:${session.companyId}`, 60, 10 * 60_000).ok) {
+    return NextResponse.json({ error: "Zu viele Zuweisungen in kurzer Zeit." }, { status: 429 });
+  }
   const parsed = assignSchema.safeParse(json);
   if (!parsed.success) return NextResponse.json({ error: "bookingId und driverId erforderlich." }, { status: 400 });
 

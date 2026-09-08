@@ -117,17 +117,23 @@ export async function saveCard(customerId: string, paymentMethodId: string): Pro
   const info = await getCardInfo(paymentMethodId);
   if (!info) return null;
 
-  const count = await prisma.customerCard.count({ where: { customerId } });
-  const card = await prisma.customerCard.create({
-    data: {
-      customerId,
-      stripePaymentMethodId: info.paymentMethodId,
-      brand: info.brand,
-      last4: info.last4,
-      expMonth: info.expMonth,
-      expYear: info.expYear,
-      isDefault: count === 0,
-    },
+  // ERSTE KARTE = STANDARD, aber genau einmal. Zwei gleichzeitig gespeicherte
+  // Karten lasen beide "noch keine vorhanden" und wurden beide zur
+  // Standardkarte. In einer Transaktion zaehlen und anlegen schliesst das
+  // Fenster: die zweite Transaktion sieht die erste bereits.
+  const card = await prisma.$transaction(async (tx) => {
+    const count = await tx.customerCard.count({ where: { customerId } });
+    return tx.customerCard.create({
+      data: {
+        customerId,
+        stripePaymentMethodId: info.paymentMethodId,
+        brand: info.brand,
+        last4: info.last4,
+        expMonth: info.expMonth,
+        expYear: info.expYear,
+        isDefault: count === 0,
+      },
+    });
   });
   return cardDTO(card);
 }
@@ -170,12 +176,16 @@ export async function removeCard(customerId: string, cardId: string): Promise<{ 
   if (!geloest) {
     return { ok: false, reason: "Die Karte konnte beim Zahlungsdienstleister nicht entfernt werden. Bitte später erneut versuchen." };
   }
-  await prisma.customerCard.delete({ where: { id: cardId } });
-
-  if (card.isDefault) {
-    const next = await prisma.customerCard.findFirst({ where: { customerId }, orderBy: { createdAt: "desc" } });
-    if (next) await prisma.customerCard.update({ where: { id: next.id }, data: { isDefault: true } });
-  }
+  // Loeschen und Nachruecken der Standardkarte GEMEINSAM: sonst konnte nach
+  // einem Fehler dazwischen ein Kunde mit mehreren Karten dastehen, von denen
+  // keine die Standardkarte ist.
+  await prisma.$transaction(async (tx) => {
+    await tx.customerCard.delete({ where: { id: cardId } });
+    if (card.isDefault) {
+      const next = await tx.customerCard.findFirst({ where: { customerId }, orderBy: { createdAt: "desc" } });
+      if (next) await tx.customerCard.update({ where: { id: next.id }, data: { isDefault: true } });
+    }
+  });
   return { ok: true };
 }
 

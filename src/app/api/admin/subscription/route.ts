@@ -19,7 +19,17 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
 
   // Stand aus Stripe auffrischen, damit die Anzeige nie veraltet ist.
-  await syncSubscription(session.companyId).catch(() => {});
+  // Der Fehlschlag wurde bisher verschluckt und danach der lokale Stand
+  // ausgegeben - der Firmenchef sah "AKTIV", waehrend Stripe laengst etwas
+  // anderes wusste. Jetzt wird der Stand trotzdem angezeigt, aber als
+  // moeglicherweise veraltet gekennzeichnet.
+  let standAktuell = true;
+  try {
+    await syncSubscription(session.companyId);
+  } catch (e: any) {
+    standAktuell = false;
+    console.error("Abo-Abgleich mit Stripe fehlgeschlagen:", e?.message ?? e);
+  }
 
   const [company, driverCount] = await Promise.all([
     prisma.company.findUnique({
@@ -58,6 +68,8 @@ export async function GET() {
     plans: PLANS,
     // Klare Trennung: das Abo ist unsere EINZIGE Einnahme.
     commissionPercent: 0,
+    // false = der angezeigte Stand konnte gerade nicht mit Stripe abgeglichen werden.
+    standAktuell,
     invoices: await listSubscriptionInvoices(session.companyId).catch(() => []),
   });
 }

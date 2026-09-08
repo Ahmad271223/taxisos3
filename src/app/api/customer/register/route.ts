@@ -10,17 +10,21 @@ export const dynamic = "force-dynamic";
 const schema = z.object({
   name: z.string().min(2),
   email: z.string().email(),
-  phone: z.string().min(3),
-  password: z.string().min(8),
+  phone: z.string().min(3).max(40),
+  password: z.string().min(8).max(200),
   verificationToken: z.string().optional().nullable(),
 });
 
 /** Kundenkonto erstellen. Telefon wird (wie bei der Buchung) per SMS verifiziert. */
 export async function POST(req: Request) {
+  // Auch ohne erkennbare Adresse bremsen - sonst laeuft die Registrierung in
+  // genau dem Fall ungebremst, in dem man den Absender nicht zuordnen kann.
   const ip = clientIp(req);
-  if (ip) {
-    const r = rateLimit(`register-customer:${ip}`, 10, 10 * 60_000);
-    if (!r.ok) return NextResponse.json({ error: "Zu viele Versuche. Bitte später erneut." }, { status: 429 });
+  const bremse = ip
+    ? rateLimit(`register-customer:${ip}`, 5, 10 * 60_000)
+    : rateLimit("register-customer:ohne-adresse", 100, 10 * 60_000);
+  if (!bremse.ok) {
+    return NextResponse.json({ error: "Zu viele Registrierungen. Bitte später erneut." }, { status: 429 });
   }
 
   let json: any;
@@ -72,7 +76,10 @@ export async function POST(req: Request) {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
+    // Genau so lange wie der Ausweis selbst gilt (7 Tage). Vorher blieb das
+      // Merkmal 30 Tage liegen, obwohl es nach 7 Tagen wertlos war - der
+      // Nutzer sah sich angemeldet und bekam von jeder Abfrage ein Nein.
+      maxAge: 60 * 60 * 24 * 7,
     secure: process.env.NODE_ENV === "production",
   });
   return res;

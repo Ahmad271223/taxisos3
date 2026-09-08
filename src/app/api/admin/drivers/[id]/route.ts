@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { aboGesperrt } from "@/lib/firmaAktiv";
 import { logAccess } from "@/lib/accessLog";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -33,6 +34,10 @@ const schema = z.object({
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   const session = requireRole("ADMIN");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  // Abo-Sperre: gekuendigt oder ueberfaellig -> keine betriebsrelevanten
+  // Aenderungen mehr. Lesen bleibt erlaubt (Rechnungen, Belege, Abo-Seite).
+  const abo = await aboGesperrt(session.companyId);
+  if (abo) return abo;
 
   // Mandantencheck: Fahrer muss zur eigenen Firma gehoeren.
   const existing = await prisma.driver.findUnique({ where: { id: params.id } });
@@ -96,6 +101,10 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
   const session = requireRole("ADMIN");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  // Abo-Sperre: gekuendigt oder ueberfaellig -> keine betriebsrelevanten
+  // Aenderungen mehr. Lesen bleibt erlaubt (Rechnungen, Belege, Abo-Seite).
+  const abo = await aboGesperrt(session.companyId);
+  if (abo) return abo;
   const existing = await prisma.driver.findUnique({ where: { id: params.id } });
   if (!existing || existing.companyId !== session.companyId) {
     return NextResponse.json({ error: "Nicht gefunden" }, { status: 404 });

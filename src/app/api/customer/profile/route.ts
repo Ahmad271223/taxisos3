@@ -175,7 +175,10 @@ export async function PATCH(req: Request) {
       httpOnly: true,
       sameSite: "lax",
       path: "/",
-      maxAge: 60 * 60 * 24 * 30,
+      // Genau so lange wie der Ausweis selbst gilt (7 Tage). Vorher blieb das
+      // Merkmal 30 Tage liegen, obwohl es nach 7 Tagen wertlos war - der
+      // Nutzer sah sich angemeldet und bekam von jeder Abfrage ein Nein.
+      maxAge: 60 * 60 * 24 * 7,
       secure: process.env.NODE_ENV === "production",
     });
   }

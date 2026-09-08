@@ -459,6 +459,31 @@ export function registerSockets(io: IOServer, dispatcher: Dispatcher, realDriver
             ack?.({ ok: false, error: "Auftrag nicht gefunden." });
             return;
           }
+          // NUR waehrend der laufenden Fahrt. Vorher genuegte "ist mir
+          // zugewiesen" - damit konnte ein Fahrer das Ziel einer
+          // Vorbestellung fuer uebermorgen aendern, die er lediglich
+          // reserviert hat, und damit den Preis verschieben.
+          if (!["FAHRER_UNTERWEGS", "FAHRER_ANGEKOMMEN", "FAHRT_LAEUFT"].includes(b.trackingStatus)) {
+            ack?.({ ok: false, error: "Das Ziel lässt sich nur während der Fahrt ändern." });
+            return;
+          }
+          // Koordinaten pruefen: anders als die Buchungsroute hatte dieser Weg
+          // keinerlei Pruefung - Fantasiewerte gingen direkt in Routen- und
+          // Preisberechnung.
+          const zielGueltig = (q: any) =>
+            q == null ||
+            (typeof q === "object" &&
+              typeof q.address === "string" &&
+              q.address.trim().length > 0 &&
+              q.address.length <= 300 &&
+              Number.isFinite(q.lat) &&
+              Number.isFinite(q.lng) &&
+              Math.abs(q.lat) <= 90 &&
+              Math.abs(q.lng) <= 180);
+          if (!zielGueltig(p?.dest) || !zielGueltig(p?.addStop)) {
+            ack?.({ ok: false, error: "Ungültige Zielangabe." });
+            return;
+          }
           const r = await dispatcher.changeDestination(p.bookingId, { dest: p.dest, addStop: p.addStop });
           if (r.ok) socket.emit("driver:state", await driverState(driverId));
           ack?.(r);

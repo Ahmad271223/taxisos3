@@ -169,6 +169,18 @@ export async function POST(req: Request) {
       );
     }
     companyId = company.id;
+
+    // Eine im Dashboard DEAKTIVIERTE Fahrzeugklasse war serverseitig weiterhin
+    // buchbar: `enabled` wurde geladen, aber nirgends ausgewertet. Wer die
+    // Klasse abschaltet, will sie nicht anbieten - dann darf sie auch nicht
+    // bestellt werden.
+    const klasse = await classFactorForSlug(d.company, normalizeClass(d.vehicleClass));
+    if (klasse.enabled === false) {
+      return NextResponse.json(
+        { error: "Diese Fahrzeugklasse bietet das Unternehmen derzeit nicht an.", code: "CLASS_DISABLED" },
+        { status: 409 },
+      );
+    }
   }
 
   // Plattform-Tarif (Standard) bzw. Firmen-Tarif, falls explizit Firma gewählt.

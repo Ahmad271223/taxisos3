@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { aboGesperrt } from "@/lib/firmaAktiv";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
@@ -55,6 +56,10 @@ const createSchema = z.object({
 export async function POST(req: Request) {
   const session = requireRole("ADMIN");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  // Abo-Sperre: gekuendigt oder ueberfaellig -> keine betriebsrelevanten
+  // Aenderungen mehr. Lesen bleibt erlaubt (Rechnungen, Belege, Abo-Seite).
+  const abo = await aboGesperrt(session.companyId);
+  if (abo) return abo;
 
   let json: any;
   try {
@@ -146,7 +151,29 @@ export async function POST(req: Request) {
   // Fahrer war noch keine Sekunde im Einsatz, es geht nichts verloren.
   const nachher = await prisma.driver.count({ where: { companyId: session.companyId } });
   if (nachher > getPlan(company?.plan).maxDrivers) {
-    await prisma.driver.delete({ where: { id: driver.id } }).catch(() => {});
+    // Das Zuruecknehmen darf NICHT stillschweigend scheitern: sonst meldet die
+    // Antwort "nicht angelegt", waehrend der ueberzaehlige Fahrer in der
+    // Datenbank steht - ein Widerspruch, der spaeter niemandem auffaellt.
+    const zurueck = await prisma.driver
+      .delete({ where: { id: driver.id } })
+      .then(() => true)
+      .catch((e: any) => {
+        console.error("Ueberzaehligen Fahrer entfernen fehlgeschlagen:", driver.id, e?.message ?? e);
+        return false;
+      });
+    if (!zurueck) {
+      // Wenigstens stilllegen, damit er nicht disponiert wird.
+      await prisma.driver.update({ where: { id: driver.id }, data: { active: false } }).catch(() => {});
+      return NextResponse.json(
+        {
+          error:
+            "Ihr Tarif ist ausgeschöpft. Der Fahrer wurde angelegt, aber deaktiviert – bitte Tarif wechseln und ihn dann freischalten.",
+          code: "PLAN_LIMIT_REACHED",
+          driverId: driver.id,
+        },
+        { status: 402 },
+      );
+    }
     return NextResponse.json(
       {
         error: `Ihr Tarif erlaubt maximal ${getPlan(company?.plan).maxDrivers} Fahrer. Bitte legen Sie den Fahrer erneut an, nachdem Sie den Tarif gewechselt haben.`,

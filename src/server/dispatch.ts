@@ -1046,9 +1046,16 @@ export class Dispatcher {
     // Schaltflaechen der App. Ein manipulierter Client konnte damit direkt
     // "abgeschlossen" senden, ohne je angekommen oder losgefahren zu sein, und
     // die gesamte Geldlogik lief los: Fahrpreis, Abbuchung, Punkte, Beleg.
+    // Vorwaerts, aber tolerant: Was zaehlt, ist die EINE Regel, an der Geld
+    // haengt - abgeschlossen wird nur, was auch wirklich gefahren wurde.
+    // Davor ist die Wirklichkeit unordentlich: eine reservierte Folgefahrt
+    // (RESERVIERT_FAHRER) wird angetreten, ein Fahrgast steht schon an der
+    // Strasse und der Fahrer tippt gleich "Fahrt gestartet", ohne vorher
+    // "angekommen" zu druecken. Diese Wege duerfen nicht blockieren, sonst
+    // bleibt die Fahrt haengen und der Fahrer bekommt keine neue mehr.
     const ERLAUBT: Record<string, string[]> = {
-      arrived: ["FAHRER_UNTERWEGS"],
-      start: ["FAHRER_ANGEKOMMEN"],
+      arrived: ["FAHRER_GEFUNDEN", "FAHRER_UNTERWEGS", "RESERVIERT_FAHRER"],
+      start: ["FAHRER_ANGEKOMMEN", "FAHRER_GEFUNDEN", "FAHRER_UNTERWEGS", "RESERVIERT_FAHRER"],
       complete: ["FAHRT_LAEUFT"],
       // Absagen und Nichtantritt sind bis zum Fahrtbeginn moeglich.
       cancel: ["FAHRER_GEFUNDEN", "FAHRER_UNTERWEGS", "FAHRER_ANGEKOMMEN", "GEPLANT", "RESERVIERT_FAHRER"],

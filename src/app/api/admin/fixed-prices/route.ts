@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { aboGesperrt } from "@/lib/firmaAktiv";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
@@ -31,6 +32,10 @@ const schema = z.object({
 export async function POST(req: Request) {
   const session = requireRole("ADMIN");
   if (!session) return NextResponse.json({ error: "Nicht autorisiert" }, { status: 401 });
+  // Abo-Sperre: gekuendigt oder ueberfaellig -> keine betriebsrelevanten
+  // Aenderungen mehr. Lesen bleibt erlaubt (Rechnungen, Belege, Abo-Seite).
+  const abo = await aboGesperrt(session.companyId);
+  if (abo) return abo;
   let json: any;
   try {
     json = await req.json();

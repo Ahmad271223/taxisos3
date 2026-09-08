@@ -62,10 +62,25 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: "Ungültige Klassendaten" }, { status: 400 });
   }
 
+  // Frueher wurden unbekannte Klassen still uebersprungen und die Antwort
+  // meldete trotzdem Erfolg - der Firmenchef glaubte, gespeichert zu haben.
+  const unbekannt = parsed.data.classes.filter((c) => !isValidClass(c.key)).map((c) => c.key);
+  if (unbekannt.length > 0) {
+    return NextResponse.json(
+      { error: `Unbekannte Fahrzeugklasse: ${unbekannt.join(", ")}` },
+      { status: 400 },
+    );
+  }
+
+  // ALLES ODER NICHTS: Frueher wurde Klasse fuer Klasse gespeichert. Brach das
+  // in der Mitte ab, galten zwei neue und zwei alte Tarife gleichzeitig - und
+  // die Antwort meldete trotzdem einen Fehler, sodass der Firmenchef nicht
+  // wusste, was nun gilt.
+  await prisma.$transaction(async (tx) => {
   for (const c of parsed.data.classes) {
     if (!isValidClass(c.key)) continue;
     const key = normalizeClass(c.key);
-    await prisma.vehicleClassPricing.upsert({
+    await tx.vehicleClassPricing.upsert({
       where: { companyId_classKey: { companyId: session.companyId, classKey: key } },
       update: {
         enabled: c.enabled ?? true,
@@ -81,6 +96,7 @@ export async function PUT(req: Request) {
       },
     });
   }
+  });
 
   const rows = await prisma.vehicleClassPricing.findMany({ where: { companyId: session.companyId } });
   return NextResponse.json({ ok: true, count: rows.length });

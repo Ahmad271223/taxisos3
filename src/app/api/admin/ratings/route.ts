@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { logAccess } from "@/lib/accessLog";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/session";
 
@@ -26,10 +27,16 @@ export async function GET(req: Request) {
   }
   if (driverId) where.driverId = driverId;
 
+  const limit = Math.min(100, Math.max(10, parseInt(searchParams.get("limit") ?? "100", 10) || 100));
+  const cursor = searchParams.get("cursor") || null;
+
   const ratings = await prisma.booking.findMany({
     where,
     orderBy: { ratedAt: "desc" },
-    take: 100,
+    // Blaettern statt harter Deckel: ab dem 101. Eintrag war vorher nichts
+    // mehr auffindbar.
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     select: {
       id: true,
       rating: true,
@@ -52,5 +59,24 @@ export async function GET(req: Request) {
     _count: { rating: true },
   });
 
-  return NextResponse.json({ ratings, byDriver: grouped });
+  const weitere = ratings.length > limit;
+  const seite = weitere ? ratings.slice(0, limit) : ratings;
+
+  // Dieser Abruf enthaelt Fahrgastnamen sowie genaue Start- und Zieladressen.
+  // Wie bei den anderen Auswertungen mit Personenbezug wird der Zugriff
+  // protokolliert.
+  await logAccess({
+    actorType: "ADMIN",
+    companyId: session.role === "SUPER_ADMIN" ? undefined : session.companyId,
+    actorId: session.sub,
+    action: "VIEW",
+    entity: "BOOKING",
+    detail: `Bewertungen abgerufen (${seite.length} Eintraege)`,
+  });
+
+  return NextResponse.json({
+    ratings: seite,
+    byDriver: grouped,
+    nextCursor: weitere ? seite[seite.length - 1]?.id ?? null : null,
+  });
 }

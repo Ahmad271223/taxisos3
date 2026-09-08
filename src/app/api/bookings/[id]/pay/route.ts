@@ -49,7 +49,14 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     tip: b.tip ?? 0,
     total: Math.round(((b.fare ?? 0) + (b.tip ?? 0)) * 100) / 100,
     // Trinkgeld-Auswahl ist NUR nach Fahrtende und NUR bei Kartenzahlung offen.
-    tipWindowOpen: isCard && finished && b.paymentStatus === "KARTE_HINTERLEGT",
+    // Das Zeitfenster galt bisher nur in der Anzeige - der Ablauf wurde nicht
+    // geprueft. Jetzt gehoert er zur Bedingung (und der Zahlungs-POST weist
+    // Trinkgeld nach Ablauf zurueck).
+    tipWindowOpen:
+      isCard &&
+      finished &&
+      b.paymentStatus === "KARTE_HINTERLEGT" &&
+      (!deadline || Date.now() <= deadline.getTime()),
     tipDeadline: deadline,
     tipWindowSeconds: Math.round(TIP_WINDOW_MS / 1000),
     paymentError: b.paymentError ?? null,
@@ -95,6 +102,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       status: true,
       fare: true,
       tip: true,
+      // Fuer die Pruefung des Trinkgeld-Zeitfensters.
+      tipPromptedAt: true,
     },
   });
   if (!b) return NextResponse.json({ error: "Fahrt nicht gefunden" }, { status: 404 });
@@ -168,6 +177,20 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (Number.isFinite(Number(json?.tip))) tip = Number(json.tip);
   else if (Number.isFinite(Number(json?.tipPercent))) tip = (fare * Number(json.tipPercent)) / 100;
   tip = capTip(fare, Math.round(tip * 100) / 100);
+
+  // ZEITFENSTER ERZWINGEN. Es wurde bisher nur angezeigt: wer den Aufruf von
+  // Hand absetzte, konnte auch Stunden spaeter noch Trinkgeld aufschlagen -
+  // auf eine Karte, die der Fahrgast laengst aus den Augen hatte.
+  if (tip > 0 && b.tipPromptedAt && Date.now() > b.tipPromptedAt.getTime() + TIP_WINDOW_MS) {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "TIP_WINDOW_CLOSED",
+        error: "Das Zeitfenster für Trinkgeld ist abgelaufen. Die Fahrt wird ohne Trinkgeld abgerechnet.",
+      },
+      { status: 409 },
+    );
+  }
 
   const result = await settleRide(b.id, tip);
 

@@ -26,10 +26,14 @@ export async function GET() {
     where: {
       companyId,
       medicalType: { not: null },
+      // EIN eindeutiger Zeitpunkt je Fahrt, nicht "irgendeines von dreien".
+      // Vorher zaehlte eine am 20. September angelegte Fahrt fuer den 10.
+      // Oktober bereits im September mit - allein wegen des Anlagedatums.
+      // Massgeblich ist, wann gefahren wurde (oder werden soll).
       OR: [
-        { createdAt: { gte: monthStart, lt: monthEnd } },
-        { scheduledAt: { gte: monthStart, lt: monthEnd } },
-        { completedAt: { gte: monthStart, lt: monthEnd } },
+        { status: "ABGESCHLOSSEN", completedAt: { gte: monthStart, lt: monthEnd } },
+        { status: { not: "ABGESCHLOSSEN" }, scheduledAt: { gte: monthStart, lt: monthEnd } },
+        { status: { not: "ABGESCHLOSSEN" }, scheduledAt: null, createdAt: { gte: monthStart, lt: monthEnd } },
       ],
     },
     select: {
@@ -61,6 +65,8 @@ export async function GET() {
     },
     select: { id: true, kind: true, fileName: true, validUntil: true, bookingId: true, recurringId: true },
   });
+  // Erst alle bewerten (fuer die Kennzahlen), dann fuer die Anzeige kuerzen.
+  const alleBewertet = validityDocs.map((d) => ({ ...d, ...documentValidity(d.validUntil) }));
   const warnings = validityDocs
     .map((d) => ({ ...d, ...documentValidity(d.validUntil) }))
     .filter((d) => d.status === "EXPIRING" || d.status === "EXPIRED")
@@ -73,10 +79,27 @@ export async function GET() {
     inProgress: monthRides.filter((b) => ["OFFEN", "ZUGEWIESEN", "AKTIV"].includes(b.status)).length,
     completedThisMonth: completed.length,
     revenueThisMonth: r2(completed.reduce((s, b) => s + (b.fare ?? 0), 0)),
-    activeSeries: new Set(monthRides.filter((b) => b.recurringId).map((b) => b.recurringId)).size,
-    pendingDocs: await prisma.medicalDocument.count({ where: { reviewStatus: "PENDING", booking: { companyId } } }),
-    expiringDocs: warnings.filter((d) => d.status === "EXPIRING").length,
-    expiredDocs: warnings.filter((d) => d.status === "EXPIRED").length,
+    // "Aktiv" hiess bisher nur "irgendeine Fahrt dieses Monats verweist darauf".
+    // Eine vor zwei Wochen beendete Serie zaehlte deshalb weiter mit.
+    activeSeries: await prisma.recurringRide.count({
+      where: {
+        active: true,
+        id: { in: [...new Set(monthRides.filter((b) => b.recurringId).map((b) => b.recurringId as string))] },
+      },
+    }),
+    // Auch Nachweise, die an einer SERIE haengen (Dialyse, Reha) - die haben
+    // keine einzelne Fahrt und fehlten deshalb komplett in der Zahl.
+    pendingDocs: await prisma.medicalDocument.count({
+      where: {
+        reviewStatus: "PENDING",
+        OR: [{ booking: { companyId } }, { recurring: { bookings: { some: { companyId } } } }],
+      },
+    }),
+    // Aus ALLEN Dokumenten, nicht aus der auf 25 gekuerzten Anzeigeliste:
+    // vorher meldete das Dashboard hoechstens 25 Probleme, auch wenn es 70
+    // waren - bei Nachweisen fuer Krankenfahrten ist das gefaehrlich.
+    expiringDocs: alleBewertet.filter((d) => d.status === "EXPIRING").length,
+    expiredDocs: alleBewertet.filter((d) => d.status === "EXPIRED").length,
   };
 
   // Aufschlüsselung nach Krankenkasse (Privatzahler separat).
